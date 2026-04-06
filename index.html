@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Cosmic Golf</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #000; overflow: hidden; width: 100vw; height: 100vh; touch-action: none; }
+    canvas { display: block; }
+    #game-ui {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      z-index: 10;
+      font-family: 'Courier New', monospace;
+    }
+    #hud {
+      position: absolute;
+      top: max(16px, env(safe-area-inset-top, 0px)); left: max(16px, env(safe-area-inset-left, 0px));
+      color: #fff;
+      text-shadow: 0 0 8px rgba(255,255,255,0.6);
+      pointer-events: none;
+    }
+    #hud-hole { font-size: 18px; font-weight: bold; letter-spacing: 2px; }
+    #hud-strokes { font-size: 14px; margin-top: 4px; opacity: 0.85; }
+    #hud-player { font-size: 13px; margin-top: 4px; opacity: 0.8; }
+    #power-bar-wrap {
+      position: absolute;
+      bottom: 80px; left: 50%;
+      transform: translateX(-50%);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      pointer-events: none;
+    }
+    #power-label { color: #fff; font-size: 12px; letter-spacing: 2px; margin-bottom: 6px; opacity: 0.85; }
+    #power-bar-bg {
+      width: 180px; height: 12px;
+      background: rgba(255,255,255,0.15);
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.3);
+      overflow: hidden;
+    }
+    #power-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #4af, #f4a);
+      border-radius: 6px;
+      transition: background 0.1s;
+    }
+    #aim-hint {
+      position: absolute;
+      bottom: max(40px, calc(env(safe-area-inset-bottom, 0px) + 20px)); left: 50%;
+      transform: translateX(-50%);
+      color: rgba(255,255,255,0.4);
+      font-size: 11px;
+      letter-spacing: 2px;
+      pointer-events: none;
+      white-space: nowrap;
+      text-shadow: 0 0 12px rgba(100,200,255,0.4);
+      transition: color 0.3s ease, opacity 0.3s ease;
+    }
+    #room-code-ui {
+      position: absolute;
+      top: max(16px, env(safe-area-inset-top, 0px)); right: max(16px, env(safe-area-inset-right, 0px));
+      color: rgba(255,255,255,0.7);
+      font-size: 12px;
+      text-align: right;
+      pointer-events: auto;
+      cursor: pointer;
+    }
+    #room-code-ui span {
+      display: block;
+      font-size: 16px;
+      font-weight: bold;
+      color: #fff;
+      letter-spacing: 3px;
+      margin-top: 2px;
+    }
+    #scoreboard-overlay {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(0,0,10,0.9);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      pointer-events: auto;
+    }
+    #scoreboard-overlay h2 {
+      color: #fff;
+      font-size: 28px;
+      letter-spacing: 4px;
+      margin-bottom: 24px;
+      text-shadow: 0 0 20px rgba(100,180,255,0.8);
+    }
+    #scoreboard-table {
+      color: #fff;
+      font-size: 15px;
+      border-collapse: collapse;
+      margin-bottom: 32px;
+    }
+    #scoreboard-table th, #scoreboard-table td {
+      padding: 8px 20px;
+      text-align: center;
+      border-bottom: 1px solid rgba(255,255,255,0.15);
+    }
+    #scoreboard-table th { color: rgba(255,255,255,0.6); font-size: 12px; letter-spacing: 2px; }
+    #btn-next-hole {
+      background: transparent;
+      border: 2px solid rgba(255,255,255,0.6);
+      color: #fff;
+      font-size: 16px;
+      font-family: 'Courier New', monospace;
+      letter-spacing: 3px;
+      padding: 14px 40px;
+      cursor: pointer;
+      border-radius: 4px;
+      transition: all 0.2s;
+    }
+    #btn-next-hole:hover { background: rgba(255,255,255,0.1); border-color: #fff; }
+    #penalty-msg {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: #ff6464;
+      font-size: 22px;
+      letter-spacing: 3px;
+      font-weight: bold;
+      text-shadow: 0 0 16px rgba(255,100,100,0.8);
+      display: none;
+      pointer-events: none;
+    }
+    #mode-badge {
+      position: absolute;
+      bottom: max(16px, env(safe-area-inset-bottom, 0px));
+      right: max(16px, env(safe-area-inset-right, 0px));
+      color: rgba(255,255,255,0.4);
+      font-size: 11px;
+      letter-spacing: 1px;
+    }
+    .overlay {
+      padding-top: max(20px, 8vh, var(--ogp-safe-top-inset, 0px));
+      padding-bottom: var(--ogp-safe-bottom-inset, 0px);
+    }
+  </style>
+</head>
+<body>
+  <div id="game-ui">
+    <div id="hud" class="overlay">
+      <div id="hud-hole">HOLE 1</div>
+      <div id="hud-strokes">STROKES: 0</div>
+      <div id="hud-player"></div>
+    </div>
+    <div id="power-bar-wrap">
+      <div id="power-label">POWER</div>
+      <div id="power-bar-bg">
+        <div id="power-bar-fill"></div>
+      </div>
+    </div>
+    <div id="aim-hint">DRAG BACK FROM BALL TO AIM</div>
+    <div id="room-code-ui">
+      ROOM<span id="room-code-display">----</span>
+    </div>
+    <div id="scoreboard-overlay" class="overlay">
+      <h2 id="scoreboard-title">HOLE COMPLETE</h2>
+      <table id="scoreboard-table">
+        <thead><tr id="scoreboard-header"></tr></thead>
+        <tbody id="scoreboard-body"></tbody>
+      </table>
+      <button id="btn-next-hole">CONTINUE</button>
+    </div>
+    <div id="penalty-msg">OUT OF BOUNDS! +2 STROKES</div>
+    <div id="mode-badge" class="overlay">SOLO MODE</div>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+  <!-- VibeJam 2026 widget — REQUIRED -->
+  <script async src="https://jam.pieter.com/2026/widget.js"></script>
+</body>
+</html>

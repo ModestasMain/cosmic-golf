@@ -1,0 +1,78 @@
+// ============================================================
+// EventBus.js — singleton pub/sub, domain:action naming
+// ============================================================
+
+class EventBus {
+  constructor() {
+    this.listeners = new Map();
+  }
+
+  on(event, callback) {
+    if (!this.listeners.has(event)) this.listeners.set(event, new Set());
+    this.listeners.get(event).add(callback);
+    return () => this.off(event, callback);
+  }
+
+  once(event, callback) {
+    const wrapper = (...args) => {
+      this.off(event, wrapper);
+      callback(...args);
+    };
+    this.on(event, wrapper);
+  }
+
+  off(event, callback) {
+    const cbs = this.listeners.get(event);
+    if (cbs) {
+      cbs.delete(callback);
+      if (cbs.size === 0) this.listeners.delete(event);
+    }
+  }
+
+  emit(event, data) {
+    const cbs = this.listeners.get(event);
+    if (cbs) cbs.forEach(cb => {
+      try { cb(data); } catch (e) { console.error(`EventBus error [${event}]:`, e); }
+    });
+  }
+
+  clear(event) {
+    event ? this.listeners.delete(event) : this.listeners.clear();
+  }
+}
+
+export const eventBus = new EventBus();
+
+export const Events = {
+  // Shot events
+  SHOT_TAKEN:         'shot:taken',       // { direction: Vector3, power: number }
+  SHOT_RECEIVED:      'shot:received',    // { direction: Vector3, power: number, playerId }
+  AIM_START:          'aim:start',
+  AIM_UPDATE:         'aim:update',       // { dragScreenVec, dragDist } — direction phase
+  AIM_DIR_LOCKED:     'aim:dir_locked',   // direction confirmed, power phase begins
+  AIM_POWER_UPDATE:   'aim:power_update', // { power: 0-1 } — oscillating bar
+  AIM_CANCEL:         'aim:cancel',
+
+  // Ball events
+  BALL_HOLED:         'ball:holed',       // { strokes: number }
+  BALL_OUT_OF_BOUNDS: 'ball:oob',
+  BALL_BOUNCED:       'ball:bounced',     // { position: Vector3 }
+
+  // Hole events
+  HOLE_COMPLETE:      'hole:complete',    // { holeIndex, strokes, players }
+  HOLE_LOADED:        'hole:loaded',      // { holeIndex }
+  NEXT_HOLE:          'hole:next',
+  GAME_COMPLETE:      'game:complete',    // { players }
+
+  // Multiplayer events
+  MP_ROOM_CREATED:    'mp:room_created',  // { code }
+  MP_PLAYER_JOINED:   'mp:player_joined', // { playerId, name }
+  MP_PLAYER_LEFT:     'mp:player_left',   // { playerId }
+  MP_SOLO_MODE:       'mp:solo',
+
+  // Audio
+  AUDIO_MUTE_TOGGLE:  'audio:mute_toggle',
+
+  // Portal
+  PORTAL_ENTER:       'portal:enter',
+};

@@ -1,0 +1,31 @@
+{
+  "name": "cosmic-golf",
+  "version": "1.0.0",
+  "description": "Multiplayer mini golf on tiny planets with real gravity wells — VibeJam 2026",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "playwright test"
+  },
+  "keywords": [
+    "game",
+    "golf",
+    "three.js",
+    "vibejam"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@tweenjs/tween.js": "^25.0.0",
+    "gsap": "^3.14.2",
+    "postprocessing": "^6.39.0",
+    "simplex-noise": "^4.0.3",
+    "three": "^0.183.2"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "vite": "^8.0.4"
+  }
+}

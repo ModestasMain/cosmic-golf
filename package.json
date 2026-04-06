@@ -6,8 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview",
-    "test": "playwright test"
+    "preview": "npm run build && wrangler dev",
+    "test": "playwright test",
+    "deploy": "npm run build && wrangler deploy"
   },
   "keywords": [
     "game",
@@ -25,7 +26,9 @@
     "three": "^0.183.2"
   },
   "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.31.0",
     "@playwright/test": "^1.59.1",
-    "vite": "^8.0.4"
+    "vite": "^8.0.4",
+    "wrangler": "^4.80.0"
   }
 }

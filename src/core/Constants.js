@@ -60,9 +60,7 @@ export const STARFIELD = {
 
 export const MULTIPLAYER = {
   ROOM_JOIN_TIMEOUT_MS: 10000,
-  // Updated after: cd worker && npx wrangler deploy
-  // URL format: cosmic-golf-mp.{your-subdomain}.workers.dev
-  MP_HOST: 'cosmic-golf-mp.YOUR_SUBDOMAIN.workers.dev',
+  MP_HOST: 'cosmic-golf-mp.modestasmain.workers.dev',
 };
 
 export const COLOR_PALETTES = [

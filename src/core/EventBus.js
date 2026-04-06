@@ -65,10 +65,12 @@ export const Events = {
   GAME_COMPLETE:      'game:complete',    // { players }
 
   // Multiplayer events
-  MP_ROOM_CREATED:    'mp:room_created',  // { code }
-  MP_PLAYER_JOINED:   'mp:player_joined', // { playerId, name }
-  MP_PLAYER_LEFT:     'mp:player_left',   // { playerId }
+  MP_ROOM_CREATED:    'mp:room_created',   // { code }
+  MP_PLAYER_JOINED:   'mp:player_joined',  // { playerId, name, color }
+  MP_PLAYER_LEFT:     'mp:player_left',    // { playerId }
   MP_SOLO_MODE:       'mp:solo',
+  MP_HOLE_COMPLETE:   'mp:hole_complete',  // { playerId, strokes }
+  MP_HOLE_TIMER:      'mp:hole_timer',     // { remaining } — countdown seconds
 
   // Audio
   AUDIO_MUTE_TOGGLE:  'audio:mute_toggle',

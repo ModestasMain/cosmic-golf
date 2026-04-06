@@ -24,6 +24,7 @@ import { PortalSystem } from '../portal/PortalSystem.js';
 import { BallTrail } from '../effects/BallTrail.js';
 import { ScreenShake } from '../effects/ScreenShake.js';
 import { LaunchBurst } from '../effects/LaunchBurst.js';
+import { GhostBall } from '../objects/GhostBall.js';
 
 export class HoleScene {
   constructor(renderer, inputSystem) {
@@ -66,6 +67,18 @@ export class HoleScene {
     // Camera facing direction — rotated by aim drag, trails velocity in flight
     this._facingDir  = new Vector3(0, 0, -1);
     this._aimStartDir = new Vector3(0, 0, -1);
+
+    // Multiplayer: ghost balls for remote players
+    // playerId -> { ball: GhostBall, inFlight, holed, stuckFrames, launchGrace }
+    this._remoteBalls = new Map();
+
+    // Hole completion timer (starts when first player holes in MP)
+    this._holeTimerActive    = false;
+    this._holeTimerRemaining = 0;
+    this._playersHoled       = new Set();
+
+    // Spectator mode — active after local player holes in MP
+    this._spectating = false;
 
     // Occlusion: reusable vectors (no per-frame allocation)
     this._occRayDir = new Vector3();
@@ -178,8 +191,32 @@ export class HoleScene {
     });
 
     eventBus.on(Events.SHOT_RECEIVED, (data) => {
-      // Multiplayer: another player's shot
-      this._fireShot(data);
+      // Multiplayer: fire the remote player's ghost ball, not the local ball
+      this._handleRemoteShot(data);
+    });
+
+    eventBus.on(Events.MP_PLAYER_JOINED, ({ playerId, name, color }) => {
+      if (!this._holeData) return;
+      this._spawnRemoteBall(playerId, color ?? 0xff6464, name ?? '');
+    });
+
+    eventBus.on(Events.MP_PLAYER_LEFT, ({ playerId }) => {
+      const remote = this._remoteBalls.get(playerId);
+      if (remote) {
+        remote.ball.removeFromScene(this.scene);
+        this._remoteBalls.delete(playerId);
+      }
+    });
+
+    eventBus.on(Events.MP_HOLE_COMPLETE, ({ playerId, strokes }) => {
+      // Record remote player's strokes
+      gameState.recordStroke(playerId, gameState.currentHole, strokes);
+      this._playersHoled.add(playerId);
+      // Mark their ghost ball as holed
+      const remote = this._remoteBalls.get(playerId);
+      if (remote) remote.holed = true;
+      // Start or continue timer
+      this._onAnyPlayerHoled();
     });
 
     eventBus.on(Events.NEXT_HOLE, () => {
@@ -283,6 +320,14 @@ export class HoleScene {
       this.portalSystem.initScene();
     }
 
+    // Spawn ghost balls for all known remote players
+    for (const player of gameState.players) {
+      const localId = gameState.currentPlayer?.id;
+      if (player.id !== localId) {
+        this._spawnRemoteBall(player.id, player.color, player.name);
+      }
+    }
+
     eventBus.emit(Events.HOLE_LOADED, { holeIndex });
   }
 
@@ -327,6 +372,18 @@ export class HoleScene {
     }
 
     this.trajectoryPreview.hide();
+
+    // Clear remote ghost balls
+    for (const remote of this._remoteBalls.values()) {
+      remote.ball.removeFromScene(this.scene);
+    }
+    this._remoteBalls.clear();
+
+    // Reset multiplayer state
+    this._holeTimerActive    = false;
+    this._holeTimerRemaining = 0;
+    this._playersHoled.clear();
+    this._spectating = false;
   }
 
   /**
@@ -412,6 +469,12 @@ export class HoleScene {
    */
   update(dt) {
     if (!this._holeData || !this.ball) return;
+
+    // Remote balls — always simulate regardless of local state
+    if (this._state !== 'HOLE_COMPLETE') this._updateRemoteBalls(dt);
+
+    // Hole timer countdown
+    if (this._holeTimerActive) this._tickHoleTimer(dt);
 
     // Trajectory: update every frame while player is choosing power
     if (this._state === 'AIMING' && this.inputSystem.isInPowerPhase() && this.ball && this._holeData) {
@@ -602,6 +665,33 @@ export class HoleScene {
   _updateCamera(dt) {
     if (!this.ball) return;
 
+    // Spectator mode: follow the first remote ball still in flight (or just not holed)
+    if (this._spectating) {
+      let spectateTarget = null;
+      for (const remote of this._remoteBalls.values()) {
+        if (!remote.holed) { spectateTarget = remote.ball; break; }
+      }
+      if (spectateTarget) {
+        const speed = spectateTarget.velocity.length();
+        const facing = speed > 2
+          ? spectateTarget.velocity.clone().normalize()
+          : this._facingDir.clone();
+        const behind = facing.clone().negate();
+        const worldUp = Math.abs(facing.y) < 0.95 ? new Vector3(0,1,0) : new Vector3(0,0,-1);
+        const camRight = new Vector3().crossVectors(facing, worldUp).normalize();
+        const camUp    = new Vector3().crossVectors(camRight, facing).normalize();
+        const targetPos = spectateTarget.position.clone()
+          .addScaledVector(behind, CAMERA.FOLLOW_DISTANCE)
+          .addScaledVector(camUp,  CAMERA.FOLLOW_HEIGHT);
+        this._cameraPos.lerp(targetPos, CAMERA.FOLLOW_LERP);
+        this.camera.position.copy(this._cameraPos).add(this.screenShake.shakeOffset);
+        const lookAt = spectateTarget.position.clone().addScaledVector(facing, 8);
+        this._cameraTarget.lerp(lookAt, CAMERA.AIM_LERP);
+        this.camera.lookAt(this._cameraTarget);
+        return;
+      }
+    }
+
     const ballPos = this.ball.position;
 
     // Smoothly lerp the stored facing direction
@@ -665,12 +755,24 @@ export class HoleScene {
       gameState.recordStroke(player.id, holeIndex, strokes);
     }
 
+    this._playersHoled.add('local');
     eventBus.emit(Events.BALL_HOLED, { strokes });
-    eventBus.emit(Events.HOLE_COMPLETE, {
-      holeIndex,
-      strokes,
-      players: gameState.players,
-    });
+
+    // Multiplayer: check if anyone else is still playing
+    const anyRemoteStillPlaying = [...this._remoteBalls.values()].some(r => !r.holed);
+    if (!gameState.isSoloMode && anyRemoteStillPlaying) {
+      // Enter spectator mode — wait for others or timer
+      this._spectating = true;
+      this._onAnyPlayerHoled();
+      // Don't emit HOLE_COMPLETE yet — timer or _checkAllHoled will do it
+    } else {
+      // Solo or everyone done — advance immediately
+      eventBus.emit(Events.HOLE_COMPLETE, {
+        holeIndex,
+        strokes,
+        players: gameState.players,
+      });
+    }
   }
 
   _onOutOfBounds() {
@@ -689,6 +791,138 @@ export class HoleScene {
     gameState.ballInFlight = false;
     gameState.aimState = 'IDLE';
     this.inputSystem.setAiming(false);
+  }
+
+  // ── Multiplayer: remote ball management ──────────────────────
+
+  _spawnRemoteBall(playerId, color, name) {
+    if (this._remoteBalls.has(playerId) || !this._holeData) return;
+    const ball = new GhostBall(color, name);
+    const teePos = this._holeData.tee.clone().add(new Vector3(0, BALL.RADIUS + 0.2, 0));
+    ball.setPosition(teePos);
+    ball.addToScene(this.scene);
+    this._remoteBalls.set(playerId, {
+      ball, inFlight: false, holed: false, stuckFrames: 0, launchGrace: 0,
+    });
+  }
+
+  _handleRemoteShot({ playerId, direction, power }) {
+    if (!this._holeData || !playerId) return;
+    // Create ghost ball on first shot if not yet spawned
+    if (!this._remoteBalls.has(playerId)) {
+      const player = gameState.players.find(p => p.id === playerId);
+      this._spawnRemoteBall(playerId, player?.color ?? 0xff6464, player?.name ?? '');
+    }
+    const remote = this._remoteBalls.get(playerId);
+    if (!remote || remote.holed) return;
+    const vel = new Vector3(direction.x, direction.y, direction.z).normalize().multiplyScalar(power);
+    remote.ball.setVelocity(vel);
+    remote.inFlight   = true;
+    remote.stuckFrames = 0;
+    remote.launchGrace = PHYSICS.LAUNCH_GRACE_FRAMES;
+  }
+
+  _updateRemoteBalls(dt) {
+    if (this._remoteBalls.size === 0 || !this._holeData) return;
+
+    for (const [playerId, remote] of this._remoteBalls) {
+      if (!remote.inFlight || remote.holed) continue;
+
+      let gravScale = 1.0;
+      if (remote.launchGrace > 0) {
+        remote.launchGrace--;
+        gravScale = 1.0 - (remote.launchGrace / PHYSICS.LAUNCH_GRACE_FRAMES);
+      }
+
+      stepBall(remote.ball, this._holeData.planets, dt, gravScale);
+      remote.ball.syncMesh();
+      remote.ball.updateSpin(dt);
+
+      const speed = remote.ball.velocity.length();
+      const nearSurface = this._holeData.planets.some(p =>
+        remote.ball.position.distanceTo(p.position) < p.radius + BALL.RADIUS * 3,
+      );
+      if (nearSurface && speed < 12) remote.stuckFrames++;
+      else remote.stuckFrames = 0;
+
+      if (speed < PHYSICS.REST_VELOCITY || remote.stuckFrames > PHYSICS.STUCK_FRAMES) {
+        remote.inFlight = false;
+        remote.stuckFrames = 0;
+      }
+
+      // OOB — reset to tee
+      if (remote.ball.position.length() > HOLE.OUT_OF_BOUNDS_DISTANCE) {
+        remote.inFlight = false;
+        const teePos = this._holeData.tee.clone().add(new Vector3(0, BALL.RADIUS + 0.2, 0));
+        remote.ball.setPosition(teePos);
+        remote.ball.setVelocity(new Vector3());
+      }
+
+      // Check hole
+      if (this.cup && remote.ball.position.distanceTo(this.cup.position) < HOLE.CUP_RADIUS) {
+        remote.inFlight = false;
+        remote.holed    = true;
+        this._playersHoled.add(playerId);
+        this._onAnyPlayerHoled();
+      }
+    }
+  }
+
+  // ── Hole completion timer ─────────────────────────────────────
+
+  _onAnyPlayerHoled() {
+    if (!this._holeTimerActive) {
+      this._holeTimerActive    = true;
+      this._holeTimerRemaining = 30;
+      eventBus.emit(Events.MP_HOLE_TIMER, { remaining: 30 });
+    }
+    this._checkAllHoled();
+  }
+
+  _checkAllHoled() {
+    // Count total remote players
+    const totalRemote = this._remoteBalls.size;
+    const remoteHoled = [...this._remoteBalls.values()].filter(r => r.holed).length;
+    const localHoled  = this._playersHoled.has('local');
+
+    if (localHoled && remoteHoled >= totalRemote && this._state === 'HOLE_COMPLETE') {
+      // Everyone done — advance immediately
+      eventBus.emit(Events.HOLE_COMPLETE, {
+        holeIndex: gameState.currentHole,
+        strokes:   gameState.currentStrokes,
+        players:   gameState.players,
+      });
+    }
+  }
+
+  _tickHoleTimer(dt) {
+    if (!this._holeTimerActive) return;
+    this._holeTimerRemaining -= dt;
+    const seconds = Math.ceil(this._holeTimerRemaining);
+    eventBus.emit(Events.MP_HOLE_TIMER, { remaining: Math.max(0, seconds) });
+
+    if (this._holeTimerRemaining <= 0) {
+      this._holeTimerActive = false;
+      // Force-complete local player if not yet holed
+      if (!this._playersHoled.has('local')) {
+        gameState.currentStrokes = 10;
+        this._playersHoled.add('local');
+        const player = gameState.currentPlayer;
+        if (player) gameState.recordStroke(player.id, gameState.currentHole, 10);
+      }
+      // Force-complete any remote players that didn't hole
+      for (const [playerId, remote] of this._remoteBalls) {
+        if (!remote.holed) {
+          gameState.recordStroke(playerId, gameState.currentHole, 10);
+          remote.holed = true;
+        }
+      }
+      eventBus.emit(Events.HOLE_COMPLETE, {
+        holeIndex: gameState.currentHole,
+        strokes:   gameState.currentStrokes,
+        players:   gameState.players,
+      });
+    }
   }
 
   render() {

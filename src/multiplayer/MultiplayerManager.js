@@ -109,7 +109,7 @@ export class MultiplayerManager {
     switch (msg.type) {
       case 'join':
         this.players.set(msg.playerId, { name: msg.name, color: msg.color });
-        eventBus.emit(Events.MP_PLAYER_JOINED, { playerId: msg.playerId, name: msg.name });
+        eventBus.emit(Events.MP_PLAYER_JOINED, { playerId: msg.playerId, name: msg.name, color: msg.color });
         if (this._soloTimer) {
           clearTimeout(this._soloTimer);
           this._soloTimer = null;
@@ -130,6 +130,12 @@ export class MultiplayerManager {
           });
         }
         break;
+
+      case 'hole_complete':
+        if (msg.playerId !== this.playerId) {
+          eventBus.emit(Events.MP_HOLE_COMPLETE, { playerId: msg.playerId, strokes: msg.strokes });
+        }
+        break;
     }
   }
 
@@ -140,12 +146,12 @@ export class MultiplayerManager {
    */
   broadcastShot(direction, power) {
     if (!this._isConnected || this._isSolo) return;
-    this._send({
-      type: 'shot',
-      playerId: this.playerId,
-      direction,
-      power,
-    });
+    this._send({ type: 'shot', playerId: this.playerId, direction, power });
+  }
+
+  broadcastHoleComplete(strokes) {
+    if (!this._isConnected || this._isSolo) return;
+    this._send({ type: 'hole_complete', playerId: this.playerId, strokes });
   }
 
   onShotReceived(callback) {

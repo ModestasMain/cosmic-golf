@@ -13,6 +13,7 @@ import { ScoreboardScene } from './scenes/ScoreboardScene.js';
 import { AimUI } from './ui/AimUI.js';
 import { TutorialOverlay } from './ui/TutorialOverlay.js';
 import { MultiplayerManager } from './multiplayer/MultiplayerManager.js';
+import { MultiplayerUI } from './ui/MultiplayerUI.js';
 import { audioManager } from './audio/AudioManager.js';
 
 class Game {
@@ -98,8 +99,9 @@ class Game {
   }
 
   _setupUI() {
-    this.aimUI    = new AimUI();
-    this.tutorial = new TutorialOverlay();
+    this.aimUI       = new AimUI();
+    this.tutorial    = new TutorialOverlay();
+    this.mpUI        = new MultiplayerUI();
     // Show after a short delay so the game has rendered something behind it
     setTimeout(() => this.tutorial.show(), 800);
   }
@@ -136,6 +138,10 @@ class Game {
           );
         }
       }
+    });
+
+    eventBus.on(Events.BALL_HOLED, ({ strokes }) => {
+      this.mp.broadcastHoleComplete(strokes);
     });
 
     eventBus.on(Events.MP_SOLO_MODE, () => {

@@ -36,8 +36,11 @@ export class AimUI {
       roomUi.style.pointerEvents = 'auto';
       roomUi.addEventListener('click', () => {
         const code = gameState.roomCode;
-        if (code && navigator.clipboard) {
-          navigator.clipboard.writeText(code).catch(() => {});
+        if (!code) return;
+        const url = new URL(window.location.href);
+        url.searchParams.set('room', code);
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(url.toString()).catch(() => {});
         }
       });
     }

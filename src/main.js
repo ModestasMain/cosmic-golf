@@ -106,8 +106,20 @@ class Game {
 
   _setupMultiplayer() {
     this.mp = new MultiplayerManager();
-    // Start room creation; will fall back to solo after 10s
-    this.mp.createRoom(gameState.players[0].name, gameState.players[0].color);
+
+    const params = new URLSearchParams(window.location.search);
+    const roomParam = params.get('room');
+
+    if (roomParam) {
+      // Join existing room from shared link
+      this.mp.joinRoom(roomParam, gameState.players[0].name, gameState.players[0].color);
+    } else {
+      // Create new room — then put code in URL so it's shareable
+      const code = this.mp.createRoom(gameState.players[0].name, gameState.players[0].color);
+      const url = new URL(window.location.href);
+      url.searchParams.set('room', code);
+      window.history.replaceState({}, '', url.toString());
+    }
 
     // Wire multiplayer shot events
     this.mp.onShotReceived((data) => {

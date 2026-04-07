@@ -74,6 +74,9 @@ export const Events = {
   MP_SOLO_MODE:       'mp:solo',
   MP_HOLE_COMPLETE:   'mp:hole_complete',  // { playerId, strokes }
   MP_HOLE_TIMER:      'mp:hole_timer',     // { remaining } — countdown seconds
+  MP_LOBBY_STATE:     'mp:lobby_state',    // { phase, countdown, playerCount }
+  MP_GAME_START:      'mp:game_start',     // server confirmed game is starting
+  MP_ROOM_LOCKED:     'mp:room_locked',    // tried to join but game already running
 
   // Audio
   AUDIO_MUTE_TOGGLE:  'audio:mute_toggle',

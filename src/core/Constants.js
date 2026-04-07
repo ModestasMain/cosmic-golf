@@ -63,6 +63,7 @@ export const STARFIELD = {
 export const MULTIPLAYER = {
   ROOM_JOIN_TIMEOUT_MS: 10000,
   MP_HOST: 'cosmic-golf-mp.modestasmain.workers.dev',
+  PUBLIC_ROOM: 'PUBLIC',
   MAX_PLAYERS: 8,
   // Distinct colors assigned per player slot (index 0 = host stays white)
   PLAYER_COLORS: [

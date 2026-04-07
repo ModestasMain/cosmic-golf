@@ -15,6 +15,7 @@ import { TutorialOverlay } from './ui/TutorialOverlay.js';
 import { MultiplayerManager } from './multiplayer/MultiplayerManager.js';
 import { MultiplayerUI } from './ui/MultiplayerUI.js';
 import { NameEntryOverlay } from './ui/NameEntryOverlay.js';
+import { LobbyOverlay } from './ui/LobbyOverlay.js';
 import { PlayerLabels } from './ui/PlayerLabels.js';
 import { audioManager } from './audio/AudioManager.js';
 
@@ -105,51 +106,29 @@ class Game {
     this.tutorial     = new TutorialOverlay();
     this.mpUI         = new MultiplayerUI();
     this.nameEntry    = new NameEntryOverlay();
+    this.lobbyOverlay = new LobbyOverlay();
     this.playerLabels = new PlayerLabels();
   }
 
   _setupMultiplayer() {
     this.mp = new MultiplayerManager();
 
-    const params = new URLSearchParams(window.location.search);
-    const roomParam = params.get('room');
-
-    if (roomParam) {
-      // Join existing room from shared link
-      this.mp.joinRoom(roomParam, gameState.players[0].name, gameState.players[0].color);
-    } else {
-      // Create new room — then put code in URL so it's shareable
-      const code = this.mp.createRoom(gameState.players[0].name, gameState.players[0].color);
-      const url = new URL(window.location.href);
-      url.searchParams.set('room', code);
-      window.history.replaceState({}, '', url.toString());
-    }
-
-    // Wire multiplayer shot events
+    // Wire shot + sync callbacks (before any connection is made)
     this.mp.onShotReceived((data) => {
       eventBus.emit(Events.SHOT_RECEIVED, data);
     });
-
-    // Wire ball position sync
     this.mp.onBallStateReceived((data) => {
       eventBus.emit(Events.MP_BALL_STATE, data);
     });
 
     eventBus.on(Events.BALL_POS_SYNC, ({ pos, vel }) => {
-      if (!gameState.isSoloMode) {
-        this.mp.broadcastBallState(pos, vel);
-      }
+      if (!gameState.isSoloMode) this.mp.broadcastBallState(pos, vel);
     });
 
     eventBus.on(Events.SHOT_TAKEN, (data) => {
       if (!gameState.isSoloMode && this.holeScene.ball) {
         const vel = this.holeScene._computeShotVelocity(data.dragScreenVec, data.dragDist);
-        if (vel) {
-          this.mp.broadcastShot(
-            { x: vel.x, y: vel.y, z: vel.z },
-            data.power,
-          );
-        }
+        if (vel) this.mp.broadcastShot({ x: vel.x, y: vel.y, z: vel.z }, data.power);
       }
     });
 
@@ -165,21 +144,28 @@ class Game {
       const col = color ?? 0xff6464;
       const existing = gameState.players.find(p => p.id === playerId);
       if (!existing) {
-        // New player
         gameState.addPlayer(playerId, name, col);
         gameState.isSoloMode = false;
         this.playerLabels.addPlayer(playerId, name || playerId, col);
-      } else {
-        // Re-announcement — update name if it changed (e.g. after name entry)
-        if (name && name !== existing.name) {
-          existing.name = name;
-          this.playerLabels.updateName(playerId, name);
-        }
+      } else if (name && name !== existing.name) {
+        existing.name = name;
+        this.playerLabels.updateName(playerId, name);
       }
     });
 
     eventBus.on(Events.MP_PLAYER_LEFT, ({ playerId }) => {
       this.playerLabels.removePlayer(playerId);
+    });
+
+    eventBus.on(Events.MP_GAME_START, () => {
+      // Server says go — start the game
+      this.holeScene.loadHole(0);
+      setTimeout(() => this.tutorial.show(), 600);
+    });
+
+    eventBus.on(Events.MP_ROOM_LOCKED, () => {
+      // Game already in progress — fall back to solo
+      this.mp._enterSoloMode();
     });
   }
 
@@ -244,18 +230,38 @@ class Game {
   }
 
   _startGame() {
-    this.nameEntry.show().then(name => {
+    // Pre-fill room code from URL if arriving via invite link
+    const params = new URLSearchParams(window.location.search);
+    const urlRoom = params.get('room');
+    if (urlRoom) this.nameEntry.prefillRoom(urlRoom);
+
+    this.nameEntry.show().then(({ name, roomCode }) => {
+      // Update local player name
       gameState.players[0].name = name;
-      // Re-announce name to any connected MP peers
-      this.mp.updateIdentity(name, gameState.players[0].color);
-      // Add local player label
-      this.playerLabels.addPlayer(
-        gameState.players[0].id,
-        name,
-        gameState.players[0].color,
-      );
-      this.holeScene.loadHole(0);
-      setTimeout(() => this.tutorial.show(), 600);
+      const color = gameState.players[0].color;
+
+      this.playerLabels.addPlayer(gameState.players[0].id, name, color);
+
+      if (roomCode) {
+        // Private room — join by code, put in URL for sharing
+        this.mp.joinRoom(roomCode, name, color);
+        const url = new URL(window.location.href);
+        url.searchParams.set('room', roomCode);
+        window.history.replaceState({}, '', url.toString());
+        this.lobbyOverlay.show(false, roomCode, gameState.players[0]);
+      } else {
+        // Public lobby
+        this.mp.joinPublic(name, color);
+        // Clear room param so URL stays clean for public players
+        const url = new URL(window.location.href);
+        url.searchParams.delete('room');
+        window.history.replaceState({}, '', url.toString());
+        this.lobbyOverlay.show(true, null, gameState.players[0]);
+      }
+
+      // Re-announce once connected so peers get the real name
+      // (connection may not be open yet — MultiplayerManager guards this)
+      setTimeout(() => this.mp.updateIdentity(name, color), 2000);
     });
   }
 

@@ -60,14 +60,25 @@ export class MultiplayerManager {
   }
 
   /**
-   * Join an existing room by code.
+   * Join an existing private room by code.
    */
   joinRoom(code, playerName = 'PLAYER', playerColor) {
     this.roomCode = code.toUpperCase();
     this.playerId = 'guest_' + Date.now();
     gameState.roomCode = this.roomCode;
 
-    // Derive a color from playerId hash so each guest gets a stable unique color
+    const color = playerColor ?? this._colorFromId(this.playerId);
+    this._connect(playerName, color);
+  }
+
+  /**
+   * Join the public matchmaking lobby.
+   */
+  joinPublic(playerName = 'PLAYER', playerColor) {
+    this.roomCode = MULTIPLAYER.PUBLIC_ROOM;
+    this.playerId = 'pub_' + Date.now();
+    gameState.roomCode = this.roomCode;
+
     const color = playerColor ?? this._colorFromId(this.playerId);
     this._connect(playerName, color);
   }
@@ -173,6 +184,22 @@ export class MultiplayerManager {
         if (msg.playerId !== this.playerId) {
           eventBus.emit(Events.MP_HOLE_COMPLETE, { playerId: msg.playerId, strokes: msg.strokes });
         }
+        break;
+
+      case 'lobby_state':
+        eventBus.emit(Events.MP_LOBBY_STATE, {
+          phase: msg.phase,
+          countdown: msg.countdown,
+          playerCount: msg.playerCount,
+        });
+        break;
+
+      case 'game_start':
+        eventBus.emit(Events.MP_GAME_START);
+        break;
+
+      case 'room_locked':
+        eventBus.emit(Events.MP_ROOM_LOCKED);
         break;
     }
   }

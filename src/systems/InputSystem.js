@@ -28,6 +28,9 @@ export class InputSystem {
     // Phase 2 power drag
     this._powerDragStart = new Vector2();
     this._power = 0; // 0-1, readable by HoleScene each frame
+    this._powerLocked = false;
+    this._powerGestureMaxMove = 0;
+    this._oscillateT = 0;
 
     this._buildUI();
 
@@ -50,7 +53,28 @@ export class InputSystem {
   // ── UI ─────────────────────────────────────────────────────
 
   _buildUI() {
-    // Vertical power slider at bottom center
+    // Inject keyframe animations — only decorative, never on dragged elements
+    if (!document.getElementById('cosmic-power-style')) {
+      const style = document.createElement('style');
+      style.id = 'cosmic-power-style';
+      style.textContent = `
+        @keyframes handle-spin {
+          from { transform:translate(-50%,50%) rotate(0deg); }
+          to   { transform:translate(-50%,50%) rotate(360deg); }
+        }
+        @keyframes label-glow {
+          0%,100% { opacity:0.7; }
+          50%      { opacity:1; }
+        }
+        @keyframes nebula-scroll {
+          0%   { background-position: 0 200px; }
+          100% { background-position: 0 0px; }
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
+    // Outer wrapper
     const wrap = document.createElement('div');
     wrap.id = 'power-ring-wrap';
     wrap.style.cssText = [
@@ -58,49 +82,119 @@ export class InputSystem {
       'left:50%',
       'bottom:max(64px, calc(env(safe-area-inset-bottom, 0px) + 44px))',
       'transform:translateX(-50%)',
-      'display:none', 'flex-direction:column', 'align-items:center', 'gap:8px',
+      'display:none', 'flex-direction:column', 'align-items:center', 'gap:10px',
       'z-index:100', 'pointer-events:none',
     ].join(';');
 
+    // Phase label
     this._phaseLabel = document.createElement('div');
     this._phaseLabel.style.cssText = [
-      'color:rgba(255,255,255,0.6)', 'font-family:monospace',
-      'font-size:10px', 'letter-spacing:2px', 'text-align:center',
+      'color:rgba(160,210,255,0.85)', 'font-family:monospace',
+      'font-size:10px', 'letter-spacing:3px', 'text-align:center',
+      'animation:label-glow 2s ease-in-out infinite',
     ].join(';');
 
-    // Track + fill (vertical: fills bottom→top)
-    const barOuter = document.createElement('div');
-    barOuter.style.cssText = [
-      'width:18px', 'height:180px',
-      'background:rgba(255,255,255,0.12)',
-      'border-radius:9px',
-      'border:1px solid rgba(255,255,255,0.25)',
+    // Bar container — no overflow:hidden so corona bleeds out
+    this._barOuter = document.createElement('div');
+    this._barOuter.style.cssText = [
+      'width:22px', 'height:200px',
+      'border-radius:11px',
       'position:relative', 'overflow:visible',
     ].join(';');
 
+    // Track — deep space background, clipped
+    const barTrack = document.createElement('div');
+    barTrack.style.cssText = [
+      'position:absolute', 'inset:0',
+      'border-radius:11px',
+      'overflow:hidden',
+      'background:#060814',
+      'border:1px solid rgba(100,160,255,0.3)',
+    ].join(';');
+
+    // Scrolling nebula texture inside track (decorative, independent of fill height)
+    const nebulaScroll = document.createElement('div');
+    nebulaScroll.style.cssText = [
+      'position:absolute', 'inset:0',
+      // tall tile so animation has room to scroll
+      'background-image:',
+      // dot cluster A
+      'radial-gradient(1.5px 1.5px at 5px  20px, rgba(180,140,255,0.8) 0%, transparent 100%),',
+      'radial-gradient(1px   1px   at 15px 45px, rgba(255,255,255,0.6) 0%, transparent 100%),',
+      'radial-gradient(1px   1px   at 3px  75px, rgba(140,200,255,0.7) 0%, transparent 100%),',
+      'radial-gradient(1.5px 1.5px at 18px 100px,rgba(255,180,120,0.6) 0%, transparent 100%),',
+      'radial-gradient(1px   1px   at 8px  130px,rgba(255,255,255,0.5) 0%, transparent 100%),',
+      'radial-gradient(1px   1px   at 13px 160px,rgba(120,220,180,0.7) 0%, transparent 100%),',
+      'radial-gradient(1.5px 1.5px at 2px  185px,rgba(200,140,255,0.6) 0%, transparent 100%)',
+      ';background-size:22px 200px',
+      ';animation:nebula-scroll 4s linear infinite',
+    ].join('');
+
+    // Fill — the active power indicator, no CSS transitions (tracks finger directly)
     this._powerBarFill = document.createElement('div');
     this._powerBarFill.style.cssText = [
       'position:absolute', 'left:0', 'bottom:0',
       'width:100%', 'height:0%',
-      'border-radius:9px',
-      'background:rgba(80,220,80,0.8)',
+      'border-radius:11px',
+      // static gradient clipped by height — no animation that fights JS updates
+      'background:linear-gradient(to top, #ff3355 0%, #cc44ff 45%, #3388ff 80%, #44ffdd 100%)',
+      'background-size:100% 200px',
+      'background-position:0 bottom',
     ].join(';');
 
-    // Handle
+    // Shimmer highlight on fill (purely decorative, doesn't move)
+    const shimmer = document.createElement('div');
+    shimmer.style.cssText = [
+      'position:absolute', 'inset:0', 'border-radius:11px',
+      'background:linear-gradient(90deg,transparent 0%,rgba(255,255,255,0.12) 50%,transparent 100%)',
+      'pointer-events:none',
+    ].join(';');
+    this._powerBarFill.appendChild(shimmer);
+
+    barTrack.appendChild(nebulaScroll);
+    barTrack.appendChild(this._powerBarFill);
+
+    // Corona glow behind handle — no CSS transition
+    this._powerCorona = document.createElement('div');
+    this._powerCorona.style.cssText = [
+      'position:absolute', 'left:50%', 'bottom:0%',
+      'transform:translate(-50%, 50%)',
+      'width:40px', 'height:40px',
+      'border-radius:50%',
+      'pointer-events:none',
+      'will-change:bottom',
+    ].join(';');
+
+    // Handle — planet sphere, spinning ring animation (transform not hijacked by JS)
     this._powerHandle = document.createElement('div');
     this._powerHandle.style.cssText = [
       'position:absolute', 'left:50%', 'bottom:0%',
       'transform:translate(-50%, 50%)',
-      'width:28px', 'height:28px',
-      'background:#fff', 'border-radius:50%',
-      'border:2px solid rgba(255,255,255,0.9)',
-      'box-shadow:0 0 10px rgba(255,255,255,0.5)',
+      'width:26px', 'height:26px',
+      'border-radius:50%',
+      'background:radial-gradient(circle at 36% 36%, #d0eeff 0%, #5588ff 55%, #1133aa 100%)',
+      'border:1.5px solid rgba(160,200,255,0.9)',
+      'box-shadow:0 0 10px rgba(80,140,255,0.9), 0 0 22px rgba(60,100,255,0.4)',
+      // spin uses transform — BUT we set bottom via style.bottom so they don't conflict
+      'animation:handle-spin 3s linear infinite',
+      'will-change:bottom',
     ].join(';');
 
-    barOuter.appendChild(this._powerBarFill);
-    barOuter.appendChild(this._powerHandle);
+    // Tick marks (left side, so they don't overlap handle)
+    const ticks = document.createElement('div');
+    ticks.style.cssText = 'position:absolute;left:-9px;top:0;height:100%;display:flex;flex-direction:column;justify-content:space-between;padding:4px 0;pointer-events:none;';
+    [0.7, 0.45, 0.35, 0.45, 0.7].forEach((w, i) => {
+      const t = document.createElement('div');
+      t.style.cssText = `width:${Math.round(w * 10)}px;height:1px;background:rgba(100,160,255,${i === 0 || i === 4 ? 0.65 : 0.3});`;
+      ticks.appendChild(t);
+    });
+
+    this._barOuter.appendChild(barTrack);
+    this._barOuter.appendChild(this._powerCorona);
+    this._barOuter.appendChild(this._powerHandle);
+    this._barOuter.appendChild(ticks);
     wrap.appendChild(this._phaseLabel);
-    wrap.appendChild(barOuter);
+    wrap.appendChild(this._barOuter);
     document.body.appendChild(wrap);
     this._wrap = wrap;
   }
@@ -111,15 +205,31 @@ export class InputSystem {
   }
 
   _setBarPower(p) {
-    const pct = Math.round(p * 100);
+    const pct = (p * 100).toFixed(2);
+
+    // Height + position — no transitions, tracks pointer exactly
     this._powerBarFill.style.height = `${pct}%`;
-    this._powerHandle.style.bottom = `${pct}%`;
-    const r = Math.round(p * 255);
-    const g = Math.round((1 - p * 0.7) * 220);
-    const color = `rgb(${r},${g},40)`;
-    this._powerBarFill.style.background = color;
-    this._powerHandle.style.background = color;
-    this._powerHandle.style.boxShadow = `0 0 10px ${color}`;
+    this._powerHandle.style.bottom  = `${pct}%`;
+    this._powerCorona.style.bottom  = `${pct}%`;
+
+    // Color: blue(220) → purple(280) → red(0/360) as power rises
+    const hue  = (220 + p * 200) % 360;  // 220→60 wrapping through purple→red
+    // easier: lerp 220→10 (blue→red via purple)
+    const h    = Math.round(220 - p * 210);
+    const glow = `hsl(${h},90%,60%)`;
+    const dim  = `hsl(${h},80%,45%)`;
+
+    this._powerHandle.style.boxShadow = `0 0 ${10 + p * 16}px ${glow}, 0 0 ${22 + p * 28}px ${dim}66`;
+    this._powerHandle.style.borderColor = glow;
+
+    // Corona size + color
+    const cs = 34 + Math.round(p * 28);
+    this._powerCorona.style.width      = `${cs}px`;
+    this._powerCorona.style.height     = `${cs}px`;
+    this._powerCorona.style.background = `radial-gradient(circle, ${glow}50 0%, transparent 68%)`;
+
+    // Bar outer border glow
+    this._barOuter.style.boxShadow = `0 0 0 1px ${glow}33, 0 0 ${10 + p * 20}px ${dim}44`;
   }
 
   // ── Pointer handlers ───────────────────────────────────────
@@ -139,15 +249,23 @@ export class InputSystem {
       this._dragCurrent.copy(ptr);
       this._ballScreenPos.copy(ballScreen);
       this._power = 0;
-      this._setBarPower(0);
-      this._showUI('AIM DIRECTION');
       eventBus.emit(Events.AIM_START);
       return;
     }
 
     if (this._phase === 'AIMING_POWER') {
-      // Touch anywhere to start power drag — captures Y start position
+      if (this._powerLocked) {
+        // Oscillating mode: second tap fires at current power
+        const drag  = this._lockedDragVec;
+        const dist  = this._lockedDragDist;
+        const power = this._power * AIM.MAX_POWER;
+        this._reset();
+        eventBus.emit(Events.SHOT_TAKEN, { dragScreenVec: drag, dragDist: dist, power });
+        return;
+      }
+      // Start tracking a new gesture (drag or tap TBD on pointerup)
       this._powerDragStart.set(e.clientX, e.clientY);
+      this._powerGestureMaxMove = 0;
       this._power = 0;
       this._setBarPower(0);
     }
@@ -170,10 +288,12 @@ export class InputSystem {
 
     if (this._phase === 'AIMING_POWER') {
       e.preventDefault();
-      // Y axis: drag UP from start = more power, drag back down = less
-      const dy = this._powerDragStart.y - e.clientY; // positive = dragged up
+      if (this._powerLocked) return; // oscillating — ignore moves
+      const dy = this._powerDragStart.y - e.clientY;
       this._power = Math.max(0, Math.min(1, dy / AIM.MAX_DRAG_DISTANCE));
       this._setBarPower(this._power);
+      const moved = Math.abs(dy);
+      if (moved > this._powerGestureMaxMove) this._powerGestureMaxMove = moved;
     }
   }
 
@@ -209,26 +329,42 @@ export class InputSystem {
     }
 
     if (this._phase === 'AIMING_POWER') {
-      if (this._power < 0.02) {
-        // No power set yet — stay in power phase, wait for user to drag
-        return;
+      const wasDrag = this._powerGestureMaxMove > 10;
+      if (wasDrag) {
+        // Drag → release: fire immediately
+        const drag  = this._lockedDragVec;
+        const dist  = this._lockedDragDist;
+        const power = this._power * AIM.MAX_POWER;
+        this._reset();
+        eventBus.emit(Events.SHOT_TAKEN, { dragScreenVec: drag, dragDist: dist, power });
+      } else {
+        // Tap → start oscillating power bar, wait for second tap
+        this._powerLocked  = true;
+        this._oscillateT   = 0;
+        this._power        = 0;
+        this._setBarPower(0);
+        this._showUI('TAP TO SHOOT');
       }
-      const drag  = this._lockedDragVec;
-      const dist  = this._lockedDragDist;
-      const power = this._power * AIM.MAX_POWER;
-      this._reset();
-      eventBus.emit(Events.SHOT_TAKEN, { dragScreenVec: drag, dragDist: dist, power });
     }
   }
 
   _onKeyDown(e) {
     if (e.key === 'Escape') { this._reset(); eventBus.emit(Events.AIM_CANCEL); }
+    if (e.key === 'r' || e.key === 'R') { this._reset(); eventBus.emit(Events.BALL_RESET_TO_TEE); }
     if (e.key === 'm' || e.key === 'M') eventBus.emit(Events.AUDIO_MUTE_TOGGLE);
   }
 
   // ── Per-frame ─────────────────────────────────────────────
 
-  update(_dt) {} // no oscillation — power is driven by user drag
+  update(dt) {
+    if (this._phase === 'AIMING_POWER' && this._powerLocked) {
+      // Oscillate 0→1→0 at increasing speed — classic golf power meter
+      this._oscillateT += dt;
+      const speed = 1.2 + this._oscillateT * 0.3; // accelerates over time
+      this._power = (Math.sin(this._oscillateT * speed * Math.PI) + 1) / 2;
+      this._setBarPower(this._power);
+    }
+  }
 
   // ── Helpers ───────────────────────────────────────────────
 
@@ -246,6 +382,9 @@ export class InputSystem {
     this._power = 0;
     this._lockedDragVec  = null;
     this._lockedDragDist = 0;
+    this._powerLocked = false;
+    this._powerGestureMaxMove = 0;
+    this._oscillateT = 0;
     this._wrap.style.display = 'none';
     this._setBarPower(0);
   }

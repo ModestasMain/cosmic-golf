@@ -71,6 +71,7 @@ export class HoleScene {
     // Multiplayer: ghost balls for remote players
     // playerId -> { ball: GhostBall, inFlight, holed, stuckFrames, launchGrace }
     this._remoteBalls = new Map();
+    this._syncFrameCounter = 0; // broadcast local ball state every N frames
 
     // Hole completion timer (starts when first player holes in MP)
     this._holeTimerActive    = false;
@@ -222,6 +223,27 @@ export class HoleScene {
     eventBus.on(Events.NEXT_HOLE, () => {
       if (this._state !== 'HOLE_COMPLETE') return; // ignore duplicate events
       this._loadNextHole();
+    });
+
+    // Remote ball position correction — smooth-correct locally simulated ghost balls
+    eventBus.on(Events.MP_BALL_STATE, ({ playerId, pos, vel }) => {
+      const remote = this._remoteBalls.get(playerId);
+      if (!remote || !remote.inFlight || remote.holed) return;
+
+      const receivedPos = new Vector3(pos.x, pos.y, pos.z);
+      const receivedVel = new Vector3(vel.x, vel.y, vel.z);
+      const error = remote.ball.position.distanceTo(receivedPos);
+
+      if (error > 20) {
+        // Large drift — snap immediately
+        remote.ball.setPosition(receivedPos);
+        remote.ball.setVelocity(receivedVel);
+      } else if (error > 1.5) {
+        // Small drift — lerp 50% toward authoritative position, blend velocity
+        remote.ball.position.lerp(receivedPos, 0.5);
+        remote.ball.velocity.lerp(receivedVel, 0.5);
+      }
+      // < 1.5 units: within tolerance, local sim is fine
     });
 
     // Screen shake triggers
@@ -544,6 +566,16 @@ export class HoleScene {
       // Update input system with current ball position
       this.inputSystem.setBallPosition(this.ball.position);
 
+      // Broadcast ball state to remote players every 6 frames for sync correction
+      this._syncFrameCounter++;
+      if (this._syncFrameCounter >= 6) {
+        this._syncFrameCounter = 0;
+        eventBus.emit(Events.BALL_POS_SYNC, {
+          pos: this.ball.position,
+          vel: this.ball.velocity,
+        });
+      }
+
       if (result.bounced) {
         const now = Date.now();
         if (now - this._lastBounceTime > PHYSICS.BOUNCE_COOLDOWN_MS) {
@@ -556,13 +588,24 @@ export class HoleScene {
         }
       }
 
-      // Black hole proximity shake — intensifies as ball nears cup
+      // Black hole: proximity shake + gravitational pull within radius
       if (this.cup) {
         const cupDist = this.ball.position.distanceTo(this.cup.position);
-        const pullZone = HOLE.CUP_RADIUS * 4;
-        if (cupDist < pullZone) {
-          const intensity = Math.pow(1 - cupDist / pullZone, 2) * 0.25;
+
+        // Shake zone (close approach)
+        const shakeZone = HOLE.CUP_RADIUS * 4;
+        if (cupDist < shakeZone) {
+          const intensity = Math.pow(1 - cupDist / shakeZone, 2) * 0.25;
           this.screenShake.trigger(intensity, 0.08);
+        }
+
+        // Gravity pull — hard cutoff at BLACK_HOLE_PULL_RADIUS, smooth falloff inside
+        if (cupDist < HOLE.BLACK_HOLE_PULL_RADIUS && cupDist > HOLE.CUP_RADIUS) {
+          const t = 1 - cupDist / HOLE.BLACK_HOLE_PULL_RADIUS; // 0 at edge, 1 at cup
+          const distSq = Math.max(cupDist * cupDist, HOLE.CUP_RADIUS * HOLE.CUP_RADIUS);
+          const strength = HOLE.BLACK_HOLE_GRAVITY * t * t / distSq;
+          const toCup = new Vector3().subVectors(this.cup.position, this.ball.position).normalize();
+          this.ball.velocity.addScaledVector(toCup, strength * dt * 60);
         }
       }
 
@@ -592,9 +635,16 @@ export class HoleScene {
         return;
       }
 
-      // Settle: ball at rest OR stuck near planet surface too long
-      const atRest = ballSpeed < PHYSICS.REST_VELOCITY;
+      // Settle: ball at rest ON a planet, OR stuck near a planet surface too long
+      const atRest = ballSpeed < PHYSICS.REST_VELOCITY && nearSurface;
       const stuck = this._stuckFrames > PHYSICS.STUCK_FRAMES;
+
+      // Ball too slow to reach anything but not near a planet → void trap → OOB
+      if (ballSpeed < PHYSICS.REST_VELOCITY && !nearSurface) {
+        this._onOutOfBounds();
+        return;
+      }
+
       if (atRest || stuck) {
         this._stuckFrames = 0;
         this.ballTrail.setActive(false);
@@ -793,6 +843,23 @@ export class HoleScene {
     this.inputSystem.setAiming(false);
   }
 
+  resetBallToTee() {
+    if (!this._holeData || !this.ball || this._spectating) return;
+    if (this._state === 'BALL_MOVING') {
+      // Stop the ball first
+      this.ball.setVelocity(new Vector3());
+      this.ballTrail.setActive(false);
+    }
+    const teePos = this._holeData.tee.clone().add(new Vector3(0, BALL.RADIUS + 0.2, 0));
+    this.ball.setPosition(teePos);
+    this.ball.setVelocity(new Vector3());
+    this._state = 'IDLE';
+    gameState.ballInFlight = false;
+    gameState.aimState = 'IDLE';
+    this.inputSystem.enabled = true;
+    this.inputSystem._reset();
+  }
+
   // ── Multiplayer: remote ball management ──────────────────────
 
   _spawnRemoteBall(playerId, color, name) {
@@ -835,6 +902,19 @@ export class HoleScene {
       }
 
       stepBall(remote.ball, this._holeData.planets, dt, gravScale);
+
+      // Black hole pull for remote balls (same logic as local ball)
+      if (this.cup) {
+        const cupDist = remote.ball.position.distanceTo(this.cup.position);
+        if (cupDist < HOLE.BLACK_HOLE_PULL_RADIUS && cupDist > HOLE.CUP_RADIUS) {
+          const t = 1 - cupDist / HOLE.BLACK_HOLE_PULL_RADIUS;
+          const distSq = Math.max(cupDist * cupDist, HOLE.CUP_RADIUS * HOLE.CUP_RADIUS);
+          const strength = HOLE.BLACK_HOLE_GRAVITY * t * t / distSq;
+          const toCup = new Vector3().subVectors(this.cup.position, remote.ball.position).normalize();
+          remote.ball.velocity.addScaledVector(toCup, strength * dt * 60);
+        }
+      }
+
       remote.ball.syncMesh();
       remote.ball.updateSpin(dt);
 

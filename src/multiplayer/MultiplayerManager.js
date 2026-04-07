@@ -21,6 +21,7 @@ export class MultiplayerManager {
     this.playerId = null;
     this.players = new Map(); // id -> { name, color }
     this._shotCallback = null;
+    this._ballStateCallback = null;
     this._soloTimer = null;
     this._isConnected = false;
     this._isSolo = false;
@@ -131,6 +132,16 @@ export class MultiplayerManager {
         }
         break;
 
+      case 'ball_state':
+        if (msg.playerId !== this.playerId && this._ballStateCallback) {
+          this._ballStateCallback({
+            playerId: msg.playerId,
+            pos: msg.pos,
+            vel: msg.vel,
+          });
+        }
+        break;
+
       case 'hole_complete':
         if (msg.playerId !== this.playerId) {
           eventBus.emit(Events.MP_HOLE_COMPLETE, { playerId: msg.playerId, strokes: msg.strokes });
@@ -156,6 +167,20 @@ export class MultiplayerManager {
 
   onShotReceived(callback) {
     this._shotCallback = callback;
+  }
+
+  onBallStateReceived(callback) {
+    this._ballStateCallback = callback;
+  }
+
+  broadcastBallState(pos, vel) {
+    if (!this._isConnected || this._isSolo) return;
+    this._send({
+      type: 'ball_state',
+      playerId: this.playerId,
+      pos: { x: pos.x, y: pos.y, z: pos.z },
+      vel: { x: vel.x, y: vel.y, z: vel.z },
+    });
   }
 
   _send(data) {

@@ -128,6 +128,17 @@ class Game {
       eventBus.emit(Events.SHOT_RECEIVED, data);
     });
 
+    // Wire ball position sync
+    this.mp.onBallStateReceived((data) => {
+      eventBus.emit(Events.MP_BALL_STATE, data);
+    });
+
+    eventBus.on(Events.BALL_POS_SYNC, ({ pos, vel }) => {
+      if (!gameState.isSoloMode) {
+        this.mp.broadcastBallState(pos, vel);
+      }
+    });
+
     eventBus.on(Events.SHOT_TAKEN, (data) => {
       if (!gameState.isSoloMode && this.holeScene.ball) {
         const vel = this.holeScene._computeShotVelocity(data.dragScreenVec, data.dragDist);
@@ -170,6 +181,51 @@ class Game {
       gameState.addPlayer('solo', 'PLAYER', 0xffffff);
       this.holeScene.loadHole(0);
     });
+
+    // Reset ball to tee (R key or mobile button)
+    eventBus.on(Events.BALL_RESET_TO_TEE, () => {
+      this.holeScene.resetBallToTee();
+    });
+
+    // Mobile reset button
+    this._buildResetButton();
+  }
+
+  _buildResetButton() {
+    const btn = document.createElement('button');
+    btn.id = 'reset-btn';
+    btn.textContent = '↩ RESTART';
+    btn.style.cssText = [
+      'position:fixed',
+      'bottom:max(20px, calc(env(safe-area-inset-bottom, 0px) + 12px))',
+      'left:max(20px, calc(env(safe-area-inset-left, 0px) + 12px))',
+      'z-index:200',
+      'background:rgba(10,12,30,0.75)',
+      'color:rgba(160,210,255,0.9)',
+      'font-family:monospace',
+      'font-size:11px',
+      'letter-spacing:2px',
+      'border:1px solid rgba(100,160,255,0.35)',
+      'border-radius:8px',
+      'padding:8px 14px',
+      'cursor:pointer',
+      'backdrop-filter:blur(4px)',
+      '-webkit-backdrop-filter:blur(4px)',
+      'touch-action:manipulation',
+      'user-select:none',
+      '-webkit-user-select:none',
+    ].join(';');
+
+    btn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      eventBus.emit(Events.BALL_RESET_TO_TEE);
+    });
+
+    // Visual feedback on press
+    btn.addEventListener('pointerdown', () => { btn.style.background = 'rgba(40,60,120,0.85)'; });
+    btn.addEventListener('pointerup',   () => { btn.style.background = 'rgba(10,12,30,0.75)'; });
+
+    document.body.appendChild(btn);
   }
 
   _startGame() {

@@ -57,6 +57,9 @@ export const Events = {
   BALL_HOLED:         'ball:holed',       // { strokes: number }
   BALL_OUT_OF_BOUNDS: 'ball:oob',
   BALL_BOUNCED:       'ball:bounced',     // { position: Vector3 }
+  BALL_RESET_TO_TEE:  'ball:reset_tee',
+  BALL_POS_SYNC:      'ball:pos_sync',    // { pos, vel } — local ball state for broadcast
+  MP_BALL_STATE:      'mp:ball_state',    // { playerId, pos, vel } — received from remote
 
   // Hole events
   HOLE_COMPLETE:      'hole:complete',    // { holeIndex, strokes, players }

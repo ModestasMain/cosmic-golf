@@ -34,6 +34,8 @@ export const HOLE = {
   CUP_SPEED_THRESHOLD: 80,
   OUT_OF_BOUNDS_DISTANCE: 450,
   OUT_OF_BOUNDS_PENALTY: 2,
+  BLACK_HOLE_PULL_RADIUS: 45,  // units — beyond this, no pull at all
+  BLACK_HOLE_GRAVITY: 60,      // much weaker than planet gravity (420)
 };
 
 export const PLANET = {

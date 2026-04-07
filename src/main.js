@@ -3,7 +3,7 @@
 // Sets up renderer, boots directly into hole 1 (no title screen)
 // ============================================================
 
-import { WebGLRenderer, Clock } from 'three';
+import { WebGLRenderer } from 'three';
 import { EffectComposer, RenderPass, BloomEffect, EffectPass, VignetteEffect } from 'postprocessing';
 import { eventBus, Events } from './core/EventBus.js';
 import { gameState } from './core/GameState.js';
@@ -21,7 +21,8 @@ import { audioManager } from './audio/AudioManager.js';
 
 class Game {
   constructor() {
-    this.clock = new Clock();
+    this._lastTime = performance.now();
+    this._hiddenInterval = null;
     this._init();
   }
 
@@ -34,10 +35,10 @@ class Game {
     this._setupMultiplayer();
     this._setupEventListeners();
     this._startGame();
-
     this._setupAudio();
+    this._setupVisibility();
 
-    // Kick off render loop
+    // rAF loop — renders + updates when tab is visible
     this.renderer.setAnimationLoop(() => this._animate());
   }
 
@@ -265,16 +266,38 @@ class Game {
     });
   }
 
-  _animate() {
-    const dt = Math.min(this.clock.getDelta(), 0.1); // cap delta
+  _setupVisibility() {
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        // Tab hidden — rAF stops, run physics-only loop via setInterval (~30 fps)
+        this._lastTime = performance.now();
+        this._hiddenInterval = setInterval(() => this._stepHidden(), 1000 / 30);
+      } else {
+        // Tab visible — kill interval, rAF resumes; reset time to avoid dt spike
+        clearInterval(this._hiddenInterval);
+        this._hiddenInterval = null;
+        this._lastTime = performance.now();
+      }
+    });
+  }
 
-    // Update input (power oscillation)
+  /** Physics-only tick used when tab is hidden. No render. */
+  _stepHidden() {
+    const now = performance.now();
+    const dt  = Math.min((now - this._lastTime) / 1000, 0.1);
+    this._lastTime = now;
     this.inputSystem.update(dt);
+    this.holeScene.update(dt);
+  }
 
-    // Update game scene
+  _animate() {
+    const now = performance.now();
+    const dt  = Math.min((now - this._lastTime) / 1000, 0.1);
+    this._lastTime = now;
+
+    this.inputSystem.update(dt);
     this.holeScene.update(dt);
 
-    // Update HUD + cup indicator
     this.aimUI.update();
     if (this.holeScene.cup && this.holeScene.ball) {
       this.aimUI.updateCupIndicator(
@@ -284,10 +307,7 @@ class Game {
       );
     }
 
-    // Update player name labels
     this._updatePlayerLabels();
-
-    // Render via postprocessing composer (bloom + vignette)
     this.composer.render(dt);
   }
 

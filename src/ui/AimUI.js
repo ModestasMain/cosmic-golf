@@ -7,12 +7,14 @@ import { Vector3 } from 'three';
 import { eventBus, Events } from '../core/EventBus.js';
 import { gameState } from '../core/GameState.js';
 import { AIM } from '../core/Constants.js';
+import { ARCHETYPE_LABELS } from '../systems/HoleGenerator.js';
 
 
 export class AimUI {
   constructor() {
     this._els = {
       holeNum:      document.getElementById('hud-hole'),
+      archetype:    document.getElementById('hud-archetype'),
       strokes:      document.getElementById('hud-strokes'),
       player:       document.getElementById('hud-player'),
       powerWrap:    document.getElementById('power-bar-wrap'),
@@ -187,8 +189,11 @@ export class AimUI {
       this._setHint('', 'rgba(255,255,255,0.4)');
     });
 
-    eventBus.on(Events.HOLE_LOADED, () => {
+    eventBus.on(Events.HOLE_LOADED, ({ archetype }) => {
       this._setHint('DRAG NEAR BALL TO AIM', 'rgba(255,255,255,0.4)');
+      if (this._els.archetype) {
+        this._els.archetype.textContent = archetype ? (ARCHETYPE_LABELS[archetype] ?? archetype) : '';
+      }
     });
 
     eventBus.on(Events.BALL_OUT_OF_BOUNDS, () => {

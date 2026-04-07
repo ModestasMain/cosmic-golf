@@ -159,10 +159,13 @@ export class PortalSystem {
   }
 
   _enterReturnPortal() {
-    if (gameState.portalRef) {
-      window.location.href = `https://${gameState.portalRef}`;
-      eventBus.emit(Events.PORTAL_ENTER, { type: 'return' });
-    }
+    if (!gameState.portalRef) return;
+    const name  = encodeURIComponent(gameState.currentPlayer?.name || gameState.portalUsername || 'PLAYER');
+    const color = encodeURIComponent(gameState.portalColor || 'ffffff');
+    const ref   = encodeURIComponent(DOMAIN);
+    const url   = `https://${gameState.portalRef}?portal=true&username=${name}&color=${color}&ref=${ref}`;
+    eventBus.emit(Events.PORTAL_ENTER, { type: 'return' });
+    window.location.href = url;
   }
 
   /**

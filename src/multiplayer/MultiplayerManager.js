@@ -20,12 +20,23 @@ export class MultiplayerManager {
   }
 
   joinPublic(playerName = 'PLAYER', playerColor) {
-    this.roomCode = MULTIPLAYER.PUBLIC_ROOM;
     this.playerId = 'pub_' + Date.now();
-    gameState.roomCode = this.roomCode;
-
     const color = playerColor ?? this._colorFromId(this.playerId);
-    this._connect(playerName, color);
+    this._connectPublicSlot(playerName, color, 1);
+  }
+
+  /** Try PUBLIC, PUBLIC_2, PUBLIC_3 … up to MAX_PUBLIC_SLOTS before going solo. */
+  _connectPublicSlot(playerName, playerColor, slot) {
+    const code = slot === 1 ? MULTIPLAYER.PUBLIC_ROOM : `${MULTIPLAYER.PUBLIC_ROOM}_${slot}`;
+    this.roomCode = code;
+    gameState.roomCode = code;
+    this._connectWithFallback(playerName, playerColor, () => {
+      if (slot < MULTIPLAYER.MAX_PUBLIC_SLOTS) {
+        this._connectPublicSlot(playerName, playerColor, slot + 1);
+      } else {
+        this._enterSoloMode();
+      }
+    });
   }
 
   /** Deterministic color from player ID — avoids needing server-side slot assignment. */
@@ -37,16 +48,21 @@ export class MultiplayerManager {
     return MULTIPLAYER.PLAYER_COLORS[idx];
   }
 
-  _connect(playerName, playerColor) {
+  /**
+   * Attempt a WebSocket connection.
+   * @param {function} onRejected  Called when the connection is refused before
+   *   opening (e.g. 503 room-full). NOT called if the connection drops mid-game.
+   */
+  _connectWithFallback(playerName, playerColor, onRejected) {
     try {
       const url = `wss://${MULTIPLAYER.MP_HOST}/party/${this.roomCode}`;
       this.ws = new WebSocket(url);
+      let opened = false;
 
       this.ws.onopen = () => {
+        opened = true;
         this._isConnected = true;
         console.log('[MP] Connected to room', this.roomCode);
-
-        // Announce self
         this._send({
           type: 'join',
           playerId: this.playerId,
@@ -66,17 +82,22 @@ export class MultiplayerManager {
 
       this.ws.onclose = () => {
         this._isConnected = false;
-        console.log('[MP] Disconnected');
-        if (!this._isSolo) this._enterSoloMode();
+        if (!opened) {
+          // Never opened — room was full or unreachable; try next slot
+          console.log('[MP] Room full or rejected:', this.roomCode);
+          onRejected();
+        } else if (!this._isSolo) {
+          console.log('[MP] Disconnected mid-game — solo mode');
+          this._enterSoloMode();
+        }
       };
 
-      this.ws.onerror = (err) => {
-        console.warn('[MP] WebSocket error — falling back to solo', err);
-        this._enterSoloMode();
+      this.ws.onerror = () => {
+        // onerror always fires before onclose; let onclose handle the logic
       };
     } catch (err) {
       console.warn('[MP] Could not connect — solo mode', err);
-      this._enterSoloMode();
+      onRejected();
     }
   }
 

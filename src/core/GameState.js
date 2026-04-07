@@ -19,6 +19,9 @@ class GameState {
     this.isSoloMode = true;
     this.isMuted = false;
     this.roomCode = null;
+    // Random seed for solo sessions — each run gets unique holes.
+    // Multiplayer uses the room code string instead (see generateHole).
+    this.sessionSeed = Math.floor(Math.random() * 0xffffffff);
 
     // Portal state (read from URL)
     this.portalMode = false;

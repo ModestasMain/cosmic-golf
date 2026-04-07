@@ -140,13 +140,13 @@ export class HoleScene {
       this._state = 'AIMING';
       this._aimDrag = null;
       this._aimStartDir.copy(this._facingDir);
-      this.trajectoryPreview.hide();
+      this.trajectoryPreview.show(); // show immediately — direction re-aimable anytime
     });
 
-    // Direction locked — show trajectory now (power phase begins)
+    // Fired at the start of each new direction drag — reset base so re-drags feel natural
     eventBus.on(Events.AIM_DIR_LOCKED, () => {
       if (this._state !== 'AIMING') return;
-      this.trajectoryPreview.show();
+      this._aimStartDir.copy(this._facingDir);
     });
 
     eventBus.on(Events.AIM_UPDATE, (data) => {
@@ -281,7 +281,10 @@ export class HoleScene {
     gameState.aimState = 'IDLE';
     this._state = 'IDLE';
 
-    this._holeData = generateHole(holeIndex);
+    // Use room code for multiplayer (all clients share it → identical holes).
+    // Fall back to sessionSeed for solo so each run is a fresh set of holes.
+    const holeSeed = gameState.roomCode ?? gameState.sessionSeed;
+    this._holeData = generateHole(holeIndex, holeSeed);
     const { planets, tee, cup, palette } = this._holeData;
 
     // Update scene background and lighting for palette — tween to new background color
@@ -362,7 +365,7 @@ export class HoleScene {
     // Ghost balls are spawned on-demand when ball_state or shot arrives with matching holeIndex
     // (prevents showing ghosts for players who are on a different hole)
 
-    eventBus.emit(Events.HOLE_LOADED, { holeIndex });
+    eventBus.emit(Events.HOLE_LOADED, { holeIndex, archetype: this._holeData.archetype });
   }
 
   _loadNextHole() {
@@ -622,6 +625,14 @@ export class HoleScene {
         if (cupDist < shakeZone) {
           const intensity = Math.pow(1 - cupDist / shakeZone, 2) * 0.25;
           this.screenShake.trigger(intensity, 0.08);
+        }
+
+        // Emit proximity for audio drone effect (0 = far, 1 = at edge)
+        if (cupDist < HOLE.BLACK_HOLE_PULL_RADIUS) {
+          const proximity = 1 - Math.min(cupDist / HOLE.BLACK_HOLE_PULL_RADIUS, 1);
+          eventBus.emit(Events.BLACK_HOLE_PROXIMITY, { proximity });
+        } else {
+          eventBus.emit(Events.BLACK_HOLE_PROXIMITY, { proximity: 0 });
         }
 
         // Gravity pull — hard cutoff at BLACK_HOLE_PULL_RADIUS, smooth falloff inside

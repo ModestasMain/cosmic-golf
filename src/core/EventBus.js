@@ -83,7 +83,9 @@ export const Events = {
   NEXT_HOLE_ADVANCE:  'hole:next_advance', // force everyone to next hole now
 
   // Audio
-  AUDIO_MUTE_TOGGLE:  'audio:mute_toggle',
+  AUDIO_MUTE_TOGGLE:      'audio:mute_toggle',
+  BLACK_HOLE_PROXIMITY:   'audio:black_hole_proximity', // { proximity: 0-1 }
+  AIM_POWER_LOCKED:       'aim:power_locked',           // { power: 0-1 }
 
   // Portal
   PORTAL_ENTER:       'portal:enter',

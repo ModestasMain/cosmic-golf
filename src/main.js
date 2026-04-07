@@ -209,21 +209,30 @@ class Game {
   }
 
   _startGame() {
+    // Portal arrival: skip name entry, use URL params directly
+    if (gameState.portalMode && gameState.portalUsername) {
+      const name  = gameState.portalUsername;
+      const color = gameState.portalColor
+        ? parseInt(gameState.portalColor.replace('#', ''), 16) || gameState.players[0].color
+        : gameState.players[0].color;
+
+      gameState.players[0].name  = name;
+      gameState.players[0].color = color;
+      this.playerLabels.addPlayer(gameState.players[0].id, name, color);
+      this.mp.joinPublic(name, color);
+      this.holeScene.loadHole(0);
+      setTimeout(() => this.mp.updateIdentity(name, color), 2000);
+      return;
+    }
+
     this.nameEntry.show().then(({ name }) => {
-      // Update local player
       gameState.players[0].name = name;
       const color = gameState.players[0].color;
 
       this.playerLabels.addPlayer(gameState.players[0].id, name, color);
-
-      // Always join public lobby
       this.mp.joinPublic(name, color);
-
-      // Start immediately — no lobby wait
       this.holeScene.loadHole(0);
       setTimeout(() => this.tutorial.show(), 600);
-
-      // Re-announce once connection opens so peers get the real name
       setTimeout(() => this.mp.updateIdentity(name, color), 2000);
     });
   }

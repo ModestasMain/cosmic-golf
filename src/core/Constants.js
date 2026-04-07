@@ -64,6 +64,7 @@ export const MULTIPLAYER = {
   MP_HOST: 'cosmic-golf-mp.cosmicgolf.workers.dev',
   PUBLIC_ROOM: 'PUBLIC',
   MAX_PLAYERS: 24,
+  MAX_PUBLIC_SLOTS: 9999, // PUBLIC → PUBLIC_2 … effectively unlimited (Durable Objects are free/lazy)
   PLAYER_COLORS: [
     0xffffff, 0xff6464, 0x64ff96, 0x64c8ff,
     0xffdc64, 0xff64c8, 0xff9632, 0xc864ff,

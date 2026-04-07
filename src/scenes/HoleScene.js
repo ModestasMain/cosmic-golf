@@ -75,7 +75,9 @@ export class HoleScene {
 
     // Hole completion timer (starts when first player holes in MP)
     this._holeTimerActive    = false;
-    this._holeTimerRemaining = 0;
+    this._holeTimerStartedAt = 0;   // wall-clock ms — shared via broadcast
+    this._holeTimerDuration  = 30;  // seconds
+    this._holeAdvanceSent    = false;
     this._playersHoled       = new Set();
 
     // Spectator mode — active after local player holes in MP
@@ -224,6 +226,16 @@ export class HoleScene {
     eventBus.on(Events.NEXT_HOLE, () => {
       if (this._state !== 'HOLE_COMPLETE') return; // ignore duplicate events
       this._loadNextHole();
+    });
+
+    // Sync hole timer start time from the first player who holed
+    eventBus.on(Events.MP_HOLE_TIMER_SYNC, ({ startedAt }) => {
+      this._syncHoleTimer(startedAt);
+    });
+
+    // Server relayed: all clients must advance to next hole now
+    eventBus.on(Events.MP_HOLE_ADVANCE, () => {
+      this._advanceHole();
     });
 
     // Remote ball position correction — smooth-correct locally simulated ghost balls
@@ -404,7 +416,8 @@ export class HoleScene {
 
     // Reset multiplayer state
     this._holeTimerActive    = false;
-    this._holeTimerRemaining = 0;
+    this._holeTimerStartedAt = 0;
+    this._holeAdvanceSent    = false;
     this._playersHoled.clear();
     this._spectating = false;
   }
@@ -496,8 +509,8 @@ export class HoleScene {
     // Remote balls — always simulate regardless of local state
     if (this._state !== 'HOLE_COMPLETE') this._updateRemoteBalls(dt);
 
-    // Hole timer countdown
-    if (this._holeTimerActive) this._tickHoleTimer(dt);
+    // Hole timer countdown (wall-clock, not dt-based)
+    if (this._holeTimerActive) this._tickHoleTimer();
 
     // Trajectory: update every frame while player is choosing power
     if (this._state === 'AIMING' && this.inputSystem.isInPowerPhase() && this.ball && this._holeData) {
@@ -954,56 +967,78 @@ export class HoleScene {
   _onAnyPlayerHoled() {
     if (!this._holeTimerActive) {
       this._holeTimerActive    = true;
-      this._holeTimerRemaining = 30;
-      eventBus.emit(Events.MP_HOLE_TIMER, { remaining: 30 });
+      this._holeTimerStartedAt = Date.now();
+      this._holeAdvanceSent    = false;
+      // Broadcast start time so all clients share the exact same reference
+      eventBus.emit(Events.MP_HOLE_TIMER_SYNC, { startedAt: this._holeTimerStartedAt });
+      eventBus.emit(Events.MP_HOLE_TIMER, { remaining: this._holeTimerDuration });
     }
     this._checkAllHoled();
   }
 
+  /** Called by remote MP_HOLE_TIMER_SYNC — sync start time from the broadcast. */
+  _syncHoleTimer(startedAt) {
+    if (!this._holeTimerActive) {
+      this._holeTimerActive    = true;
+      this._holeAdvanceSent    = false;
+    }
+    // Use the broadcaster's wall-clock start so all clients count identically
+    this._holeTimerStartedAt = startedAt;
+  }
+
   _checkAllHoled() {
-    // Count total remote players
     const totalRemote = this._remoteBalls.size;
     const remoteHoled = [...this._remoteBalls.values()].filter(r => r.holed).length;
     const localHoled  = this._playersHoled.has('local');
 
     if (localHoled && remoteHoled >= totalRemote && this._state === 'HOLE_COMPLETE') {
-      // Everyone done — advance immediately
-      eventBus.emit(Events.HOLE_COMPLETE, {
-        holeIndex: gameState.currentHole,
-        strokes:   gameState.currentStrokes,
-        players:   gameState.players,
-      });
+      // Everyone done — advance immediately, no need to wait for timer
+      this._advanceHole();
     }
   }
 
-  _tickHoleTimer(dt) {
-    if (!this._holeTimerActive) return;
-    this._holeTimerRemaining -= dt;
-    const seconds = Math.ceil(this._holeTimerRemaining);
-    eventBus.emit(Events.MP_HOLE_TIMER, { remaining: Math.max(0, seconds) });
+  _tickHoleTimer() {
+    if (!this._holeTimerActive || !this._holeTimerStartedAt) return;
 
-    if (this._holeTimerRemaining <= 0) {
+    const elapsed   = (Date.now() - this._holeTimerStartedAt) / 1000;
+    const remaining = Math.max(0, this._holeTimerDuration - elapsed);
+    eventBus.emit(Events.MP_HOLE_TIMER, { remaining: Math.ceil(remaining) });
+
+    if (remaining <= 0) {
       this._holeTimerActive = false;
-      // Force-complete local player if not yet holed
-      if (!this._playersHoled.has('local')) {
-        gameState.currentStrokes = 10;
-        this._playersHoled.add('local');
-        const player = gameState.currentPlayer;
-        if (player) gameState.recordStroke(player.id, gameState.currentHole, 10);
+      // Broadcast once so all clients advance together
+      if (!this._holeAdvanceSent) {
+        this._holeAdvanceSent = true;
+        eventBus.emit(Events.MP_HOLE_ADVANCE);
       }
-      // Force-complete any remote players that didn't hole
-      for (const [playerId, remote] of this._remoteBalls) {
-        if (!remote.holed) {
-          gameState.recordStroke(playerId, gameState.currentHole, 10);
-          remote.holed = true;
-        }
-      }
-      eventBus.emit(Events.HOLE_COMPLETE, {
-        holeIndex: gameState.currentHole,
-        strokes:   gameState.currentStrokes,
-        players:   gameState.players,
-      });
     }
+  }
+
+  /** Force all players to complete and advance — called by timer or remote advance signal. */
+  _advanceHole() {
+    if (this._state === 'HOLE_COMPLETE' && this._holeTimerActive === false &&
+        !this._holeAdvanceSent) return; // already processed
+    this._holeTimerActive = false;
+
+    // Assign 10-stroke penalty to anyone who didn't hole
+    if (!this._playersHoled.has('local')) {
+      gameState.currentStrokes = 10;
+      this._playersHoled.add('local');
+      const player = gameState.currentPlayer;
+      if (player) gameState.recordStroke(player.id, gameState.currentHole, 10);
+    }
+    for (const [playerId, remote] of this._remoteBalls) {
+      if (!remote.holed) {
+        gameState.recordStroke(playerId, gameState.currentHole, 10);
+        remote.holed = true;
+      }
+    }
+
+    eventBus.emit(Events.HOLE_COMPLETE, {
+      holeIndex: gameState.currentHole,
+      strokes:   gameState.currentStrokes,
+      players:   gameState.players,
+    });
   }
 
   render() {

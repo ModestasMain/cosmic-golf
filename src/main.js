@@ -137,6 +137,14 @@ class Game {
       this.mp.broadcastHoleComplete(strokes);
     });
 
+    eventBus.on(Events.MP_HOLE_TIMER_SYNC, ({ startedAt }) => {
+      this.mp.broadcastHoleTimerSync(startedAt);
+    });
+
+    eventBus.on(Events.MP_HOLE_ADVANCE, () => {
+      this.mp.broadcastHoleAdvance();
+    });
+
     eventBus.on(Events.MP_SOLO_MODE, () => {
       gameState.isSoloMode = true;
     });

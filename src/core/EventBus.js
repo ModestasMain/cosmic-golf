@@ -77,6 +77,8 @@ export const Events = {
   MP_LOBBY_STATE:     'mp:lobby_state',    // { phase, countdown, playerCount }
   MP_GAME_START:      'mp:game_start',     // server confirmed game is starting
   MP_ROOM_LOCKED:     'mp:room_locked',    // tried to join but game already running
+  MP_HOLE_TIMER_SYNC: 'mp:hole_timer_sync',// { startedAt } — wall-clock ms when timer started
+  MP_HOLE_ADVANCE:    'mp:hole_advance',   // all clients must advance to next hole now
 
   // Audio
   AUDIO_MUTE_TOGGLE:  'audio:mute_toggle',

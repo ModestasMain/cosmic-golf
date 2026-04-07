@@ -201,6 +201,14 @@ export class MultiplayerManager {
       case 'room_locked':
         eventBus.emit(Events.MP_ROOM_LOCKED);
         break;
+
+      case 'hole_timer_sync':
+        eventBus.emit(Events.MP_HOLE_TIMER_SYNC, { startedAt: msg.startedAt });
+        break;
+
+      case 'hole_advance':
+        eventBus.emit(Events.MP_HOLE_ADVANCE);
+        break;
     }
   }
 
@@ -217,6 +225,16 @@ export class MultiplayerManager {
   broadcastHoleComplete(strokes) {
     if (!this._isConnected || this._isSolo) return;
     this._send({ type: 'hole_complete', playerId: this.playerId, strokes });
+  }
+
+  broadcastHoleTimerSync(startedAt) {
+    if (!this._isConnected || this._isSolo) return;
+    this._send({ type: 'hole_timer_sync', startedAt });
+  }
+
+  broadcastHoleAdvance() {
+    if (!this._isConnected || this._isSolo) return;
+    this._send({ type: 'hole_advance' });
   }
 
   onShotReceived(callback) {

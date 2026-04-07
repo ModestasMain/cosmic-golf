@@ -14,25 +14,20 @@ export class GhostBall {
     this._name    = name;
 
     const col = new Color(color);
-    const geo = new SphereGeometry(BALL.RADIUS, 20, 14);
+    const geo = new SphereGeometry(BALL.RADIUS * 1.05, 20, 14);
     const mat = new MeshStandardMaterial({
       color:             col,
       emissive:          col,
-      emissiveIntensity: 0.55,
-      roughness:         0.5,
-      metalness:         0.0,
-      transparent:       true,
-      opacity:           0.92,
-      depthWrite:        false,
+      emissiveIntensity: 1.1,
+      roughness:         0.35,
+      metalness:         0.1,
     });
 
     this.mesh = new Mesh(geo, mat);
-    this.mesh.renderOrder = 99;
-    this.mesh.material.depthTest = false;
     this.group.add(this.mesh);
 
     // Colored point light so ghost ball illuminates nearby planets
-    this.light = new PointLight(color, 0.4, 12);
+    this.light = new PointLight(color, 1.2, 28);
     this.group.add(this.light);
   }
 

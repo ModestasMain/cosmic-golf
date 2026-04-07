@@ -173,6 +173,11 @@ export class MultiplayerManager {
     this._ballStateCallback = callback;
   }
 
+  /** Re-announce identity after name is confirmed (name entry happens after connect). */
+  updateIdentity(name, color) {
+    this._send({ type: 'join', playerId: this.playerId, name, color });
+  }
+
   broadcastBallState(pos, vel) {
     if (!this._isConnected || this._isSolo) return;
     this._send({

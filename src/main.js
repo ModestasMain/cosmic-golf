@@ -14,6 +14,8 @@ import { AimUI } from './ui/AimUI.js';
 import { TutorialOverlay } from './ui/TutorialOverlay.js';
 import { MultiplayerManager } from './multiplayer/MultiplayerManager.js';
 import { MultiplayerUI } from './ui/MultiplayerUI.js';
+import { NameEntryOverlay } from './ui/NameEntryOverlay.js';
+import { PlayerLabels } from './ui/PlayerLabels.js';
 import { audioManager } from './audio/AudioManager.js';
 
 class Game {
@@ -99,11 +101,11 @@ class Game {
   }
 
   _setupUI() {
-    this.aimUI       = new AimUI();
-    this.tutorial    = new TutorialOverlay();
-    this.mpUI        = new MultiplayerUI();
-    // Show after a short delay so the game has rendered something behind it
-    setTimeout(() => this.tutorial.show(), 800);
+    this.aimUI        = new AimUI();
+    this.tutorial     = new TutorialOverlay();
+    this.mpUI         = new MultiplayerUI();
+    this.nameEntry    = new NameEntryOverlay();
+    this.playerLabels = new PlayerLabels();
   }
 
   _setupMultiplayer() {
@@ -159,12 +161,18 @@ class Game {
       gameState.isSoloMode = true;
     });
 
-    eventBus.on(Events.MP_PLAYER_JOINED, ({ playerId, name }) => {
+    eventBus.on(Events.MP_PLAYER_JOINED, ({ playerId, name, color }) => {
       // Add new player if not already known
       if (!gameState.players.find(p => p.id === playerId)) {
-        gameState.addPlayer(playerId, name, 0xff6464);
+        const col = color ?? 0xff6464;
+        gameState.addPlayer(playerId, name, col);
         gameState.isSoloMode = false;
+        this.playerLabels.addPlayer(playerId, name || playerId, col);
       }
+    });
+
+    eventBus.on(Events.MP_PLAYER_LEFT, ({ playerId }) => {
+      this.playerLabels.removePlayer(playerId);
     });
   }
 
@@ -229,8 +237,19 @@ class Game {
   }
 
   _startGame() {
-    // Boot directly into hole 1 (no title screen — VibeJam rule)
-    this.holeScene.loadHole(0);
+    this.nameEntry.show().then(name => {
+      gameState.players[0].name = name;
+      // Re-announce name to any connected MP peers
+      this.mp.updateIdentity(name, gameState.players[0].color);
+      // Add local player label
+      this.playerLabels.addPlayer(
+        gameState.players[0].id,
+        name,
+        gameState.players[0].color,
+      );
+      this.holeScene.loadHole(0);
+      setTimeout(() => this.tutorial.show(), 600);
+    });
   }
 
   _animate() {
@@ -252,8 +271,31 @@ class Game {
       );
     }
 
+    // Update player name labels
+    this._updatePlayerLabels();
+
     // Render via postprocessing composer (bloom + vignette)
     this.composer.render(dt);
+  }
+
+  _updatePlayerLabels() {
+    const cam = this.holeScene.camera;
+    if (!cam) return;
+
+    // Local player label follows their ball
+    if (this.holeScene.ball) {
+      this.playerLabels.setWorldPos(
+        gameState.players[0]?.id,
+        this.holeScene.ball.position,
+      );
+    }
+
+    // Remote player labels follow ghost balls
+    for (const [playerId, remote] of this.holeScene._remoteBalls) {
+      this.playerLabels.setWorldPos(playerId, remote.ball.position);
+    }
+
+    this.playerLabels.render(cam);
   }
 
   _onResize() {

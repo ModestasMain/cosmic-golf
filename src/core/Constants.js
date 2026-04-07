@@ -26,7 +26,7 @@ export const AIM = {
 };
 
 export const HOLE = {
-  COUNT: 5,
+  COUNT: 10,
   PLANETS_MIN: 5,
   PLANETS_MAX: 8,
   TEE_RADIUS: 1.5,
@@ -61,20 +61,16 @@ export const STARFIELD = {
 };
 
 export const MULTIPLAYER = {
-  ROOM_JOIN_TIMEOUT_MS: 10000,
-  MP_HOST: 'cosmic-golf-mp.modestasmain.workers.dev',
+  MP_HOST: 'cosmic-golf-mp.cosmicgolf.workers.dev',
   PUBLIC_ROOM: 'PUBLIC',
-  MAX_PLAYERS: 8,
-  // Distinct colors assigned per player slot (index 0 = host stays white)
+  MAX_PLAYERS: 24,
   PLAYER_COLORS: [
-    0xffffff, // host — white
-    0xff6464, // coral
-    0x64ff96, // lime
-    0x64c8ff, // sky blue
-    0xffdc64, // yellow
-    0xff64c8, // magenta
-    0xff9632, // orange
-    0xc864ff, // purple
+    0xffffff, 0xff6464, 0x64ff96, 0x64c8ff,
+    0xffdc64, 0xff64c8, 0xff9632, 0xc864ff,
+    0x64ffdc, 0xff3232, 0x32ff64, 0x3296ff,
+    0xff32c8, 0xc8ff32, 0x32c8ff, 0xffc832,
+    0xc832ff, 0x32ffc8, 0xff6432, 0x64ff64,
+    0x6464ff, 0xff6496, 0x96ff64, 0x64ffff,
   ],
 };
 

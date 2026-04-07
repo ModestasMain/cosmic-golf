@@ -63,7 +63,7 @@ export class PlayerLabels {
 
   setWorldPos(id, pos) {
     const label = this._labels.get(id);
-    if (label) label.worldPos = pos.clone();
+    if (label) label.worldPos = pos ? pos.clone() : null;
   }
 
   /** Call every frame — projects world positions → screen space. */

@@ -40,7 +40,7 @@ class GameState {
   }
 
   addPlayer(id, name, color) {
-    this.players.push({ id, name, color, strokes: [] });
+    this.players.push({ id, name, color, strokes: [], holeTimes: [] });
   }
 
   recordStroke(playerId, holeIndex, strokes) {
@@ -48,10 +48,21 @@ class GameState {
     if (player) player.strokes[holeIndex] = strokes;
   }
 
+  recordHoleTime(playerId, holeIndex, ms) {
+    const player = this.players.find(p => p.id === playerId);
+    if (player) player.holeTimes[holeIndex] = ms;
+  }
+
   totalStrokes(playerId) {
     const player = this.players.find(p => p.id === playerId);
     if (!player) return 0;
     return player.strokes.reduce((sum, s) => sum + (s || 0), 0);
+  }
+
+  totalTime(playerId) {
+    const player = this.players.find(p => p.id === playerId);
+    if (!player) return 0;
+    return player.holeTimes.reduce((sum, t) => sum + (t || 0), 0);
   }
 
   advanceHole() {

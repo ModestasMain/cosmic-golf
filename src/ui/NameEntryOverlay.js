@@ -1,6 +1,5 @@
 // ============================================================
-// NameEntryOverlay.js — name + optional room code entry
-// Shows before the game loads. Returns { name, roomCode }.
+// NameEntryOverlay.js — name entry before the game starts
 // ============================================================
 
 const RANDOM_NAMES = [
@@ -47,31 +46,23 @@ export class NameEntryOverlay {
     tagline.style.cssText = 'font-size:10px;letter-spacing:3px;color:rgba(140,180,255,0.5);text-align:center;margin-top:-12px;';
     tagline.textContent = 'MULTIPLAYER · GRAVITY · MINI GOLF';
 
-    // ── Inputs ────────────────────────────────────────────────
+    // ── Name input ────────────────────────────────────────────
     const inputsWrap = document.createElement('div');
     inputsWrap.style.cssText = 'display:flex;flex-direction:column;gap:10px;width:100%;';
 
-    const nameLabel = this._makeLabel('YOUR NAME');
+    const nameLabel = this._makeLabel('YOUR NAME  (leave blank for random)');
     const nameInput = this._makeInput('COSMO', 12);
     nameInput.placeholder = this._randomName();
     nameInput.addEventListener('input', () => { nameInput.value = nameInput.value.toUpperCase(); });
     nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') this._confirm(); });
     this._nameInput = nameInput;
 
-    const roomLabel = this._makeLabel('ROOM CODE  (leave blank for public lobby)');
-    const roomInput = this._makeInput('e.g. AB3X', 8, true);
-    roomInput.addEventListener('input', () => { roomInput.value = roomInput.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); });
-    roomInput.addEventListener('keydown', e => { if (e.key === 'Enter') this._confirm(); });
-    this._roomInput = roomInput;
-
     inputsWrap.appendChild(nameLabel);
     inputsWrap.appendChild(nameInput);
-    inputsWrap.appendChild(roomLabel);
-    inputsWrap.appendChild(roomInput);
 
-    // ── Join button ───────────────────────────────────────────
+    // ── Play button ───────────────────────────────────────────
     const btn = document.createElement('button');
-    btn.textContent = 'JOIN GAME →';
+    btn.textContent = 'PLAY →';
     btn.style.cssText = [
       'width:100%',
       'background:linear-gradient(135deg,rgba(60,100,255,0.85),rgba(120,60,255,0.85))',
@@ -99,7 +90,7 @@ export class NameEntryOverlay {
       ['🎯', 'Drag near your ball to aim direction'],
       ['⚡', 'Drag up to set power, release to shoot — or tap twice'],
       ['🪐', 'Use planet gravity to slingshot toward the hole'],
-      ['⛳', '5 holes · fewest strokes wins'],
+      ['⛳', '10 holes · fewest strokes + fastest time wins'],
       ['🌀', 'Watch out for the black hole gravity pull'],
     ];
 
@@ -128,7 +119,7 @@ export class NameEntryOverlay {
     return el;
   }
 
-  _makeInput(placeholder, maxLength, optional = false) {
+  _makeInput(placeholder, maxLength) {
     const el = document.createElement('input');
     el.type = 'text';
     el.maxLength = maxLength;
@@ -136,13 +127,13 @@ export class NameEntryOverlay {
     el.style.cssText = [
       'width:100%', 'box-sizing:border-box',
       'background:rgba(10,15,40,0.8)',
-      'border:1px solid rgba(100,160,255,' + (optional ? '0.2' : '0.4') + ')',
+      'border:1px solid rgba(100,160,255,0.4)',
       'border-radius:10px', 'padding:13px 16px',
       'color:#fff', 'font-family:monospace', 'font-size:16px',
       'letter-spacing:4px', 'text-transform:uppercase', 'outline:none',
     ].join(';');
     el.addEventListener('focus', () => { el.style.borderColor='rgba(100,160,255,0.8)'; el.style.boxShadow='0 0 18px rgba(80,120,255,0.25)'; });
-    el.addEventListener('blur',  () => { el.style.borderColor='rgba(100,160,255,' + (optional ? '0.2' : '0.4') + ')'; el.style.boxShadow='none'; });
+    el.addEventListener('blur',  () => { el.style.borderColor='rgba(100,160,255,0.4)'; el.style.boxShadow='none'; });
     return el;
   }
 
@@ -153,18 +144,11 @@ export class NameEntryOverlay {
   _confirm() {
     const rawName = this._nameInput.value.trim().toUpperCase();
     const name    = rawName.length > 0 ? rawName : (this._nameInput.placeholder || this._randomName());
-    const rawRoom = this._roomInput.value.trim().toUpperCase();
-    const roomCode = rawRoom.length >= 2 ? rawRoom : null; // null = public lobby
     this._overlay.style.display = 'none';
-    if (this._resolve) this._resolve({ name, roomCode });
+    if (this._resolve) this._resolve({ name });
   }
 
-  /** Pre-fill room code from URL param (invite links). */
-  prefillRoom(code) {
-    if (code) this._roomInput.value = code.toUpperCase();
-  }
-
-  /** Returns Promise<{ name: string, roomCode: string|null }> */
+  /** Returns Promise<{ name: string }> */
   show() {
     this._nameInput.placeholder = this._randomName();
     this._overlay.style.display = 'flex';

@@ -1,6 +1,5 @@
 // ============================================================
 // main.js — Cosmic Golf entry point
-// Sets up renderer, boots directly into hole 1 (no title screen)
 // ============================================================
 
 import { WebGLRenderer } from 'three';
@@ -15,7 +14,6 @@ import { TutorialOverlay } from './ui/TutorialOverlay.js';
 import { MultiplayerManager } from './multiplayer/MultiplayerManager.js';
 import { MultiplayerUI } from './ui/MultiplayerUI.js';
 import { NameEntryOverlay } from './ui/NameEntryOverlay.js';
-import { LobbyOverlay } from './ui/LobbyOverlay.js';
 import { PlayerLabels } from './ui/PlayerLabels.js';
 import { audioManager } from './audio/AudioManager.js';
 
@@ -79,7 +77,7 @@ class Game {
   }
 
   _setupState() {
-    // Default solo player — will be overridden if multiplayer joins
+    // Default solo player — overridden if multiplayer joins
     gameState.addPlayer('solo', 'PLAYER', 0xffffff);
 
     // Read portal params
@@ -94,27 +92,24 @@ class Game {
   }
 
   _setupSystems() {
-    this.inputSystem = new InputSystem(this.renderer, null, null); // camera set later
+    this.inputSystem = new InputSystem(this.renderer, null, null);
     this.holeScene = new HoleScene(this.renderer, this.inputSystem);
     this.scoreboardScene = new ScoreboardScene();
 
-    // Give input system the camera reference
     this.inputSystem.camera = this.holeScene.camera;
   }
 
   _setupUI() {
-    this.aimUI        = new AimUI();
-    this.tutorial     = new TutorialOverlay();
-    this.mpUI         = new MultiplayerUI();
-    this.nameEntry    = new NameEntryOverlay();
-    this.lobbyOverlay = new LobbyOverlay();
+    this.aimUI     = new AimUI();
+    this.tutorial  = new TutorialOverlay();
+    this.mpUI      = new MultiplayerUI();
+    this.nameEntry = new NameEntryOverlay();
     this.playerLabels = new PlayerLabels();
   }
 
   _setupMultiplayer() {
     this.mp = new MultiplayerManager();
 
-    // Wire shot + sync callbacks (before any connection is made)
     this.mp.onShotReceived((data) => {
       eventBus.emit(Events.SHOT_RECEIVED, data);
     });
@@ -122,39 +117,21 @@ class Game {
       eventBus.emit(Events.MP_BALL_STATE, data);
     });
 
-    eventBus.on(Events.BALL_POS_SYNC, ({ pos, vel }) => {
-      if (!gameState.isSoloMode) this.mp.broadcastBallState(pos, vel);
+    eventBus.on(Events.BALL_POS_SYNC, ({ pos, vel, holeIndex }) => {
+      if (!gameState.isSoloMode) this.mp.broadcastBallState(pos, vel, holeIndex);
     });
 
     eventBus.on(Events.SHOT_TAKEN, (data) => {
       if (!gameState.isSoloMode && this.holeScene.ball) {
         const vel = this.holeScene._computeShotVelocity(data.dragScreenVec, data.dragDist);
-        if (vel) this.mp.broadcastShot({ x: vel.x, y: vel.y, z: vel.z }, data.power);
+        if (vel) this.mp.broadcastShot({ x: vel.x, y: vel.y, z: vel.z }, data.power, gameState.currentHole);
       }
     });
 
-    eventBus.on(Events.BALL_HOLED, ({ strokes }) => {
-      this.mp.broadcastHoleComplete(strokes);
+    eventBus.on(Events.BALL_HOLED, ({ strokes, timeMs }) => {
+      this.mp.broadcastHoleComplete(strokes, timeMs);
     });
 
-    eventBus.on(Events.MP_HOLE_TIMER_SYNC, ({ startedAt }) => {
-      this.mp.broadcastHoleTimerSync(startedAt);
-    });
-
-    eventBus.on(Events.MP_HOLE_ADVANCE, () => {
-      this.mp.broadcastHoleAdvance();
-    });
-
-    eventBus.on(Events.NEXT_HOLE_READY, ({ playerId }) => {
-      // Only broadcast when it's our local button click (not a re-emit from remote peer)
-      if (!gameState.isSoloMode && playerId === gameState.players[0]?.id) {
-        this.mp.broadcastNextHoleReady();
-      }
-    });
-
-    eventBus.on(Events.NEXT_HOLE_ADVANCE, () => {
-      if (!gameState.isSoloMode) this.mp.broadcastNextHoleAdvance();
-    });
 
     eventBus.on(Events.MP_SOLO_MODE, () => {
       gameState.isSoloMode = true;
@@ -176,39 +153,23 @@ class Game {
     eventBus.on(Events.MP_PLAYER_LEFT, ({ playerId }) => {
       this.playerLabels.removePlayer(playerId);
     });
-
-    eventBus.on(Events.MP_GAME_START, () => {
-      // Server says go — start the game
-      this.holeScene.loadHole(0);
-      setTimeout(() => this.tutorial.show(), 600);
-    });
-
-    eventBus.on(Events.MP_ROOM_LOCKED, () => {
-      // Game already in progress — fall back to solo
-      this.mp._enterSoloMode();
-    });
   }
 
   _setupAudio() {
-    // Audio can only start after a user gesture (browser autoplay policy).
-    // Init on the first pointerdown, then the AudioContext is alive for the session.
     document.addEventListener('pointerdown', () => audioManager.init(), { once: true });
   }
 
   _setupEventListeners() {
-    // Game restart
     eventBus.on('game:restart', () => {
       gameState.reset();
       gameState.addPlayer('solo', 'PLAYER', 0xffffff);
       this.holeScene.loadHole(0);
     });
 
-    // Reset ball to tee (R key or mobile button)
     eventBus.on(Events.BALL_RESET_TO_TEE, () => {
       this.holeScene.resetBallToTee();
     });
 
-    // Mobile reset button
     this._buildResetButton();
   }
 
@@ -241,8 +202,6 @@ class Game {
       e.preventDefault();
       eventBus.emit(Events.BALL_RESET_TO_TEE);
     });
-
-    // Visual feedback on press
     btn.addEventListener('pointerdown', () => { btn.style.background = 'rgba(40,60,120,0.85)'; });
     btn.addEventListener('pointerup',   () => { btn.style.background = 'rgba(10,12,30,0.75)'; });
 
@@ -250,37 +209,21 @@ class Game {
   }
 
   _startGame() {
-    // Pre-fill room code from URL if arriving via invite link
-    const params = new URLSearchParams(window.location.search);
-    const urlRoom = params.get('room');
-    if (urlRoom) this.nameEntry.prefillRoom(urlRoom);
-
-    this.nameEntry.show().then(({ name, roomCode }) => {
-      // Update local player name
+    this.nameEntry.show().then(({ name }) => {
+      // Update local player
       gameState.players[0].name = name;
       const color = gameState.players[0].color;
 
       this.playerLabels.addPlayer(gameState.players[0].id, name, color);
 
-      if (roomCode) {
-        // Private room — join by code, put in URL for sharing
-        this.mp.joinRoom(roomCode, name, color);
-        const url = new URL(window.location.href);
-        url.searchParams.set('room', roomCode);
-        window.history.replaceState({}, '', url.toString());
-        this.lobbyOverlay.show(false, roomCode, gameState.players[0]);
-      } else {
-        // Public lobby
-        this.mp.joinPublic(name, color);
-        // Clear room param so URL stays clean for public players
-        const url = new URL(window.location.href);
-        url.searchParams.delete('room');
-        window.history.replaceState({}, '', url.toString());
-        this.lobbyOverlay.show(true, null, gameState.players[0]);
-      }
+      // Always join public lobby
+      this.mp.joinPublic(name, color);
 
-      // Re-announce once connected so peers get the real name
-      // (connection may not be open yet — MultiplayerManager guards this)
+      // Start immediately — no lobby wait
+      this.holeScene.loadHole(0);
+      setTimeout(() => this.tutorial.show(), 600);
+
+      // Re-announce once connection opens so peers get the real name
       setTimeout(() => this.mp.updateIdentity(name, color), 2000);
     });
   }
@@ -288,11 +231,9 @@ class Game {
   _setupVisibility() {
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
-        // Tab hidden — rAF stops, run physics-only loop via setInterval (~30 fps)
         this._lastTime = performance.now();
         this._hiddenInterval = setInterval(() => this._stepHidden(), 1000 / 30);
       } else {
-        // Tab visible — kill interval, rAF resumes; reset time to avoid dt spike
         clearInterval(this._hiddenInterval);
         this._hiddenInterval = null;
         this._lastTime = performance.now();
@@ -300,7 +241,6 @@ class Game {
     });
   }
 
-  /** Physics-only tick used when tab is hidden. No render. */
   _stepHidden() {
     const now = performance.now();
     const dt  = Math.min((now - this._lastTime) / 1000, 0.1);
@@ -334,15 +274,16 @@ class Game {
     const cam = this.holeScene.camera;
     if (!cam) return;
 
-    // Local player label follows their ball
+    // Update local player label
+    const localId = gameState.players[0]?.id;
     if (this.holeScene.ball) {
-      this.playerLabels.setWorldPos(
-        gameState.players[0]?.id,
-        this.holeScene.ball.position,
-      );
+      this.playerLabels.setWorldPos(localId, this.holeScene.ball.position);
     }
 
-    // Remote player labels follow ghost balls
+    // Update remote labels — clear first so players who left the hole disappear
+    for (const [id] of this.playerLabels._labels) {
+      if (id !== localId) this.playerLabels.setWorldPos(id, null);
+    }
     for (const [playerId, remote] of this.holeScene._remoteBalls) {
       this.playerLabels.setWorldPos(playerId, remote.ball.position);
     }
@@ -357,5 +298,4 @@ class Game {
   }
 }
 
-// Start game
-new Game();
+window.__game__ = new Game();

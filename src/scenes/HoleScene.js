@@ -73,15 +73,13 @@ export class HoleScene {
     this._remoteBalls = new Map();
     this._syncFrameCounter = 0; // broadcast local ball state every N frames
 
-    // Hole completion timer (starts when first player holes in MP)
-    this._holeTimerActive    = false;
-    this._holeTimerStartedAt = 0;   // wall-clock ms — shared via broadcast
-    this._holeTimerDuration  = 30;  // seconds
-    this._holeAdvanceSent    = false;
+    this._holeCompleteEmitted = false; // idempotency guard for _advanceHole
     this._playersHoled       = new Set();
 
+    // Hole time tracking (wall-clock ms from first shot to holing)
+    this._holeStartTime = null;
+
     // Spectator mode — active after local player holes in MP
-    this._spectating = false;
 
     // Occlusion: reusable vectors (no per-frame allocation)
     this._occRayDir = new Vector3();
@@ -194,15 +192,14 @@ export class HoleScene {
     });
 
     eventBus.on(Events.SHOT_RECEIVED, (data) => {
-      // Multiplayer: fire the remote player's ghost ball, not the local ball
+      // Ignore shots from players on a different hole
+      if (data.holeIndex !== undefined && data.holeIndex !== gameState.currentHole) return;
       this._handleRemoteShot(data);
     });
 
-    eventBus.on(Events.MP_PLAYER_JOINED, ({ playerId, name, color }) => {
-      if (!this._holeData) return;
-      if (this._remoteBalls.has(playerId)) return; // already spawned, name update handled by PlayerLabels
-      this._spawnRemoteBall(playerId, color ?? 0xff6464, name ?? '');
-    });
+    // Ghost balls are spawned on-demand when ball_state or shot arrives (holeIndex must match).
+    // MP_PLAYER_JOINED only adds the player to gameState so the defensive spawn in
+    // MP_BALL_STATE can find their color/name.
 
     eventBus.on(Events.MP_PLAYER_LEFT, ({ playerId }) => {
       const remote = this._remoteBalls.get(playerId);
@@ -212,36 +209,39 @@ export class HoleScene {
       }
     });
 
-    eventBus.on(Events.MP_HOLE_COMPLETE, ({ playerId, strokes }) => {
-      // Record remote player's strokes
+    eventBus.on(Events.MP_HOLE_COMPLETE, ({ playerId, strokes, timeMs }) => {
+      // Record remote player's strokes + time
       gameState.recordStroke(playerId, gameState.currentHole, strokes);
+      if (timeMs) gameState.recordHoleTime(playerId, gameState.currentHole, timeMs);
       this._playersHoled.add(playerId);
-      // Mark their ghost ball as holed
+      // Remove their ghost — they've moved on to the next hole
       const remote = this._remoteBalls.get(playerId);
-      if (remote) remote.holed = true;
-      // Start or continue timer
-      this._onAnyPlayerHoled();
+      if (remote) {
+        remote.ball.removeFromScene(this.scene);
+        this._remoteBalls.delete(playerId);
+      }
     });
 
     eventBus.on(Events.NEXT_HOLE, () => {
-      if (this._state !== 'HOLE_COMPLETE') return; // ignore duplicate events
+      if (this._state !== 'HOLE_COMPLETE') return;
       this._loadNextHole();
     });
 
-    // Sync hole timer start time from the first player who holed
-    eventBus.on(Events.MP_HOLE_TIMER_SYNC, ({ startedAt }) => {
-      this._syncHoleTimer(startedAt);
-    });
-
-    // Server relayed: all clients must advance to next hole now
-    eventBus.on(Events.MP_HOLE_ADVANCE, () => {
-      this._advanceHole();
-    });
-
     // Remote ball position correction — smooth-correct locally simulated ghost balls
-    eventBus.on(Events.MP_BALL_STATE, ({ playerId, pos, vel }) => {
-      const remote = this._remoteBalls.get(playerId);
-      if (!remote || !remote.inFlight || remote.holed) return;
+    eventBus.on(Events.MP_BALL_STATE, ({ playerId, pos, vel, holeIndex }) => {
+      // Ignore updates from players on a different hole
+      if (holeIndex !== undefined && holeIndex !== gameState.currentHole) return;
+      let remote = this._remoteBalls.get(playerId);
+      // Defensive: spawn ghost on-the-fly if join message was missed or came late
+      if (!remote && this._holeData) {
+        const player = gameState.players.find(p => p.id === playerId);
+        if (!player) return;
+        this._spawnRemoteBall(playerId, player.color, player.name);
+        remote = this._remoteBalls.get(playerId);
+      }
+      if (!remote || remote.holed) return;
+      // Mark in-flight so physics simulation runs for this ghost
+      if (!remote.inFlight) remote.inFlight = true;
 
       const receivedPos = new Vector3(pos.x, pos.y, pos.z);
       const receivedVel = new Vector3(vel.x, vel.y, vel.z);
@@ -350,18 +350,17 @@ export class HoleScene {
     this.inputSystem.setBallPosition(this.ball.position);
     this.inputSystem.setPlanets(this.planets);
 
-    // Portal return (after game complete, don't spawn again)
+    // Portal return setup — also spawns exit portal from hole 2 onwards
     if (holeIndex === 0) {
       this.portalSystem.initScene();
     }
-
-    // Spawn ghost balls for all known remote players
-    for (const player of gameState.players) {
-      const localId = gameState.currentPlayer?.id;
-      if (player.id !== localId) {
-        this._spawnRemoteBall(player.id, player.color, player.name);
-      }
+    if (holeIndex >= 1 && this.ball) {
+      const pos = new Vector3(0, 30, -60); // fixed visible position above the scene
+      this.portalSystem.spawnExitPortal(pos);
     }
+
+    // Ghost balls are spawned on-demand when ball_state or shot arrives with matching holeIndex
+    // (prevents showing ghosts for players who are on a different hole)
 
     eventBus.emit(Events.HOLE_LOADED, { holeIndex });
   }
@@ -414,12 +413,10 @@ export class HoleScene {
     }
     this._remoteBalls.clear();
 
-    // Reset multiplayer state
-    this._holeTimerActive    = false;
-    this._holeTimerStartedAt = 0;
-    this._holeAdvanceSent    = false;
+    // Reset per-hole state
+    this._holeCompleteEmitted = false;
+    this._holeStartTime       = null;
     this._playersHoled.clear();
-    this._spectating = false;
   }
 
   /**
@@ -481,6 +478,9 @@ export class HoleScene {
     gameState.aimState = 'BALL_IN_FLIGHT';
     gameState.currentStrokes++;
 
+    // Start hole timer on first shot
+    if (!this._holeStartTime) this._holeStartTime = Date.now();
+
     this.trajectoryPreview.hide();
     this.inputSystem.setAiming(false);
 
@@ -508,9 +508,6 @@ export class HoleScene {
 
     // Remote balls — always simulate regardless of local state
     if (this._state !== 'HOLE_COMPLETE') this._updateRemoteBalls(dt);
-
-    // Hole timer countdown (wall-clock, not dt-based)
-    if (this._holeTimerActive) this._tickHoleTimer();
 
     // Trajectory: update every frame while player is choosing power
     if (this._state === 'AIMING' && this.inputSystem.isInPowerPhase() && this.ball && this._holeData) {
@@ -555,6 +552,19 @@ export class HoleScene {
       return;
     }
 
+    // Broadcast position even at rest so late-joining peers can place the ghost correctly
+    if (this.ball && this._state !== 'BALL_IN_FLIGHT') {
+      this._syncFrameCounter++;
+      if (this._syncFrameCounter >= 60) { // ~1s at 60fps
+        this._syncFrameCounter = 0;
+        eventBus.emit(Events.BALL_POS_SYNC, {
+          pos: this.ball.position,
+          vel: this.ball.velocity,
+          holeIndex: gameState.currentHole,
+        });
+      }
+    }
+
     if (this._state === 'BALL_IN_FLIGHT') {
       // Grace period: ramp gravity 0→1 over LAUNCH_GRACE_FRAMES after shot
       let gravityScale = 1.0;
@@ -587,6 +597,7 @@ export class HoleScene {
         eventBus.emit(Events.BALL_POS_SYNC, {
           pos: this.ball.position,
           vel: this.ball.velocity,
+          holeIndex: gameState.currentHole,
         });
       }
 
@@ -729,33 +740,6 @@ export class HoleScene {
   _updateCamera(dt) {
     if (!this.ball) return;
 
-    // Spectator mode: follow the first remote ball still in flight (or just not holed)
-    if (this._spectating) {
-      let spectateTarget = null;
-      for (const remote of this._remoteBalls.values()) {
-        if (!remote.holed) { spectateTarget = remote.ball; break; }
-      }
-      if (spectateTarget) {
-        const speed = spectateTarget.velocity.length();
-        const facing = speed > 2
-          ? spectateTarget.velocity.clone().normalize()
-          : this._facingDir.clone();
-        const behind = facing.clone().negate();
-        const worldUp = Math.abs(facing.y) < 0.95 ? new Vector3(0,1,0) : new Vector3(0,0,-1);
-        const camRight = new Vector3().crossVectors(facing, worldUp).normalize();
-        const camUp    = new Vector3().crossVectors(camRight, facing).normalize();
-        const targetPos = spectateTarget.position.clone()
-          .addScaledVector(behind, CAMERA.FOLLOW_DISTANCE)
-          .addScaledVector(camUp,  CAMERA.FOLLOW_HEIGHT);
-        this._cameraPos.lerp(targetPos, CAMERA.FOLLOW_LERP);
-        this.camera.position.copy(this._cameraPos).add(this.screenShake.shakeOffset);
-        const lookAt = spectateTarget.position.clone().addScaledVector(facing, 8);
-        this._cameraTarget.lerp(lookAt, CAMERA.AIM_LERP);
-        this.camera.lookAt(this._cameraTarget);
-        return;
-      }
-    }
-
     const ballPos = this.ball.position;
 
     // Smoothly lerp the stored facing direction
@@ -812,31 +796,24 @@ export class HoleScene {
 
     const holeIndex = gameState.currentHole;
     const strokes = gameState.currentStrokes;
+    const timeMs = this._holeStartTime ? Date.now() - this._holeStartTime : 0;
 
-    // Record strokes for current player
+    // Record strokes + time for current player
     const player = gameState.currentPlayer;
     if (player) {
       gameState.recordStroke(player.id, holeIndex, strokes);
+      gameState.recordHoleTime(player.id, holeIndex, timeMs);
     }
 
     this._playersHoled.add('local');
-    eventBus.emit(Events.BALL_HOLED, { strokes });
+    eventBus.emit(Events.BALL_HOLED, { strokes, timeMs });
 
-    // Multiplayer: check if anyone else is still playing
-    const anyRemoteStillPlaying = [...this._remoteBalls.values()].some(r => !r.holed);
-    if (!gameState.isSoloMode && anyRemoteStillPlaying) {
-      // Enter spectator mode — wait for others or timer
-      this._spectating = true;
-      this._onAnyPlayerHoled();
-      // Don't emit HOLE_COMPLETE yet — timer or _checkAllHoled will do it
-    } else {
-      // Solo or everyone done — advance immediately
-      eventBus.emit(Events.HOLE_COMPLETE, {
-        holeIndex,
-        strokes,
-        players: gameState.players,
-      });
-    }
+    // Free-for-all: always show scoreboard immediately, no waiting for others
+    eventBus.emit(Events.HOLE_COMPLETE, {
+      holeIndex,
+      strokes,
+      players: gameState.players,
+    });
   }
 
   _onOutOfBounds() {
@@ -858,7 +835,7 @@ export class HoleScene {
   }
 
   resetBallToTee() {
-    if (!this._holeData || !this.ball || this._spectating) return;
+    if (!this._holeData || !this.ball) return;
     if (this._state === 'BALL_MOVING') {
       // Stop the ball first
       this.ball.setVelocity(new Vector3());
@@ -954,91 +931,12 @@ export class HoleScene {
 
       // Check hole
       if (this.cup && remote.ball.position.distanceTo(this.cup.position) < HOLE.CUP_RADIUS) {
-        remote.inFlight = false;
-        remote.holed    = true;
         this._playersHoled.add(playerId);
-        this._onAnyPlayerHoled();
+        remote.ball.removeFromScene(this.scene);
+        this._remoteBalls.delete(playerId);
+        break; // map was mutated, exit loop
       }
     }
-  }
-
-  // ── Hole completion timer ─────────────────────────────────────
-
-  _onAnyPlayerHoled() {
-    if (!this._holeTimerActive) {
-      this._holeTimerActive    = true;
-      this._holeTimerStartedAt = Date.now();
-      this._holeAdvanceSent    = false;
-      // Broadcast start time so all clients share the exact same reference
-      eventBus.emit(Events.MP_HOLE_TIMER_SYNC, { startedAt: this._holeTimerStartedAt });
-      eventBus.emit(Events.MP_HOLE_TIMER, { remaining: this._holeTimerDuration });
-    }
-    this._checkAllHoled();
-  }
-
-  /** Called by remote MP_HOLE_TIMER_SYNC — sync start time from the broadcast. */
-  _syncHoleTimer(startedAt) {
-    if (!this._holeTimerActive) {
-      this._holeTimerActive    = true;
-      this._holeAdvanceSent    = false;
-    }
-    // Use the broadcaster's wall-clock start so all clients count identically
-    this._holeTimerStartedAt = startedAt;
-  }
-
-  _checkAllHoled() {
-    const totalRemote = this._remoteBalls.size;
-    const remoteHoled = [...this._remoteBalls.values()].filter(r => r.holed).length;
-    const localHoled  = this._playersHoled.has('local');
-
-    if (localHoled && remoteHoled >= totalRemote && this._state === 'HOLE_COMPLETE') {
-      // Everyone done — advance immediately, no need to wait for timer
-      this._advanceHole();
-    }
-  }
-
-  _tickHoleTimer() {
-    if (!this._holeTimerActive || !this._holeTimerStartedAt) return;
-
-    const elapsed   = (Date.now() - this._holeTimerStartedAt) / 1000;
-    const remaining = Math.max(0, this._holeTimerDuration - elapsed);
-    eventBus.emit(Events.MP_HOLE_TIMER, { remaining: Math.ceil(remaining) });
-
-    if (remaining <= 0) {
-      this._holeTimerActive = false;
-      // Broadcast once so all clients advance together
-      if (!this._holeAdvanceSent) {
-        this._holeAdvanceSent = true;
-        eventBus.emit(Events.MP_HOLE_ADVANCE);
-      }
-    }
-  }
-
-  /** Force all players to complete and advance — called by timer or remote advance signal. */
-  _advanceHole() {
-    if (this._state === 'HOLE_COMPLETE' && this._holeTimerActive === false &&
-        !this._holeAdvanceSent) return; // already processed
-    this._holeTimerActive = false;
-
-    // Assign 10-stroke penalty to anyone who didn't hole
-    if (!this._playersHoled.has('local')) {
-      gameState.currentStrokes = 10;
-      this._playersHoled.add('local');
-      const player = gameState.currentPlayer;
-      if (player) gameState.recordStroke(player.id, gameState.currentHole, 10);
-    }
-    for (const [playerId, remote] of this._remoteBalls) {
-      if (!remote.holed) {
-        gameState.recordStroke(playerId, gameState.currentHole, 10);
-        remote.holed = true;
-      }
-    }
-
-    eventBus.emit(Events.HOLE_COMPLETE, {
-      holeIndex: gameState.currentHole,
-      strokes:   gameState.currentStrokes,
-      players:   gameState.players,
-    });
   }
 
   render() {

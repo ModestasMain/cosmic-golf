@@ -162,12 +162,19 @@ class Game {
     });
 
     eventBus.on(Events.MP_PLAYER_JOINED, ({ playerId, name, color }) => {
-      // Add new player if not already known
-      if (!gameState.players.find(p => p.id === playerId)) {
-        const col = color ?? 0xff6464;
+      const col = color ?? 0xff6464;
+      const existing = gameState.players.find(p => p.id === playerId);
+      if (!existing) {
+        // New player
         gameState.addPlayer(playerId, name, col);
         gameState.isSoloMode = false;
         this.playerLabels.addPlayer(playerId, name || playerId, col);
+      } else {
+        // Re-announcement — update name if it changed (e.g. after name entry)
+        if (name && name !== existing.name) {
+          existing.name = name;
+          this.playerLabels.updateName(playerId, name);
+        }
       }
     });
 

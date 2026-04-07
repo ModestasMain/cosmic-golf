@@ -19,26 +19,33 @@ export class MultiplayerManager {
     this.ws = null;
     this.roomCode = null;
     this.playerId = null;
-    this.players = new Map(); // id -> { name, color }
+    this.players = new Map(); // id -> { name, color, slot }
     this._shotCallback = null;
     this._ballStateCallback = null;
     this._soloTimer = null;
     this._isConnected = false;
     this._isSolo = false;
+    this._colorSlot = 0; // tracks next available color slot for incoming players
+  }
+
+  /** Pick the next unused palette color for an incoming player. */
+  _nextColor() {
+    this._colorSlot = Math.min(this._colorSlot + 1, MULTIPLAYER.PLAYER_COLORS.length - 1);
+    return MULTIPLAYER.PLAYER_COLORS[this._colorSlot];
   }
 
   /**
    * Create a new room and wait for players.
    * Falls back to solo mode after ROOM_JOIN_TIMEOUT_MS.
    */
-  createRoom(playerName = 'PLAYER1', playerColor = 0x44aaff) {
+  createRoom(playerName = 'PLAYER', playerColor = 0xffffff) {
     this.roomCode = generateRoomCode();
     this.playerId = 'host_' + Date.now();
+    this._colorSlot = 0; // host is slot 0 (white)
     gameState.roomCode = this.roomCode;
 
     eventBus.emit(Events.MP_ROOM_CREATED, { code: this.roomCode });
 
-    // Try to connect to Partykit
     this._connect(playerName, playerColor);
 
     // Solo fallback timer
@@ -55,12 +62,23 @@ export class MultiplayerManager {
   /**
    * Join an existing room by code.
    */
-  joinRoom(code, playerName = 'PLAYER2', playerColor = 0xff6464) {
+  joinRoom(code, playerName = 'PLAYER', playerColor) {
     this.roomCode = code.toUpperCase();
     this.playerId = 'guest_' + Date.now();
     gameState.roomCode = this.roomCode;
 
-    this._connect(playerName, playerColor);
+    // Derive a color from playerId hash so each guest gets a stable unique color
+    const color = playerColor ?? this._colorFromId(this.playerId);
+    this._connect(playerName, color);
+  }
+
+  /** Deterministic color from player ID — avoids needing server-side slot assignment. */
+  _colorFromId(id) {
+    let h = 0;
+    for (let i = 0; i < id.length; i++) h = (Math.imul(31, h) + id.charCodeAt(i)) | 0;
+    // Skip slot 0 (white = host), pick from slots 1-7
+    const idx = (Math.abs(h) % (MULTIPLAYER.PLAYER_COLORS.length - 1)) + 1;
+    return MULTIPLAYER.PLAYER_COLORS[idx];
   }
 
   _connect(playerName, playerColor) {
@@ -108,14 +126,23 @@ export class MultiplayerManager {
 
   _handleMessage(msg) {
     switch (msg.type) {
-      case 'join':
-        this.players.set(msg.playerId, { name: msg.name, color: msg.color });
-        eventBus.emit(Events.MP_PLAYER_JOINED, { playerId: msg.playerId, name: msg.name, color: msg.color });
+      case 'join': {
+        // Enforce 8-player cap (don't count ourselves)
+        if (!this.players.has(msg.playerId) && this.players.size >= MULTIPLAYER.MAX_PLAYERS - 1) {
+          console.warn('[MP] Room full — ignoring join from', msg.playerId);
+          break;
+        }
+        const existing = this.players.get(msg.playerId);
+        // Preserve color across re-announcements (name updates shouldn't change color)
+        const color = existing?.color ?? msg.color;
+        this.players.set(msg.playerId, { name: msg.name, color });
+        eventBus.emit(Events.MP_PLAYER_JOINED, { playerId: msg.playerId, name: msg.name, color });
         if (this._soloTimer) {
           clearTimeout(this._soloTimer);
           this._soloTimer = null;
         }
         break;
+      }
 
       case 'leave':
         this.players.delete(msg.playerId);
@@ -175,6 +202,7 @@ export class MultiplayerManager {
 
   /** Re-announce identity after name is confirmed (name entry happens after connect). */
   updateIdentity(name, color) {
+    if (!this._isConnected || this._isSolo) return;
     this._send({ type: 'join', playerId: this.playerId, name, color });
   }
 

@@ -198,6 +198,7 @@ export class HoleScene {
 
     eventBus.on(Events.MP_PLAYER_JOINED, ({ playerId, name, color }) => {
       if (!this._holeData) return;
+      if (this._remoteBalls.has(playerId)) return; // already spawned, name update handled by PlayerLabels
       this._spawnRemoteBall(playerId, color ?? 0xff6464, name ?? '');
     });
 

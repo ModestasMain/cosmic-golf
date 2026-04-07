@@ -79,6 +79,8 @@ export const Events = {
   MP_ROOM_LOCKED:     'mp:room_locked',    // tried to join but game already running
   MP_HOLE_TIMER_SYNC: 'mp:hole_timer_sync',// { startedAt } — wall-clock ms when timer started
   MP_HOLE_ADVANCE:    'mp:hole_advance',   // all clients must advance to next hole now
+  NEXT_HOLE_READY:    'hole:next_ready',   // { playerId } — this player pressed Next Hole
+  NEXT_HOLE_ADVANCE:  'hole:next_advance', // force everyone to next hole now
 
   // Audio
   AUDIO_MUTE_TOGGLE:  'audio:mute_toggle',

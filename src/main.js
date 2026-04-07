@@ -145,6 +145,17 @@ class Game {
       this.mp.broadcastHoleAdvance();
     });
 
+    eventBus.on(Events.NEXT_HOLE_READY, ({ playerId }) => {
+      // Only broadcast when it's our local button click (not a re-emit from remote peer)
+      if (!gameState.isSoloMode && playerId === gameState.players[0]?.id) {
+        this.mp.broadcastNextHoleReady();
+      }
+    });
+
+    eventBus.on(Events.NEXT_HOLE_ADVANCE, () => {
+      if (!gameState.isSoloMode) this.mp.broadcastNextHoleAdvance();
+    });
+
     eventBus.on(Events.MP_SOLO_MODE, () => {
       gameState.isSoloMode = true;
     });

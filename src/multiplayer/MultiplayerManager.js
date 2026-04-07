@@ -209,6 +209,18 @@ export class MultiplayerManager {
       case 'hole_advance':
         eventBus.emit(Events.MP_HOLE_ADVANCE);
         break;
+
+      case 'next_hole_ready':
+        if (msg.playerId !== this.playerId) {
+          eventBus.emit(Events.NEXT_HOLE_READY, { playerId: msg.playerId });
+        }
+        break;
+
+      case 'next_hole_advance':
+        if (msg.playerId !== this.playerId) {
+          eventBus.emit(Events.NEXT_HOLE_ADVANCE);
+        }
+        break;
     }
   }
 
@@ -235,6 +247,16 @@ export class MultiplayerManager {
   broadcastHoleAdvance() {
     if (!this._isConnected || this._isSolo) return;
     this._send({ type: 'hole_advance' });
+  }
+
+  broadcastNextHoleReady() {
+    if (!this._isConnected || this._isSolo) return;
+    this._send({ type: 'next_hole_ready', playerId: this.playerId });
+  }
+
+  broadcastNextHoleAdvance() {
+    if (!this._isConnected || this._isSolo) return;
+    this._send({ type: 'next_hole_advance', playerId: this.playerId });
   }
 
   onShotReceived(callback) {

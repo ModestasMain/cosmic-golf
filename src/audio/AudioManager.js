@@ -133,20 +133,69 @@ const sfx = {
     noiseBurst({ duration: 0.07, volume: 0.12, cutoff: 600 });
   },
 
-  // BALL_BOUNCED — deep low thonk + metallic ring
-  // Square-wave low hit sounds like a dense planet surface impact;
-  // a high sine ring decays slowly like a struck metal sphere.
-  bounce() {
-    // Deep thonk
-    oneShot({ freq: 65, freqEnd: 28, type: 'square',   volume: 0.45, attack: 0.003, decay: 0.18,
-      filterType: 'lowpass', filterFreq: 220, filterQ: 0.7 });
-    // Mid body
-    oneShot({ freq: 140, freqEnd: 80, type: 'triangle', volume: 0.20, attack: 0.003, decay: 0.14 });
-    // Metallic ring — high sine, slow decay
-    oneShot({ freq: 2800, freqEnd: 2200, type: 'sine',  volume: 0.12, attack: 0.002, decay: 0.55,
-      filterType: 'highpass', filterFreq: 1800, filterQ: 2 });
-    // Noise click transient
-    noiseBurst({ duration: 0.025, volume: 0.08, cutoff: 1200 });
+  // BALL_BOUNCED — distinct sound per planet type
+  bounce(planetType = 'ROCKY') {
+    switch (planetType) {
+
+      // ROCKY — stone thud: heavy low boom + gravel noise
+      case 'ROCKY':
+      default:
+        oneShot({ freq: 55, freqEnd: 22, type: 'square',   volume: 0.5,  attack: 0.002, decay: 0.22,
+          filterType: 'lowpass', filterFreq: 180, filterQ: 0.6 });
+        oneShot({ freq: 110, freqEnd: 55, type: 'triangle', volume: 0.22, attack: 0.002, decay: 0.15 });
+        noiseBurst({ duration: 0.05, volume: 0.18, cutoff: 400 });
+        break;
+
+      // ICE — crystalline crack + high resonant ping
+      case 'ICE':
+        oneShot({ freq: 1200, freqEnd: 600, type: 'sine',   volume: 0.28, attack: 0.001, decay: 0.45,
+          filterType: 'highpass', filterFreq: 900, filterQ: 3 });
+        oneShot({ freq: 2400, freqEnd: 1800, type: 'sine',  volume: 0.12, attack: 0.001, decay: 0.65,
+          filterType: 'highpass', filterFreq: 1600, filterQ: 4 });
+        noiseBurst({ duration: 0.03, volume: 0.08, cutoff: 3000 });
+        break;
+
+      // SAND — soft muffled thud + mid hiss
+      case 'SAND':
+        oneShot({ freq: 90, freqEnd: 45, type: 'sine',     volume: 0.35, attack: 0.004, decay: 0.12,
+          filterType: 'lowpass', filterFreq: 280, filterQ: 0.5 });
+        noiseBurst({ duration: 0.12, volume: 0.22, cutoff: 600 });
+        break;
+
+      // TERRAN — earthy knock: mid thump with a short tail
+      case 'TERRAN':
+        oneShot({ freq: 80, freqEnd: 38, type: 'triangle', volume: 0.40, attack: 0.003, decay: 0.20,
+          filterType: 'lowpass', filterFreq: 320, filterQ: 0.8 });
+        oneShot({ freq: 160, freqEnd: 90, type: 'sine',    volume: 0.18, attack: 0.003, decay: 0.18 });
+        noiseBurst({ duration: 0.04, volume: 0.10, cutoff: 700 });
+        break;
+
+      // LAVA — deep volcanic boom + low rumble
+      case 'LAVA':
+        oneShot({ freq: 38, freqEnd: 14, type: 'square',   volume: 0.60, attack: 0.005, decay: 0.35,
+          filterType: 'lowpass', filterFreq: 140, filterQ: 0.5 });
+        oneShot({ freq: 72, freqEnd: 30, type: 'triangle', volume: 0.30, attack: 0.005, decay: 0.28 });
+        noiseBurst({ duration: 0.18, volume: 0.14, cutoff: 200 });
+        break;
+
+      // GAS — airy whomp: sine with heavy lowpass, soft attack
+      case 'GAS':
+        oneShot({ freq: 120, freqEnd: 55, type: 'sine',    volume: 0.38, attack: 0.012, decay: 0.30,
+          filterType: 'lowpass', filterFreq: 260, filterQ: 0.4 });
+        oneShot({ freq: 240, freqEnd: 100, type: 'sine',   volume: 0.18, attack: 0.015, decay: 0.22 });
+        noiseBurst({ duration: 0.10, volume: 0.08, cutoff: 350 });
+        break;
+
+      // RINGED — metallic bell clang: bright harmonics + long ring decay
+      case 'RINGED':
+        oneShot({ freq: 520, freqEnd: 440, type: 'triangle', volume: 0.30, attack: 0.001, decay: 0.60,
+          filterType: 'bandpass', filterFreq: 900, filterQ: 3 });
+        oneShot({ freq: 1560, freqEnd: 1200, type: 'sine',   volume: 0.18, attack: 0.001, decay: 0.80,
+          filterType: 'highpass', filterFreq: 1000, filterQ: 2 });
+        oneShot({ freq: 3120, freqEnd: 2400, type: 'sine',   volume: 0.08, attack: 0.001, decay: 0.50 });
+        noiseBurst({ duration: 0.02, volume: 0.06, cutoff: 2000 });
+        break;
+    }
   },
 
   // BALL_HOLED — triumphant 3-note ascending chime + sparkle
@@ -176,6 +225,102 @@ const sfx = {
     oneShot({ freq: 260, freqEnd: 60,  type: 'sine',     volume: 0.18, attack: 0.01,  decay: 0.45, delay: 0.08 });
     // Low rumble noise
     noiseBurst({ duration: 0.35, volume: 0.08, cutoff: 180 });
+  },
+
+  // LAUNCH_WARP — sustained void-rip, power-scaled (0..1)
+  // Layers: (1) bandpass noise sweep for the "tear" texture,
+  //         (2) doppler sine that rises then falls for the Doppler illusion,
+  //         (3) sub-bass rumble for mass.
+  warp(power = 0.5) {
+    if (gameState.isMuted) return;
+    const c   = ctx();
+    const p   = Math.max(0, Math.min(1, power));
+    const now = c.currentTime;
+
+    // ── 1. Noise rip — bandpass-filtered white noise sweeping from low→high→low ──
+    const duration  = 1.1 + p * 0.7;       // matches visual warp duration
+    const bufSize   = Math.ceil(c.sampleRate * duration);
+    const buf       = c.createBuffer(1, bufSize, c.sampleRate);
+    const data      = buf.getChannelData(0);
+    for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+
+    const noiseSrc  = c.createBufferSource();
+    noiseSrc.buffer = buf;
+
+    const bandpass        = c.createBiquadFilter();
+    bandpass.type         = 'bandpass';
+    bandpass.Q.value      = 1.8 + p * 2.5;         // narrower Q = more whistle-y tear
+    // Sweep: start low, peak at 20% through, fall back
+    const peakFreq        = 900 + p * 2200;         // 900 – 3100 Hz peak
+    bandpass.frequency.setValueAtTime(200, now);
+    bandpass.frequency.linearRampToValueAtTime(peakFreq, now + duration * 0.18);
+    bandpass.frequency.exponentialRampToValueAtTime(120, now + duration);
+
+    const noiseGain       = c.createGain();
+    noiseGain.gain.setValueAtTime(0.0001, now);
+    noiseGain.gain.linearRampToValueAtTime(0.28 + p * 0.32, now + 0.04);
+    noiseGain.gain.setValueAtTime(0.28 + p * 0.32, now + duration * 0.15);
+    noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+    noiseSrc.connect(bandpass);
+    bandpass.connect(noiseGain);
+    noiseGain.connect(master());
+    noiseSrc.start(now);
+    noiseSrc.stop(now + duration + 0.05);
+
+    // ── 2. Doppler sine — rises then falls, panned slightly to sell motion ──
+    const dopOsc  = c.createOscillator();
+    const dopGain = c.createGain();
+    dopOsc.type   = 'sawtooth';
+    const dopPeak = 320 + p * 480;           // 320–800 Hz
+    dopOsc.frequency.setValueAtTime(90, now);
+    dopOsc.frequency.linearRampToValueAtTime(dopPeak, now + duration * 0.12);
+    dopOsc.frequency.exponentialRampToValueAtTime(55, now + duration * 0.9);
+
+    const dopFilt        = c.createBiquadFilter();
+    dopFilt.type         = 'lowpass';
+    dopFilt.frequency.value = 600 + p * 800;
+    dopFilt.Q.value      = 0.7;
+
+    dopGain.gain.setValueAtTime(0.0001, now);
+    dopGain.gain.linearRampToValueAtTime(0.18 + p * 0.20, now + 0.05);
+    dopGain.gain.exponentialRampToValueAtTime(0.0001, now + duration * 0.85);
+
+    dopOsc.connect(dopFilt);
+    dopFilt.connect(dopGain);
+    dopGain.connect(master());
+    dopOsc.start(now);
+    dopOsc.stop(now + duration);
+
+    // ── 3. Sub rumble — low sine, gives physical weight ──
+    const subOsc  = c.createOscillator();
+    const subGain = c.createGain();
+    subOsc.type   = 'sine';
+    subOsc.frequency.setValueAtTime(55 + p * 30, now);
+    subOsc.frequency.exponentialRampToValueAtTime(28, now + duration * 0.7);
+    subGain.gain.setValueAtTime(0.0001, now);
+    subGain.gain.linearRampToValueAtTime(0.30 + p * 0.25, now + 0.03);
+    subGain.gain.exponentialRampToValueAtTime(0.0001, now + duration * 0.65);
+    subOsc.connect(subGain);
+    subGain.connect(master());
+    subOsc.start(now);
+    subOsc.stop(now + duration * 0.7);
+
+    // ── 4. High shimmer — fast freq near end, like tearing vacuum ──
+    if (p > 0.3) {
+      const shimOsc  = c.createOscillator();
+      const shimGain = c.createGain();
+      shimOsc.type   = 'sine';
+      shimOsc.frequency.setValueAtTime(3200 + p * 2000, now + 0.1);
+      shimOsc.frequency.exponentialRampToValueAtTime(800, now + duration * 0.8);
+      shimGain.gain.setValueAtTime(0.0001, now + 0.1);
+      shimGain.gain.linearRampToValueAtTime((p - 0.3) * 0.08, now + 0.25);
+      shimGain.gain.exponentialRampToValueAtTime(0.0001, now + duration * 0.75);
+      shimOsc.connect(shimGain);
+      shimGain.connect(master());
+      shimOsc.start(now + 0.1);
+      shimOsc.stop(now + duration * 0.8);
+    }
   },
 
   // AIM_START — soft click/tick
@@ -501,9 +646,12 @@ export class AudioManager {
 
     // ── Event wiring ──────────────────────────────────────
 
-    eventBus.on(Events.SHOT_TAKEN, () => sfx.launch());
+    eventBus.on(Events.SHOT_TAKEN, ({ power } = {}) => {
+      sfx.launch();
+      sfx.warp(power ?? 0.5); // power is 0..1 normalised
+    });
 
-    eventBus.on(Events.BALL_BOUNCED, () => sfx.bounce());
+    eventBus.on(Events.BALL_BOUNCED, ({ planetType } = {}) => sfx.bounce(planetType));
 
     eventBus.on(Events.BALL_HOLED, () => sfx.holed());
 
@@ -525,18 +673,6 @@ export class AudioManager {
     eventBus.on(Events.BALL_HOLED,         silenceDrone);
     eventBus.on(Events.BALL_OUT_OF_BOUNDS, silenceDrone);
     eventBus.on(Events.AIM_START,          silenceDrone);
-
-    // Throttled aim tick while dragging direction — every 150 ms
-    eventBus.on(Events.AIM_UPDATE, () => {
-      const now = Date.now();
-      if (now - this._lastAimTick > 150) {
-        this._lastAimTick = now;
-        // Very subtle tick — lower priority than aimStart, so we don't flood
-        if (!gameState.isMuted) {
-          oneShot({ freq: 900, type: 'sine', volume: 0.04, attack: 0.002, decay: 0.028 });
-        }
-      }
-    });
 
     // Mute toggle — flip gameState flag, update BGM gain
     eventBus.on(Events.AUDIO_MUTE_TOGGLE, () => {

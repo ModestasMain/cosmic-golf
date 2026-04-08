@@ -25,6 +25,7 @@ import { BallTrail } from '../effects/BallTrail.js';
 import { ScreenShake } from '../effects/ScreenShake.js';
 import { LaunchBurst } from '../effects/LaunchBurst.js';
 import { GhostBall } from '../objects/GhostBall.js';
+import { LaunchWarp } from '../effects/LaunchWarp.js';
 
 export class HoleScene {
   constructor(renderer, inputSystem) {
@@ -90,6 +91,7 @@ export class HoleScene {
     this.ballTrail = new BallTrail(this.scene);
     this.screenShake = new ScreenShake();
     this.launchBurst = new LaunchBurst(this.scene);
+    this.launchWarp = new LaunchWarp(this.camera);
 
     // Current palette background color for tweening
     this._bgColor = { r: 0, g: 0, b: 0 };
@@ -495,6 +497,10 @@ export class HoleScene {
       this.launchBurst.trigger(this.ball.position.clone(), this._holeData.palette);
     }
 
+    // Launch warp — FOV kick + speed lines scaled by power
+    const shotPowerNorm = Math.min(1, (data.power ?? AIM.MAX_POWER * 0.5) / AIM.MAX_POWER);
+    this.launchWarp.trigger(shotPowerNorm);
+
     // Hit-freeze: pause physics for a few frames for feel
     this._hitFreezeFrames = 4;
     this._stuckFrames = 0;
@@ -544,6 +550,8 @@ export class HoleScene {
     // Update effects (always, even during freeze)
     this.launchBurst.update(dt);
     this.screenShake.update(dt);
+    this.launchWarp.update(dt);
+    if (this.ball) this.ball.update(dt);
 
     // Update tween animations (palette background fade etc.)
     tweenUpdate();
@@ -588,7 +596,7 @@ export class HoleScene {
       this.ball.updateSpin(dt);
 
       // Update ball trail
-      this.ballTrail.update(this.ball.position);
+      this.ballTrail.update(this.ball.position, dt);
 
       // Update input system with current ball position
       this.inputSystem.setBallPosition(this.ball.position);
@@ -612,7 +620,11 @@ export class HoleScene {
           this._hitFreezeFrames = Math.max(this._hitFreezeFrames, 4);
           // Bounce particles at impact point
           if (this._holeData) this.launchBurst.triggerBounce(this.ball.position.clone(), this._holeData.palette);
-          eventBus.emit(Events.BALL_BOUNCED, { position: this.ball.position.clone() });
+          eventBus.emit(Events.BALL_BOUNCED, {
+            position:   this.ball.position.clone(),
+            planetType: result.bouncePlanet?.type ?? 'ROCKY',
+            speed:      this.ball.velocity.length(),
+          });
         }
       }
 
@@ -791,17 +803,56 @@ export class HoleScene {
     gameState.holeComplete = true;
     gameState.aimState = 'HOLE_COMPLETE';
 
-    // Suck ball into black hole — kill velocity, lerp toward cup center
+    // Suck ball into black hole — spiral inward animation
     if (this.ball && this.cup) {
       this.ball.setVelocity(new Vector3());
-      const suckTarget = this.cup.position.clone();
-      const startPos   = this.ball.position.clone();
-      let t = 0;
-      const suck = setInterval(() => {
-        t += 0.04;
-        if (t >= 1 || !this.ball) { clearInterval(suck); return; }
-        const eased = t * t;
-        this.ball.setPosition(startPos.clone().lerp(suckTarget, eased));
+      if (this.cup.activateSuck) this.cup.activateSuck();
+
+      // Screen shake on entry
+      this.screenShake.trigger(1.2, 0.5);
+
+      // DOM flash overlay
+      const flash = document.createElement('div');
+      flash.style.cssText = 'position:fixed;inset:0;background:radial-gradient(circle,#ff8800 0%,transparent 70%);pointer-events:none;z-index:9999;opacity:0.8;transition:opacity 0.4s ease-out';
+      document.body.appendChild(flash);
+      setTimeout(() => { flash.style.opacity = '0'; }, 50);
+      setTimeout(() => { flash.remove(); }, 500);
+
+      // Snapshot ball ref — the setInterval fires async so this.ball may
+      // point to the next hole's ball by the time it completes.
+      const suckBall = this.ball;
+      const cupPos   = this.cup.position.clone();
+      const startPos = suckBall.position.clone();
+      const startOffset = startPos.clone().sub(cupPos);
+      let startRadius = startOffset.length();
+      if (startRadius < 0.1) startRadius = 8;
+
+      // Spiral: 2.5 revolutions, radius collapses, scale shrinks
+      const DURATION = 1.1; // seconds
+      let elapsed = 0;
+      const startAngle = Math.atan2(startOffset.z, startOffset.x);
+
+      const spiral = setInterval(() => {
+        elapsed += 0.016;
+        if (elapsed >= DURATION) {
+          clearInterval(spiral);
+          suckBall.setPosition(cupPos);
+          suckBall.group.scale.setScalar(0);
+          return;
+        }
+        const frac   = elapsed / DURATION;
+        const eased  = frac * frac;
+        const radius = startRadius * (1 - eased);
+        const angle  = startAngle + frac * Math.PI * 5;
+        const y      = startOffset.y * (1 - eased);
+
+        const newPos = cupPos.clone().add(new Vector3(
+          Math.cos(angle) * radius,
+          y,
+          Math.sin(angle) * radius,
+        ));
+        suckBall.setPosition(newPos);
+        suckBall.group.scale.setScalar(1 - eased * 0.95);
       }, 16);
     }
 
@@ -967,6 +1018,7 @@ export class HoleScene {
     if (this.nebulaField) this.nebulaField.dispose();
     this.ballTrail.dispose();
     this.launchBurst.dispose();
+    this.launchWarp.dispose();
     this.scene.clear();
   }
 }

@@ -250,6 +250,32 @@ export class HoleCup {
     // Horizon pulse — barely perceptible breathe
     const hs = 1 + Math.sin(t * 1.3) * 0.02;
     this.horizon.scale.setScalar(hs);
+
+    // Suck intensification
+    if (this._sucking) {
+      this._suckT = Math.min(1, this._suckT + dt * 1.2);
+      const s = this._suckT;
+      // Speed up rings
+      for (const r of this._diskRings) {
+        r.mesh.rotation.z += dt * r.spinSpeed * s * 4;
+      }
+      // Brighten grav rings
+      for (const r of this._gravRings) {
+        r.mesh.material.opacity = Math.min(0.6, r.mesh.material.opacity + s * 0.02);
+      }
+      // Brighten lens
+      this.lensGlow.material.opacity = Math.min(0.7, 0.14 + s * 0.56);
+      // Intensify lights
+      this.light.intensity     = Math.min(8, 1.8 + s * 6);
+      this.lightBlue.intensity = Math.min(4, 0.5 + s * 3.5);
+    }
+  }
+
+  // ── Suck activation — call when ball enters ───────────────
+
+  activateSuck() {
+    this._sucking = true;
+    this._suckT   = 0;
   }
 
   // ── Collision ─────────────────────────────────────────────

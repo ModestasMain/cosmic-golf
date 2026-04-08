@@ -17,6 +17,7 @@
 import { Vector2 } from 'three';
 import { eventBus, Events } from '../core/EventBus.js';
 import { AIM } from '../core/Constants.js';
+import { gameState } from '../core/GameState.js';
 
 export class InputSystem {
   constructor(renderer, camera, scene) {
@@ -215,6 +216,7 @@ export class InputSystem {
 
   _onDown(e) {
     if (!this.enabled) return;
+    if (gameState.ballInFlight) return;
     e.preventDefault();
 
     // Enter AIMING on first press anywhere — fall through to start direction tracking

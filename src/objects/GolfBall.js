@@ -8,6 +8,7 @@ import {
   MeshBasicMaterial, AdditiveBlending, BackSide,
 } from 'three';
 import { BALL } from '../core/Constants.js';
+import { BallTrail } from '../effects/BallTrail.js';
 
 const S = 512;
 
@@ -122,11 +123,13 @@ function buildCorona(r, color, opacity) {
 // ──────────────────────────────────────────────────────────
 
 export class GolfBall {
-  constructor(color = 0xffffff) {
-    this.color    = color;
-    this.position = new Vector3();
-    this.velocity = new Vector3();
-    this._t       = 0;
+  constructor(color = 0xffffff, trailColor = null) {
+    this.color       = color;
+    this._trailColor = trailColor ?? color;
+    this.position    = new Vector3();
+    this.velocity    = new Vector3();
+    this._t          = 0;
+    this.trail       = null;
 
     this.group = new Group();
     this._buildMesh();
@@ -178,6 +181,8 @@ export class GolfBall {
 
   update(dt) {
     this._t += dt;
+    if (this.trail) this.trail.update(this.position, dt);
+
     const t     = this._t;
     const speed = this.velocity.length();
     const heat  = Math.min(1, speed / 55);
@@ -220,8 +225,16 @@ export class GolfBall {
     }
   }
 
-  addToScene(scene)      { scene.add(this.group); }
-  removeFromScene(scene) { scene.remove(this.group); this.dispose(); }
+  addToScene(scene) {
+    scene.add(this.group);
+    this.trail = new BallTrail(scene, this._trailColor);
+  }
+
+  removeFromScene(scene) {
+    if (this.trail) { this.trail.dispose(); this.trail = null; }
+    scene.remove(this.group);
+    this.dispose();
+  }
 
   dispose() {
     this.mesh.geometry.dispose();

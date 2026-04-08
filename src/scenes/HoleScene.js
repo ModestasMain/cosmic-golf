@@ -21,7 +21,7 @@ import { TeeMarker } from '../objects/TeeMarker.js';
 import { StarField } from '../objects/StarField.js';
 import { NebulaField } from '../objects/NebulaField.js';
 import { PortalSystem } from '../portal/PortalSystem.js';
-import { BallTrail } from '../effects/BallTrail.js';
+// import { BallTrail } from '../effects/BallTrail.js';
 import { ScreenShake } from '../effects/ScreenShake.js';
 import { LaunchBurst } from '../effects/LaunchBurst.js';
 import { GhostBall } from '../objects/GhostBall.js';
@@ -88,7 +88,6 @@ export class HoleScene {
 
 
     // Visual effects
-    this.ballTrail = new BallTrail(this.scene);
     this.screenShake = new ScreenShake();
     this.launchBurst = new LaunchBurst(this.scene);
     this.launchWarp = new LaunchWarp(this.camera);
@@ -349,7 +348,7 @@ export class HoleScene {
     if (this._facingDir.lengthSq() < 0.01) this._facingDir.set(0, 0, -1);
 
     // Reset ball trail for this hole
-    this.ballTrail.setActive(false);
+    if (this.ball?.trail) this.ball.trail.setActive(false);
 
     // Wire input
     this.inputSystem.setBallPosition(this.ball.position);
@@ -412,7 +411,7 @@ export class HoleScene {
 
     this.trajectoryPreview.hide();
 
-    // Clear remote ghost balls
+    // Clear remote ghost balls (trail disposed inside removeFromScene)
     for (const remote of this._remoteBalls.values()) {
       remote.ball.removeFromScene(this.scene);
     }
@@ -490,7 +489,12 @@ export class HoleScene {
     this.inputSystem.setAiming(false);
 
     // Activate ball trail
-    this.ballTrail.setActive(true);
+    if (this.ball?.trail) {
+      if (gameState.currentPlayer?.color != null) {
+        this.ball.trail.setColor(gameState.currentPlayer.color);
+      }
+      this.ball.trail.setActive(true);
+    }
 
     // Launch burst particles
     if (this._holeData) {
@@ -595,8 +599,6 @@ export class HoleScene {
       // Spin ball mesh based on velocity
       this.ball.updateSpin(dt);
 
-      // Update ball trail
-      this.ballTrail.update(this.ball.position, dt);
 
       // Update input system with current ball position
       this.inputSystem.setBallPosition(this.ball.position);
@@ -695,7 +697,7 @@ export class HoleScene {
 
       if (atRest || stuck) {
         this._stuckFrames = 0;
-        this.ballTrail.setActive(false);
+        if (this.ball?.trail) this.ball.trail.setActive(false);
         gameState.ballInFlight = false;
         gameState.aimState = 'IDLE';
 
@@ -797,7 +799,7 @@ export class HoleScene {
   }
 
   _onBallHoled() {
-    this.ballTrail.setActive(false);
+    if (this.ball?.trail) this.ball.trail.setActive(false);
     this._state = 'HOLE_COMPLETE';
     gameState.ballInFlight = false;
     gameState.holeComplete = true;
@@ -879,7 +881,7 @@ export class HoleScene {
   }
 
   _onOutOfBounds() {
-    this.ballTrail.setActive(false);
+    if (this.ball?.trail) this.ball.trail.setActive(false);
     // Apply penalty strokes and reset ball to tee
     gameState.currentStrokes += HOLE.OUT_OF_BOUNDS_PENALTY;
     eventBus.emit(Events.BALL_OUT_OF_BOUNDS);
@@ -901,7 +903,7 @@ export class HoleScene {
     if (this._state === 'BALL_MOVING') {
       // Stop the ball first
       this.ball.setVelocity(new Vector3());
-      this.ballTrail.setActive(false);
+      if (this.ball?.trail) this.ball.trail.setActive(false);
     }
     const teePos = this._holeData.tee.clone().add(new Vector3(0, BALL.RADIUS + 0.2, 0));
     this.ball.setPosition(teePos);
@@ -937,9 +939,10 @@ export class HoleScene {
     if (!remote || remote.holed) return;
     const vel = new Vector3(direction.x, direction.y, direction.z).normalize().multiplyScalar(power);
     remote.ball.setVelocity(vel);
-    remote.inFlight   = true;
+    remote.inFlight    = true;
     remote.stuckFrames = 0;
     remote.launchGrace = PHYSICS.LAUNCH_GRACE_FRAMES;
+    if (remote.ball.trail) remote.ball.trail.setActive(true);
   }
 
   _updateRemoteBalls(dt) {
@@ -969,7 +972,7 @@ export class HoleScene {
       }
 
       remote.ball.syncMesh();
-      remote.ball.updateSpin(dt);
+      remote.ball.update(dt); // handles spin + trail internally
 
       const speed = remote.ball.velocity.length();
       const nearSurface = this._holeData.planets.some(p =>
@@ -981,17 +984,19 @@ export class HoleScene {
       if (speed < PHYSICS.REST_VELOCITY || remote.stuckFrames > PHYSICS.STUCK_FRAMES) {
         remote.inFlight = false;
         remote.stuckFrames = 0;
+        if (remote.ball.trail) remote.ball.trail.setActive(false);
       }
 
       // OOB — reset to tee
       if (remote.ball.position.length() > HOLE.OUT_OF_BOUNDS_DISTANCE) {
         remote.inFlight = false;
+        if (remote.ball.trail) remote.ball.trail.setActive(false);
         const teePos = this._holeData.tee.clone().add(new Vector3(0, BALL.RADIUS + 0.2, 0));
         remote.ball.setPosition(teePos);
         remote.ball.setVelocity(new Vector3());
       }
 
-      // Check hole
+      // Check hole — trail disposed inside removeFromScene
       if (this.cup && remote.ball.position.distanceTo(this.cup.position) < HOLE.CUP_RADIUS) {
         this._playersHoled.add(playerId);
         remote.ball.removeFromScene(this.scene);
@@ -1016,7 +1021,7 @@ export class HoleScene {
     if (this._aimArrow) { this.scene.remove(this._aimArrow); this._aimArrow = null; }
     if (this.starField)   this.starField.dispose();
     if (this.nebulaField) this.nebulaField.dispose();
-    this.ballTrail.dispose();
+    // ball trail disposed inside ball.removeFromScene()
     this.launchBurst.dispose();
     this.launchWarp.dispose();
     this.scene.clear();

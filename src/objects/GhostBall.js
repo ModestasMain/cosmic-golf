@@ -5,13 +5,16 @@
 
 import { Mesh, SphereGeometry, MeshStandardMaterial, Color, Group, PointLight, Vector3 } from 'three';
 import { BALL } from '../core/Constants.js';
+import { BallTrail } from '../effects/BallTrail.js';
 
 export class GhostBall {
   constructor(color = 0xff6464, name = '') {
-    this.position = new Vector3();
-    this.velocity = new Vector3();
-    this.group    = new Group();
-    this._name    = name;
+    this.position  = new Vector3();
+    this.velocity  = new Vector3();
+    this.group     = new Group();
+    this._name     = name;
+    this._color    = color;
+    this.trail     = null;
 
     const col = new Color(color);
     const geo = new SphereGeometry(BALL.RADIUS * 1.05, 20, 14);
@@ -47,8 +50,21 @@ export class GhostBall {
     }
   }
 
-  addToScene(scene)    { scene.add(this.group); }
-  removeFromScene(scene) { scene.remove(this.group); this.dispose(); }
+  update(dt) {
+    this.updateSpin(dt);
+    if (this.trail) this.trail.update(this.position, dt);
+  }
+
+  addToScene(scene) {
+    scene.add(this.group);
+    this.trail = new BallTrail(scene, this._color);
+  }
+
+  removeFromScene(scene) {
+    if (this.trail) { this.trail.dispose(); this.trail = null; }
+    scene.remove(this.group);
+    this.dispose();
+  }
 
   dispose() {
     this.mesh.geometry.dispose();

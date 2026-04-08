@@ -7,7 +7,7 @@ import {
   MeshBasicMaterial, Group, Color,
   AdditiveBlending, BackSide, PointLight,
   BufferGeometry, Float32BufferAttribute, Points, PointsMaterial,
-  CylinderGeometry, Vector3,
+  Vector3,
 } from 'three';
 import { HOLE } from '../core/Constants.js';
 
@@ -29,7 +29,6 @@ export class HoleCup {
     this._buildDisk();
     this._buildVortex();
     this._buildGravRings();
-    this._buildJets();
     this._buildLight();
   }
 
@@ -235,14 +234,6 @@ export class HoleCup {
     // Lens glow breathe
     this.lensGlow.material.opacity = 0.14 + Math.sin(t * 0.9) * 0.08;
 
-    // Jet flicker
-    const jf = 0.15 + Math.abs(Math.sin(t * 3.7)) * 0.1;
-    this.jetNorth.material.opacity = jf;
-    this.jetSouth.material.opacity = jf;
-    const jcf = 0.4 + Math.sin(t * 5.1) * 0.15;
-    this.jetCoreN.material.opacity = jcf;
-    this.jetCoreS.material.opacity = jcf;
-
     // Point light flicker
     this.light.intensity     = 1.8 + Math.sin(t * 2.5) * 0.4;
     this.lightBlue.intensity = 0.5 + Math.abs(Math.sin(t * 3.7)) * 0.4;
@@ -295,10 +286,7 @@ export class HoleCup {
   removeFromScene(scene) { scene.remove(this.group); this.dispose(); }
 
   dispose() {
-    [
-      this.horizon, this.lensGlow,
-      this.jetNorth, this.jetSouth, this.jetCoreN, this.jetCoreS,
-    ].forEach(m => { m.geometry.dispose(); m.material.dispose(); });
+    [this.horizon, this.lensGlow].forEach(m => { m.geometry.dispose(); m.material.dispose(); });
 
     for (const r of this._diskRings) { r.mesh.geometry.dispose(); r.mesh.material.dispose(); }
     for (const r of this._gravRings) { r.mesh.geometry.dispose(); r.mesh.material.dispose(); }

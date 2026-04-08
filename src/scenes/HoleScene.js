@@ -550,7 +550,7 @@ export class HoleScene {
     // Update effects (always, even during freeze)
     this.launchBurst.update(dt);
     this.screenShake.update(dt);
-    this.launchWarp.update(dt);
+    this.launchWarp.update(dt, this.ball?.position);
     if (this.ball) this.ball.update(dt);
 
     // Update tween animations (palette background fade etc.)

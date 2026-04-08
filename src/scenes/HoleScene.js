@@ -73,6 +73,7 @@ export class HoleScene {
     // playerId -> { ball: GhostBall, inFlight, holed, stuckFrames, launchGrace }
     this._remoteBalls = new Map();
     this._syncFrameCounter = 0; // broadcast local ball state every N frames
+    this._lastValidPos = new Vector3(); // last in-bounds position for OOB reset
 
     this._holeCompleteEmitted = false; // idempotency guard for _advanceHole
     this._playersHoled       = new Set();
@@ -502,6 +503,7 @@ export class HoleScene {
 
     if (!velocity) return;
 
+    this._lastValidPos.copy(this.ball.position); // snapshot pre-shot position for OOB reset
     this.ball.setVelocity(velocity);
     this._state = 'BALL_IN_FLIGHT';
     gameState.ballInFlight = true;
@@ -704,6 +706,9 @@ export class HoleScene {
         this._onBallHoled();
         return;
       }
+
+      // Track last valid in-bounds position (updated before OOB check)
+      if (nearSurface) this._lastValidPos.copy(this.ball.position);
 
       // Check out of bounds
       if (this.ball.position.length() > HOLE.OUT_OF_BOUNDS_DISTANCE) {
@@ -910,13 +915,15 @@ export class HoleScene {
 
   _onOutOfBounds() {
     if (this.ball?.trail) this.ball.trail.setActive(false);
-    // Apply penalty strokes and reset ball to tee
     gameState.currentStrokes += HOLE.OUT_OF_BOUNDS_PENALTY;
     eventBus.emit(Events.BALL_OUT_OF_BOUNDS);
 
-    if (this._holeData) {
-      const teePos = this._holeData.tee.clone().add(new Vector3(0, BALL.RADIUS + 0.2, 0));
-      this.ball.setPosition(teePos);
+    // Reset to last known in-bounds position (golf rules — not back to tee)
+    const resetPos = this._lastValidPos.lengthSq() > 0.01
+      ? this._lastValidPos.clone().add(new Vector3(0, BALL.RADIUS + 0.5, 0))
+      : this._holeData?.tee.clone().add(new Vector3(0, BALL.RADIUS + 0.2, 0));
+    if (resetPos) {
+      this.ball.setPosition(resetPos);
       this.ball.setVelocity(new Vector3());
     }
 
@@ -950,6 +957,7 @@ export class HoleScene {
     this._remoteBalls.set(playerId, {
       ball, inFlight: false, holed: false, stuckFrames: 0, launchGrace: 0,
       _posCorrection: new Vector3(), _corrFrames: 0,
+      _lastValidPos: teePos.clone(),
     });
   }
 
@@ -1014,18 +1022,21 @@ export class HoleScene {
       if (nearSurface && speed < 12) remote.stuckFrames++;
       else remote.stuckFrames = 0;
 
+      // Track last valid in-bounds position for OOB reset
+      if (nearSurface) remote._lastValidPos.copy(remote.ball.position);
+
       if (speed < PHYSICS.REST_VELOCITY || remote.stuckFrames > PHYSICS.STUCK_FRAMES) {
         remote.inFlight = false;
         remote.stuckFrames = 0;
         if (remote.ball.trail) remote.ball.trail.setActive(false);
       }
 
-      // OOB — reset to tee
+      // OOB — reset to last valid position (not tee)
       if (remote.ball.position.length() > HOLE.OUT_OF_BOUNDS_DISTANCE) {
         remote.inFlight = false;
         if (remote.ball.trail) remote.ball.trail.setActive(false);
-        const teePos = this._holeData.tee.clone().add(new Vector3(0, BALL.RADIUS + 0.2, 0));
-        remote.ball.setPosition(teePos);
+        const resetPos = remote._lastValidPos.clone().add(new Vector3(0, BALL.RADIUS + 0.5, 0));
+        remote.ball.setPosition(resetPos);
         remote.ball.setVelocity(new Vector3());
       }
 

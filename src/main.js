@@ -121,6 +121,10 @@ class Game {
       if (!gameState.isSoloMode) this.mp.broadcastBallState(pos, vel, holeIndex);
     });
 
+    eventBus.on(Events.BALL_STOPPED, ({ pos, holeIndex }) => {
+      if (!gameState.isSoloMode) this.mp.broadcastBallStopped(pos, holeIndex);
+    });
+
     eventBus.on(Events.SHOT_TAKEN, (data) => {
       if (!gameState.isSoloMode && this.holeScene.ball) {
         const vel = this.holeScene._computeShotVelocity(data.dragScreenVec, data.dragDist);
@@ -161,8 +165,10 @@ class Game {
 
   _setupEventListeners() {
     eventBus.on('game:restart', () => {
+      const savedColor = this.mp.localColor ?? gameState.players[0]?.color ?? 0xff6600;
+      const savedName  = gameState.players[0]?.name ?? 'PLAYER';
       gameState.reset();
-      gameState.addPlayer('solo', 'PLAYER', 0xffffff);
+      gameState.addPlayer('solo', savedName, savedColor);
       this.holeScene.loadHole(0);
     });
 
@@ -227,10 +233,11 @@ class Game {
 
     this.nameEntry.show().then(({ name }) => {
       gameState.players[0].name = name;
-      const color = gameState.players[0].color;
+      this.mp.joinPublic(name); // no color — _colorFromId assigns unique color
+      const color = this.mp.localColor;
+      gameState.players[0].color = color;
 
       this.playerLabels.addPlayer(gameState.players[0].id, name, color);
-      this.mp.joinPublic(name, color);
       this.holeScene.loadHole(0);
       setTimeout(() => this.tutorial.show(), 600);
       setTimeout(() => this.mp.updateIdentity(name, color), 2000);

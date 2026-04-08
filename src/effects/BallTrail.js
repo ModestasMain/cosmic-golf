@@ -62,34 +62,17 @@ function hash(i, axis, t) {
   return (v - Math.floor(v) - 0.5) * 2; // −1..+1
 }
 
-// Fire color at a given frac (1=head, 0=tail), tinted by player color
-// white-hot → yellow → orange → red → black
+// Fire color driven by player color:
+// white-hot tip → player color through middle → dark tail
+// Each player gets a clearly distinct comet (blue=ice comet, red=fire, green=plasma, etc.)
 function fireColor(frac, pr, pg, pb) {
-  // White core at very tip
-  if (frac > 0.92) {
-    const t = (frac - 0.92) / 0.08;
-    return [
-      1,
-      1 - (1 - Math.max(pg, 0.9)) * t,
-      1 - (1 - Math.max(pb, 0.7)) * t,
-    ];
-  }
-  // Yellow → orange band
-  if (frac > 0.55) {
-    const t = (frac - 0.55) / 0.37;
-    return [
-      Math.min(1, 0.9 + pr * 0.1),
-      Math.min(1, (0.25 + t * 0.65) * Math.max(pg, 0.4)),
-      pb * (1 - t) * 0.15,
-    ];
-  }
-  // Orange → deep red
-  const t   = Math.pow(frac / 0.55, 0.7);
-  const dim = Math.pow(frac / 0.55, 1.4);
+  const fade      = Math.pow(frac, 0.65);
+  const whiteness = Math.pow(frac, 2.5) * 0.95; // flash of white at the very tip
+
   return [
-    Math.min(1, pr * 0.9 + 0.6) * dim,
-    Math.min(1, pg * 0.3 + 0.05) * dim,
-    pb * 0.05 * dim,
+    Math.min(1, pr * fade + whiteness),
+    Math.min(1, pg * fade + whiteness * 0.92),
+    Math.min(1, pb * fade + whiteness * 0.85),
   ];
 }
 

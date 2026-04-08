@@ -21,7 +21,12 @@ export class MultiplayerManager {
 
   joinPublic(playerName = 'PLAYER', playerColor) {
     this.playerId = 'pub_' + Date.now();
-    const color = playerColor ?? this._colorFromId(this.playerId);
+    // Always derive a unique color from ID; only override with explicit portal color
+    this.localColor = this._colorFromId(this.playerId);
+    const color = (playerColor != null && playerColor !== 0xffffff)
+      ? playerColor
+      : this.localColor;
+    this.localColor = color;
     this._connectPublicSlot(playerName, color, 1);
   }
 
@@ -140,7 +145,14 @@ export class MultiplayerManager {
             pos: msg.pos,
             vel: msg.vel,
             holeIndex: msg.holeIndex,
+            ts: msg.ts,
           });
+        }
+        break;
+
+      case 'ball_stopped':
+        if (msg.playerId !== this.playerId) {
+          eventBus.emit(Events.MP_BALL_STOPPED, { playerId: msg.playerId, pos: msg.pos, holeIndex: msg.holeIndex });
         }
         break;
 
@@ -189,8 +201,19 @@ export class MultiplayerManager {
       type: 'ball_state',
       playerId: this.playerId,
       holeIndex,
+      ts: Date.now(),
       pos: { x: pos.x, y: pos.y, z: pos.z },
       vel: { x: vel.x, y: vel.y, z: vel.z },
+    });
+  }
+
+  broadcastBallStopped(pos, holeIndex) {
+    if (!this._isConnected || this._isSolo) return;
+    this._send({
+      type: 'ball_stopped',
+      playerId: this.playerId,
+      holeIndex,
+      pos: { x: pos.x, y: pos.y, z: pos.z },
     });
   }
 

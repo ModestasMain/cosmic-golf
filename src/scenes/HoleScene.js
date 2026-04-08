@@ -228,12 +228,10 @@ export class HoleScene {
       this._loadNextHole();
     });
 
-    // Remote ball position correction — smooth-correct locally simulated ghost balls
-    eventBus.on(Events.MP_BALL_STATE, ({ playerId, pos, vel, holeIndex }) => {
-      // Ignore updates from players on a different hole
+    // Remote ball position correction — dead-reckoning with smooth blend
+    eventBus.on(Events.MP_BALL_STATE, ({ playerId, pos, vel, holeIndex, ts }) => {
       if (holeIndex !== undefined && holeIndex !== gameState.currentHole) return;
       let remote = this._remoteBalls.get(playerId);
-      // Defensive: spawn ghost on-the-fly if join message was missed or came late
       if (!remote && this._holeData) {
         const player = gameState.players.find(p => p.id === playerId);
         if (!player) return;
@@ -241,23 +239,51 @@ export class HoleScene {
         remote = this._remoteBalls.get(playerId);
       }
       if (!remote || remote.holed) return;
-      // Mark in-flight so physics simulation runs for this ghost
-      if (!remote.inFlight) remote.inFlight = true;
 
-      const receivedPos = new Vector3(pos.x, pos.y, pos.z);
-      const receivedVel = new Vector3(vel.x, vel.y, vel.z);
-      const error = remote.ball.position.distanceTo(receivedPos);
-
-      if (error > 20) {
-        // Large drift — snap immediately
-        remote.ball.setPosition(receivedPos);
-        remote.ball.setVelocity(receivedVel);
-      } else if (error > 1.5) {
-        // Small drift — lerp 50% toward authoritative position, blend velocity
-        remote.ball.position.lerp(receivedPos, 0.5);
-        remote.ball.velocity.lerp(receivedVel, 0.5);
+      // Latency-compensated authoritative position: extrapolate forward by one-way RTT
+      const authPos = new Vector3(pos.x, pos.y, pos.z);
+      const authVel = new Vector3(vel.x, vel.y, vel.z);
+      if (ts) {
+        const latencyS = Math.min((Date.now() - ts) / 1000, 0.15); // cap at 150 ms
+        authPos.addScaledVector(authVel, latencyS);
       }
-      // < 1.5 units: within tolerance, local sim is fine
+
+      // Only enable physics simulation if ball is actually in motion.
+      // At-rest heartbeat syncs (vel ≈ 0) must NOT trigger gravity simulation
+      // — that's what causes the "pulled then snapping back" ghost artifact.
+      if (!remote.inFlight && authVel.length() > PHYSICS.REST_VELOCITY) {
+        remote.inFlight = true;
+        if (remote.ball.trail) remote.ball.trail.setActive(true);
+      }
+
+      const error = authPos.distanceTo(remote.ball.position);
+      if (error > 8) {
+        // Too far off — hard snap, reset correction
+        remote.ball.setPosition(authPos);
+        remote.ball.setVelocity(authVel);
+        remote._posCorrection.set(0, 0, 0);
+        remote._corrFrames = 0;
+      } else {
+        // Smooth correction: blend remaining error over next 6 frames
+        remote._posCorrection.subVectors(authPos, remote.ball.position);
+        remote._corrFrames = 6;
+        // Partial velocity snap — velocity diverges faster than position
+        remote.ball.velocity.lerp(authVel, 0.5);
+      }
+    });
+
+    // Remote ball stopped — immediately settle ghost, no waiting for physics
+    eventBus.on(Events.MP_BALL_STOPPED, ({ playerId, pos, holeIndex }) => {
+      if (holeIndex !== undefined && holeIndex !== gameState.currentHole) return;
+      const remote = this._remoteBalls.get(playerId);
+      if (!remote || remote.holed) return;
+      remote.inFlight = false;
+      remote.stuckFrames = 0;
+      remote._corrFrames = 0;
+      remote._posCorrection.set(0, 0, 0);
+      if (pos) remote.ball.setPosition(new Vector3(pos.x, pos.y, pos.z));
+      remote.ball.setVelocity(new Vector3());
+      if (remote.ball.trail) remote.ball.trail.setActive(false);
     });
 
     // Screen shake triggers
@@ -570,7 +596,7 @@ export class HoleScene {
     // Broadcast position even at rest so late-joining peers can place the ghost correctly
     if (this.ball && this._state !== 'BALL_IN_FLIGHT') {
       this._syncFrameCounter++;
-      if (this._syncFrameCounter >= 60) { // ~1s at 60fps
+      if (this._syncFrameCounter >= 20) { // ~0.33s at 60fps
         this._syncFrameCounter = 0;
         eventBus.emit(Events.BALL_POS_SYNC, {
           pos: this.ball.position,
@@ -603,9 +629,9 @@ export class HoleScene {
       // Update input system with current ball position
       this.inputSystem.setBallPosition(this.ball.position);
 
-      // Broadcast ball state to remote players every 6 frames for sync correction
+      // Broadcast ball state to remote players every 3 frames (~20 Hz) for sync correction
       this._syncFrameCounter++;
-      if (this._syncFrameCounter >= 6) {
+      if (this._syncFrameCounter >= 3) {
         this._syncFrameCounter = 0;
         eventBus.emit(Events.BALL_POS_SYNC, {
           pos: this.ball.position,
@@ -700,6 +726,8 @@ export class HoleScene {
         if (this.ball?.trail) this.ball.trail.setActive(false);
         gameState.ballInFlight = false;
         gameState.aimState = 'IDLE';
+        // Broadcast stop immediately so ghosts settle on peers without waiting for next sync tick
+        eventBus.emit(Events.BALL_STOPPED, { pos: this.ball.position.clone(), holeIndex: gameState.currentHole });
 
         // Reset facing direction toward cup so trajectory always has a valid
         // default — avoids the "pointing into planet" problem after landing
@@ -900,13 +928,9 @@ export class HoleScene {
 
   resetBallToTee() {
     if (!this._holeData || !this.ball) return;
-    if (this._state === 'BALL_MOVING') {
-      // Stop the ball first
-      this.ball.setVelocity(new Vector3());
-      if (this.ball?.trail) this.ball.trail.setActive(false);
-    }
-    const teePos = this._holeData.tee.clone().add(new Vector3(0, BALL.RADIUS + 0.2, 0));
-    this.ball.setPosition(teePos);
+    // Always kill trail on reset regardless of state
+    if (this.ball.trail) this.ball.trail.setActive(false);
+    this.ball.setPosition(this._holeData.tee.clone().add(new Vector3(0, BALL.RADIUS + 0.2, 0)));
     this.ball.setVelocity(new Vector3());
     this._state = 'IDLE';
     gameState.ballInFlight = false;
@@ -925,6 +949,7 @@ export class HoleScene {
     ball.addToScene(this.scene);
     this._remoteBalls.set(playerId, {
       ball, inFlight: false, holed: false, stuckFrames: 0, launchGrace: 0,
+      _posCorrection: new Vector3(), _corrFrames: 0,
     });
   }
 
@@ -958,6 +983,14 @@ export class HoleScene {
       }
 
       stepBall(remote.ball, this._holeData.planets, dt, gravScale);
+
+      // Apply smooth position correction from last authoritative update
+      if (remote._corrFrames > 0) {
+        const step = remote._posCorrection.clone().divideScalar(remote._corrFrames);
+        remote.ball.position.add(step);
+        remote._posCorrection.sub(step);
+        remote._corrFrames--;
+      }
 
       // Black hole pull for remote balls (same logic as local ball)
       if (this.cup) {

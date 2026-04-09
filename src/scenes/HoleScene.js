@@ -21,11 +21,12 @@ import { TeeMarker } from '../objects/TeeMarker.js';
 import { StarField } from '../objects/StarField.js';
 import { NebulaField } from '../objects/NebulaField.js';
 import { PortalSystem } from '../portal/PortalSystem.js';
-// import { BallTrail } from '../effects/BallTrail.js';
+// import { BallTrail } from '../effects/BalxTrail.js';
 import { ScreenShake } from '../effects/ScreenShake.js';
 import { LaunchBurst } from '../effects/LaunchBurst.js';
 import { GhostBall } from '../objects/GhostBall.js';
 import { LaunchWarp } from '../effects/LaunchWarp.js';
+import { Wormhole, WORMHOLE_CAPTURE_RADIUS } from '../objects/Wormhole.js';
 
 export class HoleScene {
   constructor(renderer, inputSystem) {
@@ -49,6 +50,7 @@ export class HoleScene {
     this.cup = null;
     this.tee = null;
     this.starField = null;
+    this.wormholes = [];
 
     // State
     this._state = 'IDLE'; // IDLE | AIMING | BALL_IN_FLIGHT | HOLE_COMPLETE
@@ -360,6 +362,13 @@ export class HoleScene {
     this.tee = new TeeMarker(tee, palette.cup);
     this.tee.addToScene(this.scene);
 
+    // Place wormholes — pass tee so the portal faces the player
+    for (const wPos of (this._holeData.wormholes || [])) {
+      const wormhole = new Wormhole(wPos, tee);
+      wormhole.addToScene(this.scene);
+      this.wormholes.push(wormhole);
+    }
+
     // Camera: start pointing at tee
     this._cameraTarget.copy(tee);
     this._cameraPos.set(
@@ -435,6 +444,10 @@ export class HoleScene {
       this.tee.removeFromScene(this.scene);
       this.tee = null;
     }
+
+    // Remove wormholes
+    for (const w of this.wormholes) w.removeFromScene(this.scene);
+    this.wormholes = [];
 
     this.trajectoryPreview.hide();
 
@@ -576,6 +589,9 @@ export class HoleScene {
     // Update cup pulsing
     if (this.cup) this.cup.update(dt);
 
+    // Update wormholes
+    for (const w of this.wormholes) w.update(dt);
+
     // Update portal
     this.portalSystem.update(dt);
 
@@ -701,6 +717,19 @@ export class HoleScene {
       // Check portal entry
       this.portalSystem.checkPortalEntry(this.ball.position);
 
+      // Wormhole: debris deflection (always), suction + entry (when close)
+      for (const worm of this.wormholes) {
+        worm.applyDebrisDeflection(this.ball);
+        const distToWorm = this.ball.position.distanceTo(worm.position);
+        if (distToWorm < WORMHOLE_CAPTURE_RADIUS) {
+          worm.applySuction(this.ball, dt);
+          if (worm.checkBallEntered(this.ball.position)) {
+            this._onWormholeEnter(worm);
+            return;
+          }
+        }
+      }
+
       // Check cup
       if (this.cup && this.cup.checkBallHoled(this.ball)) {
         this._onBallHoled();
@@ -710,8 +739,37 @@ export class HoleScene {
       // Track last valid in-bounds position (updated before OOB check)
       if (nearSurface) this._lastValidPos.copy(this.ball.position);
 
-      // Check out of bounds
+      // Hard outer limit (shouldn't normally trigger with the void checks below)
       if (this.ball.position.length() > HOLE.OUT_OF_BOUNDS_DISTANCE) {
+        this._onOutOfBounds();
+        return;
+      }
+
+      // Void detection — nearest "safe anchor" distance.
+      // Anchors are: every planet surface, the tee, and the cup.
+      // This bridges the tee→cluster and cup→cluster corridors so the ball can
+      // legally travel between them without immediately triggering void OOB.
+      const bpos = this.ball.position;
+      let nearestSafeDist = this._holeData.planets.reduce((min, p) =>
+        Math.min(min, bpos.distanceTo(p.position) - p.radius), Infinity);
+      // Tee, cup, and wormholes act as anchor points (no radius, just position)
+      nearestSafeDist = Math.min(
+        nearestSafeDist,
+        bpos.distanceTo(this._holeData.tee),
+        bpos.distanceTo(this._holeData.cup),
+      );
+      for (const w of this.wormholes) {
+        nearestSafeDist = Math.min(nearestSafeDist, bpos.distanceTo(w.position));
+      }
+
+      // Deep void: ball escaped every safe anchor → OOB
+      if (nearestSafeDist > HOLE.VOID_OOB_SURFACE_DIST) {
+        this._onOutOfBounds();
+        return;
+      }
+
+      // Slow drift: away from all anchors and barely moving → OOB
+      if (nearestSafeDist > 80 && ballSpeed < HOLE.VOID_DRIFT_SPEED) {
         this._onOutOfBounds();
         return;
       }
@@ -719,12 +777,6 @@ export class HoleScene {
       // Settle: ball at rest ON a planet, OR stuck near a planet surface too long
       const atRest = ballSpeed < PHYSICS.REST_VELOCITY && nearSurface;
       const stuck = this._stuckFrames > PHYSICS.STUCK_FRAMES;
-
-      // Ball too slow to reach anything but not near a planet → void trap → OOB
-      if (ballSpeed < PHYSICS.REST_VELOCITY && !nearSurface) {
-        this._onOutOfBounds();
-        return;
-      }
 
       if (atRest || stuck) {
         this._stuckFrames = 0;
@@ -911,6 +963,39 @@ export class HoleScene {
       strokes,
       players: gameState.players,
     });
+  }
+
+  _onWormholeEnter(wormhole) {
+    if (!this.ball || !this.cup) return;
+
+    const cupPos = this.cup.position;
+
+    if (Math.random() < 0.25) {
+      // ── 25%: Success — fly straight into the black hole ──────────
+      // Teleport to 38 units along the wormhole→cup line — inside the
+      // black hole's 45-unit gravity pull radius so it gets assisted in.
+      const towardCup = new Vector3().subVectors(cupPos, wormhole.position).normalize();
+      this.ball.setPosition(cupPos.clone().addScaledVector(towardCup, -38));
+      this.ball.setVelocity(towardCup.multiplyScalar(55));
+    } else {
+      // ── 80%: Miss — wormhole deflects the ball ───────────────────
+      // Ball is spat back out sideways from the wormhole — no
+      // teleport near the cup. Wormhole "rejected" the entry.
+      const wormPos = wormhole.position;
+      const towardCup = new Vector3().subVectors(cupPos, wormPos).normalize();
+      // Perpendicular kick in XZ plane so ball stays in the playfield
+      const perpKick = new Vector3(-towardCup.z, 0, towardCup.x);
+      perpKick.multiplyScalar(Math.random() < 0.5 ? 1 : -1);
+      // Mix perpendicular + slight backwards so it's not going toward cup
+      const deflect = perpKick.clone()
+        .addScaledVector(towardCup, -0.4)
+        .normalize();
+      this.ball.setPosition(wormPos.clone().addScaledVector(deflect, 6));
+      this.ball.setVelocity(deflect.multiplyScalar(160));
+    }
+
+    this._launchGraceFrames = 0;
+    eventBus.emit(Events.WORMHOLE_ENTER, { position: wormhole.position.clone() });
   }
 
   _onOutOfBounds() {

@@ -30,12 +30,15 @@ export const HOLE = {
   PLANETS_MIN: 5,
   PLANETS_MAX: 8,
   TEE_RADIUS: 1.5,
-  CUP_RADIUS: 8,
-  CUP_SPEED_THRESHOLD: 80,
-  OUT_OF_BOUNDS_DISTANCE: 450,
+  CUP_RADIUS: 10,              // slightly bigger — hole is harder to reach so easier to sink
+  CUP_SPEED_THRESHOLD: 90,
+  OUT_OF_BOUNDS_DISTANCE: 1400, // hard outer limit (origin distance)
   OUT_OF_BOUNDS_PENALTY: 2,
-  BLACK_HOLE_PULL_RADIUS: 45,  // units — beyond this, no pull at all
-  BLACK_HOLE_GRAVITY: 60,      // much weaker than planet gravity (420)
+  // Void detection — ball escaping the planet cluster
+  VOID_OOB_SURFACE_DIST: 310,  // units from nearest planet *surface* — beyond this = deep space = OOB
+  VOID_DRIFT_SPEED: 14,        // if ball is >80u from any surface AND slower than this → OOB
+  BLACK_HOLE_PULL_RADIUS: 45,
+  BLACK_HOLE_GRAVITY: 60,
 };
 
 export const PLANET = {
@@ -56,8 +59,8 @@ export const CAMERA = {
 };
 
 export const STARFIELD = {
-  COUNT: 3500,
-  RADIUS: 1200,
+  COUNT: 4500,
+  RADIUS: 2800,
 };
 
 export const MULTIPLAYER = {
@@ -134,6 +137,6 @@ export const COLOR_PALETTES = [
 ];
 
 export const WORLD = {
-  CLUSTER_SPREAD: 200,  // much bigger — planets scattered over a wide area
-  CLUSTER_OFFSET: 80,   // push cluster further from origin
+  CLUSTER_SPREAD: 420,  // 2× bigger — galaxy scale, full power shot won't reach the cup
+  CLUSTER_OFFSET: 110,  // push cluster further from origin
 };

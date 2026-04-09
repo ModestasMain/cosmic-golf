@@ -116,7 +116,7 @@ export function simulateTrajectory(startPos, startVel, planets, steps, dt) {
 
     stepBall(ball, planets, dt, gravityScale);
 
-    if (ball.position.length() > 400) break;
+    if (ball.position.length() > 1300) break;
   }
 
   return points;

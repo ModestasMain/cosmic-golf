@@ -27,7 +27,6 @@ export class InputSystem {
     this.enabled  = true;
 
     this._phase       = 'IDLE'; // 'IDLE' | 'AIMING'
-    this._powerLocked = false;
     this._power       = 0;
 
     // Direction drag state
@@ -38,7 +37,8 @@ export class InputSystem {
 
     // Power drag state
     this._pwrPtr      = null;   // active pointer ID for power bar
-    this._pwrStartY   = 0;
+    this._pwrStartY   = 0;      // offset start (includes current power) for smooth continuity
+    this._pwrDownY    = 0;      // raw press Y — for tap vs drag detection
     this._pwrMaxMove  = 0;
 
     // Last confirmed direction (sent with SHOT_TAKEN)
@@ -336,12 +336,17 @@ export class InputSystem {
       this._levelLine.setAttribute('opacity', '0');
     }
 
-    // Pct label fades in above 50%
+    // Pct label fades in above 50%; also drive the small pyramid label text
     if (p > 0.5) {
       this._pyPctLabel.setAttribute('fill', `rgba(200,230,255,${(p - 0.5) * 1.2})`);
       this._pyPctLabel.textContent = `${Math.round(p * 100)}%`;
     } else {
       this._pyPctLabel.setAttribute('fill', 'rgba(200,230,255,0)');
+    }
+
+    // Update pyramid sub-label to reflect current state
+    if (this._label) {
+      this._label.textContent = p > 0.02 ? 'TAP PYRAMID TO SHOOT' : 'DRAG PYRAMID FOR POWER';
     }
 
     // Particles at high power (throttled)
@@ -401,40 +406,31 @@ export class InputSystem {
     if (gameState.ballInFlight) return;
     e.preventDefault();
 
-    // Enter AIMING on first press anywhere — fall through to start direction tracking
+    // Enter AIMING on first press anywhere
     if (this._phase === 'IDLE') {
-      this._phase       = 'AIMING';
-      this._power       = 0;
-      this._powerLocked = false;
+      this._phase = 'AIMING';
       this._setBarPower(0);
-      this._showLabel('SLIDE BAR TO SET POWER');
+      this._showLabel('DRAG PYRAMID FOR POWER');
       eventBus.emit(Events.AIM_START);
-      // no return — same gesture immediately starts direction drag below
     }
 
     if (this._phase !== 'AIMING') return;
 
-    // Bar touch → power drag
+    // Pyramid touch → power drag (or tap-to-shoot if released with minimal movement)
     if (this._isOverBar(e.clientX, e.clientY)) {
       this._pwrPtr     = e.pointerId;
-      // Offset start so dragging from current handle position feels continuous
-      this._pwrStartY  = e.clientY + this._power * AIM.MAX_DRAG_DISTANCE;
+      this._pwrDownY   = e.clientY;  // raw Y — for tap detection
+      this._pwrStartY  = e.clientY + this._power * AIM.MAX_DRAG_DISTANCE; // offset for continuity
       this._pwrMaxMove = 0;
       return;
     }
 
-    // Screen press with power locked → FIRE
-    if (this._powerLocked && this._power > 0.02) {
-      this._fire();
-      return;
-    }
-
-    // Otherwise → start tracking a potential direction drag
+    // Playable area touch → direction drag (tap does nothing; only drag moves aim)
     if (this._dirPtr === null) {
-      this._dirPtr     = e.pointerId;
+      this._dirPtr    = e.pointerId;
       this._dirStart.set(e.clientX, e.clientY);
       this._dirCurrent.set(e.clientX, e.clientY);
-      this._dirMoved   = false;
+      this._dirMoved  = false;
     }
   }
 
@@ -445,31 +441,24 @@ export class InputSystem {
     // Power drag
     if (e.pointerId === this._pwrPtr) {
       const dy = this._pwrStartY - e.clientY;
-      this._power       = Math.max(0, Math.min(1, dy / AIM.MAX_DRAG_DISTANCE));
-      this._powerLocked = false; // unlock while finger is down
+      this._power      = Math.max(0, Math.min(1, dy / AIM.MAX_DRAG_DISTANCE));
       this._setBarPower(this._power);
-      this._pwrMaxMove  = Math.max(this._pwrMaxMove, Math.abs(dy - this._power * AIM.MAX_DRAG_DISTANCE + (this._pwrStartY - e.clientY - dy)));
-
-      // Track movement for tap vs drag detection
-      const rawDy = Math.abs(e.clientY - (this._pwrStartY - this._power * AIM.MAX_DRAG_DISTANCE));
-      this._pwrMaxMove = Math.max(this._pwrMaxMove, Math.abs(this._pwrStartY - e.clientY));
+      this._pwrMaxMove = Math.max(this._pwrMaxMove, Math.abs(e.clientY - this._pwrDownY));
       return;
     }
 
-    // Direction drag — only activates after threshold
+    // Direction drag — only activates after 8px threshold
     if (e.pointerId === this._dirPtr) {
       this._dirCurrent.set(e.clientX, e.clientY);
       const moved = this._dirCurrent.distanceTo(this._dirStart);
 
-      if (moved < 8 && !this._dirMoved) return; // ignore tiny jitter
+      if (moved < 8 && !this._dirMoved) return;
 
       if (!this._dirMoved) {
-        // First real movement — reset base direction
         this._dirMoved = true;
         eventBus.emit(Events.AIM_DIR_LOCKED);
       }
 
-      // Direction is relative to where the drag started
       const drag = new Vector2().subVectors(this._dirCurrent, this._dirStart);
       const dist = Math.min(drag.length(), AIM.MAX_DRAG_DISTANCE);
       this._lastDragVec.copy(drag);
@@ -485,23 +474,23 @@ export class InputSystem {
   _onUp(e) {
     e.preventDefault();
 
-    // Power drag released
+    // Pyramid pointer released
     if (e.pointerId === this._pwrPtr) {
       this._pwrPtr = null;
-      if (this._power > 0.02) {
-        this._powerLocked = true;
-        this._showLabel('PRESS ANYWHERE TO SHOOT');
-        eventBus.emit(Events.AIM_POWER_LOCKED, { power: this._power });
-      } else {
-        this._powerLocked = false;
-        this._power       = 0;
-        this._setBarPower(0);
-        this._showLabel('SLIDE BAR TO SET POWER');
+      // Tap (minimal movement) on pyramid → fire if power and direction are set
+      if (this._pwrMaxMove < 10) {
+        if (this._power > 0.02 && this._lastDragDist > 0) {
+          this._fire();
+        } else if (this._power <= 0.02) {
+          // Nudge: no power yet
+          this._label.textContent = 'DRAG PYRAMID UP FOR POWER';
+        }
       }
+      // Large movement → power was dragged; just keep the value, stay in AIMING
       return;
     }
 
-    // Direction drag released — just stop tracking, no fire
+    // Direction drag released — stop tracking, stay in AIMING
     if (e.pointerId === this._dirPtr) {
       this._dirPtr   = null;
       this._dirMoved = false;
@@ -538,16 +527,15 @@ export class InputSystem {
   }
 
   _reset() {
-    this._phase       = 'IDLE';
-    this._power       = 0;
-    this._powerLocked = false;
-    this._dirPtr      = null;
-    this._pwrPtr      = null;
-    this._dirMoved    = false;
-    this._pwrMaxMove  = 0;
+    this._phase      = 'IDLE';
+    this._power      = 0;
+    this._dirPtr     = null;
+    this._pwrPtr     = null;
+    this._dirMoved   = false;
+    this._pwrMaxMove = 0;
     this._lastDragVec.set(0, 0);
-    this._lastDragDist        = 0;
-    this._wrap.style.display  = 'none';
+    this._lastDragDist       = 0;
+    this._wrap.style.display = 'none';
     this._setBarPower(0);
   }
 

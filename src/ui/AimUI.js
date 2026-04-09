@@ -174,11 +174,11 @@ export class AimUI {
 
   _setupListeners() {
     eventBus.on(Events.AIM_START, () => {
-      this._setHint('RELEASE TO LOCK DIRECTION', 'rgba(255,255,255,0.55)');
+      this._setHint('DRAG TO AIM  •  DRAG PYRAMID FOR POWER', 'rgba(255,255,255,0.55)');
     });
 
     eventBus.on(Events.AIM_DIR_LOCKED, () => {
-      this._setHint('DRAG UP FOR POWER  •  RELEASE TO SHOOT', 'rgba(100,220,255,0.7)');
+      this._setHint('DRAG PYRAMID UP/DOWN FOR POWER  •  TAP PYRAMID TO SHOOT', 'rgba(100,220,255,0.7)');
     });
 
     eventBus.on(Events.AIM_CANCEL, () => {

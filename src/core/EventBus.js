@@ -91,4 +91,7 @@ export const Events = {
 
   // Portal
   PORTAL_ENTER:       'portal:enter',
+
+  // Wormhole
+  WORMHOLE_ENTER:     'wormhole:enter', // { position: Vector3 }
 };

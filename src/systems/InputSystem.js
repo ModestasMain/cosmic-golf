@@ -66,18 +66,30 @@ export class InputSystem {
   // ── UI (all pointer-events:none — canvas handles everything) ─
 
   _buildUI() {
+    // SVG dimensions for the inverted pyramid
+    // Wide top (W=140), narrows to a point at bottom (H=210)
+    // Triangle vertices: top-left (4,4), top-right (136,4), bottom-tip (70,206)
+    this._pyW = 140; this._pyH = 210;
+    this._pyTipX = 70; this._pyTipY = 206;
+    this._pyTopY = 4;  this._pyTopHalfW = 66; // half of top width (4..136 = 132px)
+    this._lastSparkTime = 0;
+
     if (!document.getElementById('cosmic-power-style')) {
       const s = document.createElement('style');
       s.id = 'cosmic-power-style';
       s.textContent = `
-        @keyframes handle-spin {
-          from { transform:translate(-50%,50%) rotate(0deg); }
-          to   { transform:translate(-50%,50%) rotate(360deg); }
-        }
         @keyframes label-glow { 0%,100%{opacity:.7} 50%{opacity:1} }
-        @keyframes nebula-scroll {
-          0%   { background-position: 0 200px; }
-          100% { background-position: 0 0; }
+        @keyframes spark-float {
+          0%   { transform:translate(0,0) scale(1); opacity:1; }
+          100% { transform:translate(var(--sdx),var(--sdy)) scale(0); opacity:0; }
+        }
+        @keyframes py-pulse {
+          0%,100% { opacity:.55; }
+          50%     { opacity:1; }
+        }
+        @keyframes max-bloom {
+          0%,100% { filter:drop-shadow(0 0 8px var(--bloom)) drop-shadow(0 0 20px var(--bloom)); }
+          50%     { filter:drop-shadow(0 0 18px var(--bloom)) drop-shadow(0 0 40px var(--bloom)); }
         }
       `;
       document.head.appendChild(s);
@@ -100,81 +112,169 @@ export class InputSystem {
       'animation:label-glow 2s ease-in-out infinite', 'pointer-events:none',
     ].join(';');
 
-    this._barOuter = document.createElement('div');
-    this._barOuter.style.cssText = [
-      'width:22px', 'height:200px', 'border-radius:11px',
-      'position:relative', 'overflow:visible', 'pointer-events:none',
+    // ── Pyramid SVG container ────────────────────────────────
+    const pyramidWrap = document.createElement('div');
+    pyramidWrap.style.cssText = [
+      `width:${this._pyW}px`, `height:${this._pyH}px`,
+      'position:relative', 'pointer-events:none',
     ].join(';');
+    this._pyramidWrap = pyramidWrap;
 
-    const track = document.createElement('div');
-    track.style.cssText = [
-      'position:absolute', 'inset:0', 'border-radius:11px', 'overflow:hidden',
-      'background:#060814', 'border:1px solid rgba(100,160,255,.3)', 'pointer-events:none',
-    ].join(';');
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('width', String(this._pyW));
+    svg.setAttribute('height', String(this._pyH));
+    svg.setAttribute('viewBox', `0 0 ${this._pyW} ${this._pyH}`);
+    svg.style.cssText = 'position:absolute;top:0;left:0;overflow:visible;pointer-events:none;';
 
-    const nebula = document.createElement('div');
-    nebula.style.cssText = [
-      'position:absolute', 'inset:0', 'pointer-events:none',
-      'background-image:',
-      'radial-gradient(1.5px 1.5px at 5px 20px,rgba(180,140,255,.8) 0%,transparent 100%),',
-      'radial-gradient(1px 1px at 15px 45px,rgba(255,255,255,.6) 0%,transparent 100%),',
-      'radial-gradient(1px 1px at 3px 75px,rgba(140,200,255,.7) 0%,transparent 100%),',
-      'radial-gradient(1.5px 1.5px at 18px 100px,rgba(255,180,120,.6) 0%,transparent 100%),',
-      'radial-gradient(1px 1px at 8px 130px,rgba(255,255,255,.5) 0%,transparent 100%),',
-      'radial-gradient(1px 1px at 13px 160px,rgba(120,220,180,.7) 0%,transparent 100%),',
-      'radial-gradient(1.5px 1.5px at 2px 185px,rgba(200,140,255,.6) 0%,transparent 100%)',
-      ';background-size:22px 200px;animation:nebula-scroll 4s linear infinite',
-    ].join('');
+    const defs = document.createElementNS(NS, 'defs');
 
-    this._fill = document.createElement('div');
-    this._fill.style.cssText = [
-      'position:absolute', 'left:0', 'bottom:0', 'width:100%', 'height:0%',
-      'border-radius:11px',
-      'background:linear-gradient(to top,#ff3355 0%,#cc44ff 45%,#3388ff 80%,#44ffdd 100%)',
-      'background-size:100% 200px', 'background-position:0 bottom', 'pointer-events:none',
-    ].join(';');
+    // Clip path — inverted triangle shape
+    const clip = document.createElementNS(NS, 'clipPath');
+    clip.setAttribute('id', 'py-clip');
+    const clipPoly = document.createElementNS(NS, 'polygon');
+    clipPoly.setAttribute('points', `4,4 136,4 ${this._pyTipX},${this._pyTipY}`);
+    clip.appendChild(clipPoly);
+    defs.appendChild(clip);
 
-    const shimmer = document.createElement('div');
-    shimmer.style.cssText = [
-      'position:absolute', 'inset:0', 'border-radius:11px', 'pointer-events:none',
-      'background:linear-gradient(90deg,transparent 0%,rgba(255,255,255,.12) 50%,transparent 100%)',
-    ].join(';');
-    this._fill.appendChild(shimmer);
+    // Fill gradient (bottom = red/dim, top = cyan/bright)
+    const grad = document.createElementNS(NS, 'linearGradient');
+    grad.setAttribute('id', 'py-fill-grad');
+    grad.setAttribute('x1', '0'); grad.setAttribute('y1', '1');
+    grad.setAttribute('x2', '0'); grad.setAttribute('y2', '0');
+    [
+      { offset: '0%',   color: '#cc1133', opacity: '0.55' },
+      { offset: '28%',  color: '#ff4422', opacity: '0.75' },
+      { offset: '55%',  color: '#cc44ff', opacity: '0.9'  },
+      { offset: '78%',  color: '#3366ff', opacity: '1.0'  },
+      { offset: '100%', color: '#44ffdd', opacity: '1.0'  },
+    ].forEach(({ offset, color, opacity }) => {
+      const stop = document.createElementNS(NS, 'stop');
+      stop.setAttribute('offset', offset);
+      stop.setAttribute('stop-color', color);
+      stop.setAttribute('stop-opacity', opacity);
+      grad.appendChild(stop);
+    });
+    defs.appendChild(grad);
 
-    this._corona = document.createElement('div');
-    this._corona.style.cssText = [
-      'position:absolute', 'left:50%', 'bottom:0',
-      'transform:translate(-50%,50%)', 'width:40px', 'height:40px',
-      'border-radius:50%', 'pointer-events:none', 'will-change:bottom',
-    ].join(';');
+    // Shimmer overlay gradient (left edge highlight)
+    const shimGrad = document.createElementNS(NS, 'linearGradient');
+    shimGrad.setAttribute('id', 'py-shim-grad');
+    shimGrad.setAttribute('x1', '0'); shimGrad.setAttribute('y1', '0');
+    shimGrad.setAttribute('x2', '1'); shimGrad.setAttribute('y2', '0');
+    [
+      { offset: '0%',   color: '#ffffff', opacity: '0.13' },
+      { offset: '35%',  color: '#ffffff', opacity: '0.04' },
+      { offset: '100%', color: '#ffffff', opacity: '0.0'  },
+    ].forEach(({ offset, color, opacity }) => {
+      const stop = document.createElementNS(NS, 'stop');
+      stop.setAttribute('offset', offset);
+      stop.setAttribute('stop-color', color);
+      stop.setAttribute('stop-opacity', opacity);
+      shimGrad.appendChild(stop);
+    });
+    defs.appendChild(shimGrad);
 
-    this._handle = document.createElement('div');
-    this._handle.style.cssText = [
-      'position:absolute', 'left:50%', 'bottom:0',
-      'transform:translate(-50%,50%)', 'width:26px', 'height:26px',
-      'border-radius:50%',
-      'background:radial-gradient(circle at 36% 36%,#d0eeff 0%,#5588ff 55%,#1133aa 100%)',
-      'border:1.5px solid rgba(160,200,255,.9)',
-      'box-shadow:0 0 10px rgba(80,140,255,.9),0 0 22px rgba(60,100,255,.4)',
-      'animation:handle-spin 3s linear infinite', 'will-change:bottom', 'pointer-events:none',
-    ].join(';');
+    svg.appendChild(defs);
 
-    const ticks = document.createElement('div');
-    ticks.style.cssText = 'position:absolute;left:-9px;top:0;height:100%;display:flex;flex-direction:column;justify-content:space-between;padding:4px 0;pointer-events:none;';
-    [0.7, 0.45, 0.35, 0.45, 0.7].forEach((w, i) => {
-      const t = document.createElement('div');
-      t.style.cssText = `width:${Math.round(w * 10)}px;height:1px;background:rgba(100,160,255,${i === 0 || i === 4 ? .65 : .3});`;
-      ticks.appendChild(t);
+    // Dark background triangle
+    const bgTri = document.createElementNS(NS, 'polygon');
+    bgTri.setAttribute('points', `4,4 136,4 ${this._pyTipX},${this._pyTipY}`);
+    bgTri.setAttribute('fill', '#05060f');
+    bgTri.setAttribute('stroke', 'rgba(80,130,220,0.28)');
+    bgTri.setAttribute('stroke-width', '1.5');
+    bgTri.setAttribute('stroke-linejoin', 'round');
+    svg.appendChild(bgTri);
+
+    // Fill rect — grows from bottom-tip upward, clipped to triangle
+    const fillRect = document.createElementNS(NS, 'rect');
+    fillRect.setAttribute('x', '0');
+    fillRect.setAttribute('y', String(this._pyH));
+    fillRect.setAttribute('width', String(this._pyW));
+    fillRect.setAttribute('height', '0');
+    fillRect.setAttribute('fill', 'url(#py-fill-grad)');
+    fillRect.setAttribute('clip-path', 'url(#py-clip)');
+    this._svgFill = fillRect;
+    svg.appendChild(fillRect);
+
+    // Shimmer overlay (clipped to triangle)
+    const shimRect = document.createElementNS(NS, 'rect');
+    shimRect.setAttribute('x', '0'); shimRect.setAttribute('y', '0');
+    shimRect.setAttribute('width', String(this._pyW));
+    shimRect.setAttribute('height', String(this._pyH));
+    shimRect.setAttribute('fill', 'url(#py-shim-grad)');
+    shimRect.setAttribute('clip-path', 'url(#py-clip)');
+    svg.appendChild(shimRect);
+
+    // Outline triangle on top (colored by power)
+    const outlineTri = document.createElementNS(NS, 'polygon');
+    outlineTri.setAttribute('points', `4,4 136,4 ${this._pyTipX},${this._pyTipY}`);
+    outlineTri.setAttribute('fill', 'none');
+    outlineTri.setAttribute('stroke', 'rgba(80,130,220,0.5)');
+    outlineTri.setAttribute('stroke-width', '1.5');
+    outlineTri.setAttribute('stroke-linejoin', 'round');
+    this._outlineTri = outlineTri;
+    svg.appendChild(outlineTri);
+
+    // Horizontal fill-level line (glowing edge at fill top)
+    const levelLine = document.createElementNS(NS, 'line');
+    levelLine.setAttribute('stroke', '#ffffff');
+    levelLine.setAttribute('stroke-width', '1.5');
+    levelLine.setAttribute('stroke-linecap', 'round');
+    levelLine.setAttribute('opacity', '0');
+    this._levelLine = levelLine;
+    svg.appendChild(levelLine);
+
+    // Power % label inside pyramid (near top) — optional, small
+    const pyLabel = document.createElementNS(NS, 'text');
+    pyLabel.setAttribute('x', String(this._pyTipX));
+    pyLabel.setAttribute('y', '28');
+    pyLabel.setAttribute('text-anchor', 'middle');
+    pyLabel.setAttribute('font-family', 'monospace');
+    pyLabel.setAttribute('font-size', '10');
+    pyLabel.setAttribute('fill', 'rgba(200,230,255,0.0)');
+    pyLabel.setAttribute('letter-spacing', '1');
+    this._pyPctLabel = pyLabel;
+    svg.appendChild(pyLabel);
+
+    pyramidWrap.appendChild(svg);
+    this._svg = svg;
+
+    // Tick marks on left and right edges of pyramid (3 evenly spaced at 25%, 50%, 75%)
+    [0.25, 0.5, 0.75].forEach(frac => {
+      // Position at that fraction of the height from top (within 4..206)
+      const innerH = this._pyTipY - this._pyTopY; // 202
+      const yPos   = this._pyTopY + innerH * frac;
+      // Half-width of triangle at this y (linearly narrows to 0 at tip)
+      const hw     = this._pyTopHalfW * (1 - frac);
+      const cx     = this._pyTipX;
+
+      [[-1, -6], [1, 6]].forEach(([side, tickLen]) => {
+        const tick = document.createElementNS(NS, 'line');
+        const edgeX = cx + side * hw;
+        tick.setAttribute('x1', String(edgeX));
+        tick.setAttribute('y1', String(yPos));
+        tick.setAttribute('x2', String(edgeX + tickLen));
+        tick.setAttribute('y2', String(yPos));
+        tick.setAttribute('stroke', 'rgba(100,160,255,0.35)');
+        tick.setAttribute('stroke-width', '1');
+        tick.setAttribute('stroke-linecap', 'round');
+        svg.appendChild(tick);
+      });
     });
 
-    track.appendChild(nebula);
-    track.appendChild(this._fill);
-    this._barOuter.appendChild(track);
-    this._barOuter.appendChild(this._corona);
-    this._barOuter.appendChild(this._handle);
-    this._barOuter.appendChild(ticks);
+    // Particle layer (DOM, positioned over SVG)
+    const particles = document.createElement('div');
+    particles.style.cssText = [
+      'position:absolute', 'top:0', 'left:0',
+      `width:${this._pyW}px`, `height:${this._pyH}px`,
+      'overflow:visible', 'pointer-events:none',
+    ].join(';');
+    this._particles = particles;
+    pyramidWrap.appendChild(particles);
+
     wrap.appendChild(this._label);
-    wrap.appendChild(this._barOuter);
+    wrap.appendChild(pyramidWrap);
     document.body.appendChild(wrap);
     this._wrap = wrap;
   }
@@ -185,30 +285,111 @@ export class InputSystem {
   }
 
   _setBarPower(p) {
-    const pct  = (p * 100).toFixed(1);
-    this._fill.style.height        = `${pct}%`;
-    this._handle.style.bottom      = `${pct}%`;
-    this._corona.style.bottom      = `${pct}%`;
+    // Geometry: triangle from y=4 (top, full width) to y=206 (tip, width=0)
+    const innerH   = this._pyTipY - this._pyTopY; // 202
+    const fillH    = p * innerH;
+    const fillTop  = this._pyTipY - fillH;
 
-    const h    = Math.round(220 - p * 210);
-    const glow = `hsl(${h},90%,60%)`;
-    const dim  = `hsl(${h},80%,45%)`;
+    this._svgFill.setAttribute('y',      String(fillTop));
+    this._svgFill.setAttribute('height', String(fillH + (this._pyH - this._pyTipY)));
 
-    this._handle.style.boxShadow   = `0 0 ${10 + p*16}px ${glow},0 0 ${22+p*28}px ${dim}66`;
-    this._handle.style.borderColor = glow;
+    // Hue ramps: 0 (red) → 30 (orange) → 270 (purple) → 210 (cyan) as p goes 0→1
+    const h    = Math.round(p < 0.5 ? p * 60 : 60 + (p - 0.5) * 400);
+    const hCap = Math.min(h, 210);
+    const glow = `hsl(${hCap},90%,62%)`;
+    const dim  = `hsl(${hCap},80%,42%)`;
 
-    const cs = 34 + Math.round(p * 28);
-    this._corona.style.width       = `${cs}px`;
-    this._corona.style.height      = `${cs}px`;
-    this._corona.style.background  = `radial-gradient(circle,${glow}50 0%,transparent 68%)`;
-    this._barOuter.style.boxShadow = `0 0 0 1px ${glow}33,0 0 ${10+p*20}px ${dim}44`;
+    // Outline stroke brightens with power
+    this._outlineTri.setAttribute('stroke',
+      p > 0.05 ? `hsla(${hCap},85%,65%,${0.35 + p * 0.55})` : 'rgba(80,130,220,0.28)');
+    this._outlineTri.setAttribute('stroke-width', String(1.5 + p * 1.5));
+
+    // Drop-shadow glow on the whole pyramid
+    if (p > 0.05) {
+      const glowPx = 4 + p * 14;
+      this._pyramidWrap.style.filter =
+        `drop-shadow(0 0 ${glowPx}px ${glow}) drop-shadow(0 0 ${glowPx * 2}px ${dim}88)`;
+      if (p > 0.9) {
+        this._pyramidWrap.style.setProperty('--bloom', glow);
+        this._pyramidWrap.style.animation = 'max-bloom 0.6s ease-in-out infinite';
+      } else {
+        this._pyramidWrap.style.animation = 'none';
+      }
+    } else {
+      this._pyramidWrap.style.filter    = 'none';
+      this._pyramidWrap.style.animation = 'none';
+    }
+
+    // Level line at fill top edge (width matches triangle at that y)
+    if (p > 0.02) {
+      const yFromTop  = fillTop - this._pyTopY;
+      const hw        = this._pyTopHalfW * (1 - yFromTop / innerH);
+      const cx        = this._pyTipX;
+      this._levelLine.setAttribute('x1', String(cx - hw + 2));
+      this._levelLine.setAttribute('x2', String(cx + hw - 2));
+      this._levelLine.setAttribute('y1', String(fillTop));
+      this._levelLine.setAttribute('y2', String(fillTop));
+      this._levelLine.setAttribute('stroke', glow);
+      this._levelLine.setAttribute('stroke-width', String(1 + p * 2));
+      this._levelLine.setAttribute('opacity', String(0.5 + p * 0.45));
+    } else {
+      this._levelLine.setAttribute('opacity', '0');
+    }
+
+    // Pct label fades in above 50%
+    if (p > 0.5) {
+      this._pyPctLabel.setAttribute('fill', `rgba(200,230,255,${(p - 0.5) * 1.2})`);
+      this._pyPctLabel.textContent = `${Math.round(p * 100)}%`;
+    } else {
+      this._pyPctLabel.setAttribute('fill', 'rgba(200,230,255,0)');
+    }
+
+    // Particles at high power (throttled)
+    const now = Date.now();
+    if (p > 0.72 && now - this._lastSparkTime > 120) {
+      this._lastSparkTime = now;
+      this._spawnParticle(p, hCap);
+      if (p > 0.88) this._spawnParticle(p, hCap); // double rate near max
+    }
+
     eventBus.emit(Events.AIM_POWER_UPDATE, { power: p });
+  }
+
+  _spawnParticle(p, h) {
+    const el   = document.createElement('div');
+    const size = 1.5 + Math.random() * 2.5;
+    const angle = Math.random() * Math.PI * 2;
+    const dist  = 18 + Math.random() * 38;
+    const dx    = Math.round(Math.cos(angle) * dist);
+    const dy    = Math.round(Math.sin(angle) * dist - 10); // bias upward
+
+    // Spawn from a point along the top portion of the fill
+    const innerH  = this._pyTipY - this._pyTopY;
+    const frac    = (1 - p) + Math.random() * p * 0.4; // near fill top
+    const yPos    = Math.round(this._pyTopY + innerH * frac);
+    const hw      = this._pyTopHalfW * (1 - frac);
+    const xPos    = Math.round(this._pyTipX + (Math.random() * 2 - 1) * hw * 0.85);
+
+    el.style.cssText = [
+      'position:absolute',
+      `left:${xPos}px`, `top:${yPos}px`,
+      `width:${size.toFixed(1)}px`, `height:${size.toFixed(1)}px`,
+      'border-radius:50%',
+      `background:hsl(${h},95%,72%)`,
+      `box-shadow:0 0 ${(size * 2).toFixed(1)}px hsl(${h},90%,70%)`,
+      `--sdx:${dx}px`, `--sdy:${dy}px`,
+      'animation:spark-float 0.55s ease-out forwards',
+      'pointer-events:none',
+    ].join(';');
+
+    this._particles.appendChild(el);
+    setTimeout(() => el.parentNode && el.parentNode.removeChild(el), 600);
   }
 
   _isOverBar(x, y) {
     if (this._wrap.style.display === 'none') return false;
-    const r   = this._barOuter.getBoundingClientRect();
-    const pad = 32;
+    const r   = this._pyramidWrap.getBoundingClientRect();
+    const pad = 28;
     return x >= r.left - pad && x <= r.right  + pad &&
            y >= r.top  - pad && y <= r.bottom + pad;
   }

@@ -328,11 +328,8 @@ function buildMoon(group, parentRadius, color, seed) {
   col.lerp(new Color(0x888888), 0.5);
   const mat = new MeshStandardMaterial({
     color: col, roughness: 0.9, metalness: 0,
-    transparent: true, depthWrite: false, opacity: 1,
   });
-  mat.depthTest = false;
   const mesh = new Mesh(geo, mat);
-  mesh.renderOrder = 100;
   mesh.position.x = orbitR;
   orbit.add(mesh);
 

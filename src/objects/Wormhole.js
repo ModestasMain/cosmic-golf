@@ -158,7 +158,8 @@ export class Wormhole {
         emissive: 0x221100, emissiveIntensity: 0.4,
       });
       const mesh = new Mesh(geo, mat);
-      this._group.add(mesh);
+      // NOT added to group — added directly to scene in addToScene()
+      // so depth-testing works correctly against planets.
       this._debris.push({
         mesh, orbitR, angle, speed,
         tiltSin: Math.sin(tiltAng),
@@ -178,8 +179,19 @@ export class Wormhole {
     clr[i * 3 + 2] = 1.00;                   // B always full
   }
 
-  addToScene(scene)    { scene.add(this._group); }
-  removeFromScene(scene) { scene.remove(this._group); this._dispose(); }
+  addToScene(scene) {
+    this._scene = scene;
+    scene.add(this._group);
+    // Debris added at scene root — not inside the transparent group —
+    // so the depth buffer is respected and they're hidden behind planets.
+    for (const d of this._debris) scene.add(d.mesh);
+  }
+
+  removeFromScene(scene) {
+    scene.remove(this._group);
+    for (const d of this._debris) scene.remove(d.mesh);
+    this._dispose();
+  }
 
   _dispose() {
     for (const m of this._rings)       { m.geometry.dispose(); m.material.dispose(); }
@@ -235,17 +247,20 @@ export class Wormhole {
 
     this._activated = false;
 
-    // ── Orbit debris in world XZ space ────────────────────────────
-    const invQ = this._group.quaternion.clone().invert();
+    // ── Orbit debris in world space ───────────────────────────────
+    // Meshes live at scene root so positions are world-space directly.
     for (const d of this._debris) {
       d.angle += d.speed * dt;
       const wx = Math.cos(d.angle) * d.orbitR;
       const wz = Math.sin(d.angle) * d.orbitR;
-      const worldOffset = new Vector3(wx, wz * d.tiltSin, wz * d.tiltCos);
-      d.mesh.position.copy(worldOffset.clone().applyQuaternion(invQ));
+      d.mesh.position.set(
+        this.position.x + wx,
+        this.position.y + wz * d.tiltSin,
+        this.position.z + wz * d.tiltCos,
+      );
       d.mesh.rotation.x += dt * 0.7;
       d.mesh.rotation.y += dt * 0.5;
-      d.worldPos.copy(this.position).add(worldOffset);
+      d.worldPos.copy(d.mesh.position);
     }
   }
 

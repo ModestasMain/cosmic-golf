@@ -133,67 +133,77 @@ const sfx = {
     noiseBurst({ duration: 0.07, volume: 0.12, cutoff: 600 });
   },
 
-  // BALL_BOUNCED — distinct sound per planet type
-  bounce(planetType = 'ROCKY') {
+  // BALL_BOUNCED — meteor impact: shared sub-bass boom + shockwave, then planet flavor
+  bounce(planetType = 'ROCKY', speed = 60) {
+    const s  = Math.min(speed / 110, 1.0); // normalize: 110 u/s = full impact
+    const v  = 0.35 + s * 0.65;            // volume scales with speed
+
+    // ── Base meteor impact (all planet types) ─────────────────────
+    // 1. Sub-bass detonation — the gut punch
+    oneShot({ freq: 48, freqEnd: 10, type: 'sine',     volume: v * 0.95, attack: 0.001, decay: 0.55 + s * 0.30,
+      filterType: 'lowpass', filterFreq: 130, filterQ: 0.5 });
+    // 2. Mid thud — the physical slam of mass on mass
+    oneShot({ freq: 105, freqEnd: 22, type: 'triangle', volume: v * 0.75, attack: 0.002, decay: 0.30 + s * 0.20 });
+    // 3. Shockwave crack — instantaneous high-energy transient
+    noiseBurst({ duration: 0.025, volume: v * 0.85, cutoff: 4000 });
+    // 4. Debris scatter — rolling rocks and dust, slightly delayed
+    noiseBurst({ duration: 0.25 + s * 0.20, volume: v * 0.40, cutoff: 600, delay: 0.025 });
+
+    // ── Planet-specific flavor on top ─────────────────────────────
     switch (planetType) {
 
-      // ROCKY — stone thud: heavy low boom + gravel noise
+      // ROCKY — extra gravel crunch, low stone rumble
       case 'ROCKY':
       default:
-        oneShot({ freq: 55, freqEnd: 22, type: 'square',   volume: 0.5,  attack: 0.002, decay: 0.22,
-          filterType: 'lowpass', filterFreq: 180, filterQ: 0.6 });
-        oneShot({ freq: 110, freqEnd: 55, type: 'triangle', volume: 0.22, attack: 0.002, decay: 0.15 });
-        noiseBurst({ duration: 0.05, volume: 0.18, cutoff: 400 });
+        noiseBurst({ duration: 0.18, volume: v * 0.30, cutoff: 220, delay: 0.04 });
+        oneShot({ freq: 62, freqEnd: 28, type: 'square', volume: v * 0.25, attack: 0.003, decay: 0.22,
+          filterType: 'lowpass', filterFreq: 160, filterQ: 0.6 });
         break;
 
-      // ICE — crystalline crack + high resonant ping
+      // ICE — crystalline shatter ring above the boom
       case 'ICE':
-        oneShot({ freq: 1200, freqEnd: 600, type: 'sine',   volume: 0.28, attack: 0.001, decay: 0.45,
-          filterType: 'highpass', filterFreq: 900, filterQ: 3 });
-        oneShot({ freq: 2400, freqEnd: 1800, type: 'sine',  volume: 0.12, attack: 0.001, decay: 0.65,
-          filterType: 'highpass', filterFreq: 1600, filterQ: 4 });
-        noiseBurst({ duration: 0.03, volume: 0.08, cutoff: 3000 });
+        oneShot({ freq: 1600, freqEnd: 700, type: 'sine',  volume: v * 0.30, attack: 0.001, decay: 0.55,
+          filterType: 'highpass', filterFreq: 1000, filterQ: 3.5 });
+        oneShot({ freq: 3200, freqEnd: 2000, type: 'sine', volume: v * 0.14, attack: 0.001, decay: 0.70,
+          filterType: 'highpass', filterFreq: 2000, filterQ: 4 });
+        noiseBurst({ duration: 0.06, volume: v * 0.35, cutoff: 5000, delay: 0.01 });
         break;
 
-      // SAND — soft muffled thud + mid hiss
+      // SAND — muffled, tons of dust noise
       case 'SAND':
-        oneShot({ freq: 90, freqEnd: 45, type: 'sine',     volume: 0.35, attack: 0.004, decay: 0.12,
-          filterType: 'lowpass', filterFreq: 280, filterQ: 0.5 });
-        noiseBurst({ duration: 0.12, volume: 0.22, cutoff: 600 });
+        noiseBurst({ duration: 0.35, volume: v * 0.45, cutoff: 320, delay: 0.03 });
+        oneShot({ freq: 75, freqEnd: 38, type: 'sine', volume: v * 0.20, attack: 0.006, decay: 0.18,
+          filterType: 'lowpass', filterFreq: 200, filterQ: 0.4 });
         break;
 
-      // TERRAN — earthy knock: mid thump with a short tail
+      // TERRAN — earthy resonance, soil rumble
       case 'TERRAN':
-        oneShot({ freq: 80, freqEnd: 38, type: 'triangle', volume: 0.40, attack: 0.003, decay: 0.20,
-          filterType: 'lowpass', filterFreq: 320, filterQ: 0.8 });
-        oneShot({ freq: 160, freqEnd: 90, type: 'sine',    volume: 0.18, attack: 0.003, decay: 0.18 });
-        noiseBurst({ duration: 0.04, volume: 0.10, cutoff: 700 });
+        oneShot({ freq: 68, freqEnd: 32, type: 'triangle', volume: v * 0.30, attack: 0.008, decay: 0.40,
+          filterType: 'lowpass', filterFreq: 280, filterQ: 0.7 });
+        noiseBurst({ duration: 0.12, volume: v * 0.20, cutoff: 450, delay: 0.05 });
         break;
 
-      // LAVA — deep volcanic boom + low rumble
+      // LAVA — volcanic explosion, searing hiss
       case 'LAVA':
-        oneShot({ freq: 38, freqEnd: 14, type: 'square',   volume: 0.60, attack: 0.005, decay: 0.35,
-          filterType: 'lowpass', filterFreq: 140, filterQ: 0.5 });
-        oneShot({ freq: 72, freqEnd: 30, type: 'triangle', volume: 0.30, attack: 0.005, decay: 0.28 });
-        noiseBurst({ duration: 0.18, volume: 0.14, cutoff: 200 });
+        oneShot({ freq: 32, freqEnd: 9,  type: 'sine',   volume: v * 0.50, attack: 0.003, decay: 0.65,
+          filterType: 'lowpass', filterFreq: 110, filterQ: 0.5 });
+        noiseBurst({ duration: 0.18, volume: v * 0.55, cutoff: 2500, delay: 0.015 }); // steam/sizzle
+        noiseBurst({ duration: 0.30, volume: v * 0.25, cutoff: 180,  delay: 0.04  }); // low volcanic roll
         break;
 
-      // GAS — airy whomp: sine with heavy lowpass, soft attack
+      // GAS — deep atmospheric whomp, airy shockwave
       case 'GAS':
-        oneShot({ freq: 120, freqEnd: 55, type: 'sine',    volume: 0.38, attack: 0.012, decay: 0.30,
-          filterType: 'lowpass', filterFreq: 260, filterQ: 0.4 });
-        oneShot({ freq: 240, freqEnd: 100, type: 'sine',   volume: 0.18, attack: 0.015, decay: 0.22 });
-        noiseBurst({ duration: 0.10, volume: 0.08, cutoff: 350 });
+        oneShot({ freq: 85, freqEnd: 38, type: 'sine', volume: v * 0.28, attack: 0.015, decay: 0.45,
+          filterType: 'lowpass', filterFreq: 220, filterQ: 0.4 });
+        noiseBurst({ duration: 0.20, volume: v * 0.22, cutoff: 280, delay: 0.02 });
         break;
 
-      // RINGED — metallic bell clang: bright harmonics + long ring decay
+      // RINGED — boom + long metallic ring shimmer
       case 'RINGED':
-        oneShot({ freq: 520, freqEnd: 440, type: 'triangle', volume: 0.30, attack: 0.001, decay: 0.60,
-          filterType: 'bandpass', filterFreq: 900, filterQ: 3 });
-        oneShot({ freq: 1560, freqEnd: 1200, type: 'sine',   volume: 0.18, attack: 0.001, decay: 0.80,
-          filterType: 'highpass', filterFreq: 1000, filterQ: 2 });
-        oneShot({ freq: 3120, freqEnd: 2400, type: 'sine',   volume: 0.08, attack: 0.001, decay: 0.50 });
-        noiseBurst({ duration: 0.02, volume: 0.06, cutoff: 2000 });
+        oneShot({ freq: 480, freqEnd: 380, type: 'triangle', volume: v * 0.28, attack: 0.001, decay: 1.10,
+          filterType: 'bandpass', filterFreq: 800, filterQ: 4 });
+        oneShot({ freq: 1440, freqEnd: 1100, type: 'sine',   volume: v * 0.16, attack: 0.001, decay: 1.40,
+          filterType: 'highpass', filterFreq: 1000, filterQ: 2.5 });
         break;
     }
   },
@@ -363,7 +373,6 @@ const sfx = {
 //
 // Three-layer heavy charge sound — sub bass felt in the chest,
 // distorted sawtooth engine growl, and rising noise pressure.
-// Designed to feel like a weapon loading, not a coil charging.
 
 class PowerDrone {
   constructor() {
@@ -395,7 +404,6 @@ class PowerDrone {
     this._gainNode.gain.value = 0;
     this._gainNode.connect(master());
 
-    // ── Layer 1: sub bass sine — felt, not heard ──────────
     this._sub = c.createOscillator();
     this._sub.type = 'sine';
     this._sub.frequency.value = 38;
@@ -404,54 +412,34 @@ class PowerDrone {
     this._sub.connect(subGain);
     subGain.connect(this._gainNode);
 
-    // ── Layer 2: sawtooth growl + heavy distortion ────────
     this._saw = c.createOscillator();
     this._saw.type = 'sawtooth';
     this._saw.frequency.value = 90;
-
     const shaper = c.createWaveShaper();
     shaper.curve = PowerDrone._distCurve();
     shaper.oversample = '4x';
-
-    // Lowpass after distortion — tames harsh aliasing
     const lp = c.createBiquadFilter();
-    lp.type = 'lowpass';
-    lp.frequency.value = 500;
-    lp.Q.value = 0.7;
-
+    lp.type = 'lowpass'; lp.frequency.value = 500; lp.Q.value = 0.7;
     this._sawGain = c.createGain();
     this._sawGain.gain.value = 0;
+    this._saw.connect(shaper); shaper.connect(lp);
+    lp.connect(this._sawGain); this._sawGain.connect(this._gainNode);
 
-    this._saw.connect(shaper);
-    shaper.connect(lp);
-    lp.connect(this._sawGain);
-    this._sawGain.connect(this._gainNode);
-
-    // ── Layer 3: noise pressure burst ─────────────────────
     const bufLen = c.sampleRate * 2;
     const buf = c.createBuffer(1, bufLen, c.sampleRate);
     const data = buf.getChannelData(0);
     for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1;
-
     this._noiseNode = c.createBufferSource();
-    this._noiseNode.buffer = buf;
-    this._noiseNode.loop = true;
-
+    this._noiseNode.buffer = buf; this._noiseNode.loop = true;
     this._noiseFilt = c.createBiquadFilter();
     this._noiseFilt.type = 'bandpass';
-    this._noiseFilt.frequency.value = 180;
-    this._noiseFilt.Q.value = 0.6;
-
-    this._noiseGain = c.createGain();
-    this._noiseGain.gain.value = 0;
-
+    this._noiseFilt.frequency.value = 180; this._noiseFilt.Q.value = 0.6;
+    this._noiseGain = c.createGain(); this._noiseGain.gain.value = 0;
     this._noiseNode.connect(this._noiseFilt);
     this._noiseFilt.connect(this._noiseGain);
     this._noiseGain.connect(this._gainNode);
 
-    this._sub.start();
-    this._saw.start();
-    this._noiseNode.start();
+    this._sub.start(); this._saw.start(); this._noiseNode.start();
     this._running = true;
   }
 
@@ -463,19 +451,11 @@ class PowerDrone {
     this._ensure();
     const now = ctx().currentTime;
     const p2  = p * p;
-
-    // Sub creeps from 38 → 90 Hz — always present, gives instant weight
     this._sub.frequency.setTargetAtTime(38 + p * 52, now, 0.05);
-
-    // Growl kicks in at 25% power, rises 90 → 260 Hz
     this._saw.frequency.setTargetAtTime(90 + p2 * 170, now, 0.03);
     this._sawGain.gain.setTargetAtTime(Math.max(0, (p - 0.25) / 0.75) * 0.5, now, 0.03);
-
-    // Noise pressure: filter sweeps 180 → 900 Hz, volume p²
     this._noiseFilt.frequency.setTargetAtTime(180 + p2 * 720, now, 0.04);
     this._noiseGain.gain.setTargetAtTime(p2 * 0.09, now, 0.04);
-
-    // Master — sub is present immediately, full stack at peak
     const vol = p < 0.02 ? 0 : 0.14 + p2 * 0.20;
     this._gainNode.gain.setTargetAtTime(vol, now, 0.03);
   }
@@ -564,6 +544,106 @@ class BlackHoleDrone {
     if (this._gainNode) {
       this._gainNode.gain.setTargetAtTime(0, ctx().currentTime, 0.08);
     }
+  }
+}
+
+// ── Flight drone ──────────────────────────────────────────
+//
+// Continuous "ripping the cosmos" sound while the ball is in flight.
+// Three layers driven by normalised ball speed (0 = stopped, 1 = MAX_SPEED):
+//   1. Bandpass noise — the main rip/tear texture, brightens with speed
+//   2. Sub-bass rumble — always present once in flight, gives mass
+//   3. High sawtooth shimmer — kicks in above 50% speed for the "rip" feel
+
+class FlightDrone {
+  constructor() {
+    this._gainNode   = null;
+    this._noise      = null;
+    this._lp         = null;   // low-pass — shapes the air body
+    this._res        = null;   // peaking EQ — resonant swoosh peak
+    this._rumble     = null;   // sub sine — physical weight
+    this._rumbleGain = null;
+    this._running    = false;
+  }
+
+  _ensure() {
+    if (this._running) return;
+    const c = ctx();
+
+    this._gainNode = c.createGain();
+    this._gainNode.gain.value = 0;
+    this._gainNode.connect(master());
+
+    // ── Noise source — full white noise, sculpted by filters ────────
+    const bufLen = c.sampleRate * 4;
+    const buf    = c.createBuffer(1, bufLen, c.sampleRate);
+    const data   = buf.getChannelData(0);
+    for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1;
+
+    this._noise        = c.createBufferSource();
+    this._noise.buffer = buf;
+    this._noise.loop   = true;
+
+    // Low-pass: cuts harsh highs, keeps air body. Cutoff rises with speed.
+    this._lp             = c.createBiquadFilter();
+    this._lp.type        = 'lowpass';
+    this._lp.frequency.value = 300;
+    this._lp.Q.value     = 0.7;
+
+    // Peaking band: broad resonant hump that sweeps up — the "ooooooo" in swoooosh
+    this._res             = c.createBiquadFilter();
+    this._res.type        = 'peaking';
+    this._res.frequency.value = 120;
+    this._res.gain.value  = 14;   // dB boost
+    this._res.Q.value     = 0.6;  // broad
+
+    this._noise.connect(this._res);
+    this._res.connect(this._lp);
+    this._lp.connect(this._gainNode);
+
+    // ── Sub-bass sine — the weight of the ball hurtling through space ─
+    this._rumble = c.createOscillator();
+    this._rumble.type = 'sine';
+    this._rumble.frequency.value = 38;
+
+    this._rumbleGain = c.createGain();
+    this._rumbleGain.gain.value = 0;
+
+    this._rumble.connect(this._rumbleGain);
+    this._rumbleGain.connect(this._gainNode);
+
+    this._noise.start();
+    this._rumble.start();
+    this._running = true;
+  }
+
+  /** t: 0 (stopped) → 1 (MAX_SPEED). Call every flight frame. */
+  setSpeed(t) {
+    if (gameState.isMuted || t < 0.01) {
+      if (this._gainNode) this._gainNode.gain.setTargetAtTime(0, ctx().currentTime, 0.25);
+      return;
+    }
+    this._ensure();
+    const now = ctx().currentTime;
+    const t2  = t * t;
+
+    // Low-pass opens up as speed increases — more air ripping through
+    this._lp.frequency.setTargetAtTime(280 + t2 * 3200, now, 0.08);
+
+    // Resonant swoosh peak sweeps from low rumble to mid — the "swoooosh" body
+    this._res.frequency.setTargetAtTime(90 + t * 420, now, 0.10);
+    this._res.gain.setTargetAtTime(10 + t * 12, now, 0.08);   // bigger boost at speed
+
+    // Sub rumble — deepens slightly, more presence at speed
+    this._rumble.frequency.setTargetAtTime(32 + t * 18, now, 0.12);
+    this._rumbleGain.gain.setTargetAtTime(0.12 + t2 * 0.18, now, 0.08);
+
+    // Master — present but not overwhelming
+    this._gainNode.gain.setTargetAtTime(0.22 + t2 * 0.18, now, 0.06);
+  }
+
+  silence() {
+    if (this._gainNode) this._gainNode.gain.setTargetAtTime(0, ctx().currentTime, 0.30);
   }
 }
 
@@ -754,6 +834,7 @@ export class AudioManager {
     this._lastAimTick  = 0;
     this._bhDrone      = new BlackHoleDrone();
     this._pwrDrone     = new PowerDrone();
+    this._flightDrone  = new FlightDrone();
     this._bgm          = new BGMSequencer();
   }
 
@@ -773,12 +854,9 @@ export class AudioManager {
 
     // ── Event wiring ──────────────────────────────────────
 
-    eventBus.on(Events.SHOT_TAKEN, ({ power } = {}) => {
-      sfx.launch();
-      sfx.warp(power ?? 0.5); // power is 0..1 normalised
-    });
+    eventBus.on(Events.SHOT_TAKEN, () => sfx.launch());
 
-    eventBus.on(Events.BALL_BOUNCED, ({ planetType } = {}) => sfx.bounce(planetType));
+    eventBus.on(Events.BALL_BOUNCED, ({ planetType, speed } = {}) => sfx.bounce(planetType, speed));
 
     eventBus.on(Events.BALL_HOLED, () => sfx.holed());
 
@@ -805,11 +883,18 @@ export class AudioManager {
       this._bhDrone.setProximity(proximity);
     });
 
-    // Silence drone when ball lands / OOB
+    // Silence black hole drone when ball lands / OOB
     const silenceDrone = () => this._bhDrone.silence();
     eventBus.on(Events.BALL_HOLED,         silenceDrone);
     eventBus.on(Events.BALL_OUT_OF_BOUNDS, silenceDrone);
     eventBus.on(Events.AIM_START,          silenceDrone);
+
+    // Silence flight drone when ball stops moving
+    const silenceFlight = () => this._flightDrone.silence();
+    eventBus.on(Events.BALL_HOLED,         silenceFlight);
+    eventBus.on(Events.BALL_OUT_OF_BOUNDS, silenceFlight);
+    eventBus.on(Events.AIM_START,          silenceFlight);
+    eventBus.on(Events.BALL_RESET_TO_TEE,  silenceFlight);
 
     // Mute toggle — flip gameState flag, update BGM gain
     eventBus.on(Events.AUDIO_MUTE_TOGGLE, () => {
@@ -825,6 +910,14 @@ export class AudioManager {
    */
   setBlackHoleProximity(t) {
     this._bhDrone.setProximity(t);
+  }
+
+  /**
+   * Call every flight frame with normalised ball speed (0–1).
+   * 0 = stopped, 1 = PHYSICS.MAX_SPEED. Drives the flight drone.
+   */
+  setFlightSpeed(t) {
+    this._flightDrone.setSpeed(t);
   }
 }
 

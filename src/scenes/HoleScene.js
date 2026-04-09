@@ -27,6 +27,7 @@ import { LaunchBurst } from '../effects/LaunchBurst.js';
 import { GhostBall } from '../objects/GhostBall.js';
 import { LaunchWarp } from '../effects/LaunchWarp.js';
 import { Wormhole, WORMHOLE_CAPTURE_RADIUS } from '../objects/Wormhole.js';
+import { audioManager } from '../audio/AudioManager.js';
 
 export class HoleScene {
   constructor(renderer, inputSystem) {
@@ -666,6 +667,11 @@ export class HoleScene {
           this._hitFreezeFrames = Math.max(this._hitFreezeFrames, 4);
           // Bounce particles at impact point
           if (this._holeData) this.launchBurst.triggerBounce(this.ball.position.clone(), this._holeData.palette);
+          // Crater decal on the Planet instance (bouncePlanet is raw data; look up the live object)
+          if (result.bouncePlanet) {
+            const idx = this._holeData.planets.indexOf(result.bouncePlanet);
+            if (idx >= 0) this.planetObjects[idx]?.addCrater(this.ball.position.clone(), this.ball.velocity.length());
+          }
           eventBus.emit(Events.BALL_BOUNCED, {
             position:   this.ball.position.clone(),
             planetType: result.bouncePlanet?.type ?? 'ROCKY',
@@ -705,6 +711,9 @@ export class HoleScene {
 
       // Stuck detection: if ball lingers near any planet surface, force settle
       const ballSpeed = this.ball.velocity.length();
+
+      // Drive flight drone — normalised speed 0→1
+      audioManager.setFlightSpeed(Math.min(ballSpeed / PHYSICS.MAX_SPEED, 1));
       const nearSurface = this._holeData.planets.some(p =>
         this.ball.position.distanceTo(p.position) < p.radius + BALL.RADIUS * 3
       );

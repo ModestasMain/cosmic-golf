@@ -4,7 +4,7 @@
 
 import {
   Mesh, SphereGeometry, MeshStandardMaterial, MeshBasicMaterial,
-  TorusGeometry, BackSide, Color, Group, AdditiveBlending,
+  TorusGeometry, CircleGeometry, BackSide, Color, Group, AdditiveBlending,
   CanvasTexture, Vector3,
 } from 'three';
 import { GravityField } from '../effects/GravityField.js';
@@ -278,6 +278,34 @@ function makeTextureSand(color, seed) {
   return new CanvasTexture(c);
 }
 
+// ── Crater texture — dark scorched disc with bright ejecta rim ─
+
+function makeCraterTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const ctx = c.getContext('2d');
+
+  // Scorched void center
+  const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+  g.addColorStop(0,    'rgba(0,   0,   0,   0.98)');
+  g.addColorStop(0.30, 'rgba(8,   4,   2,   0.90)');
+  g.addColorStop(0.55, 'rgba(30,  18,  8,   0.70)');
+  g.addColorStop(0.70, 'rgba(190, 130, 60,  0.45)'); // ejecta glow rim
+  g.addColorStop(0.82, 'rgba(220, 160, 70,  0.20)');
+  g.addColorStop(1.00, 'rgba(0,   0,   0,   0.00)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 128, 128);
+
+  // Tiny bright center — the impact flash scar
+  const flash = ctx.createRadialGradient(64, 64, 0, 64, 64, 12);
+  flash.addColorStop(0,   'rgba(255, 220, 160, 0.5)');
+  flash.addColorStop(1,   'rgba(255, 220, 160, 0.0)');
+  ctx.fillStyle = flash;
+  ctx.fillRect(0, 0, 128, 128);
+
+  return new CanvasTexture(c);
+}
+
 // ── Ring builder (can be tilted any direction) ────────────────
 
 function buildRings(group, radius, color, seed) {
@@ -360,6 +388,7 @@ export class Planet {
     this._axialTilt  = (seq() - 0.5) * 0.7;    // tilt the whole planet
     this._textures   = [];
     this._moons      = [];
+    this._craters    = [];
 
     this.group = new Group();
     this.group.position.copy(position);
@@ -463,6 +492,42 @@ export class Planet {
     }
   }
 
+  /**
+   * Stamp a fading crater decal at the world-space impact position.
+   * The decal is parented to the spinning mesh so it stays on the surface.
+   */
+  addCrater(impactWorldPos, speed = 60) {
+    if (this._craters.length >= 6) {
+      // Remove oldest crater first so the planet doesn't accumulate forever
+      const old = this._craters.shift();
+      this.mesh.remove(old.mesh);
+      old.geo.dispose(); old.mat.dispose(); old.tex.dispose();
+    }
+
+    // Convert world impact point into spinning-mesh local space
+    const localPos    = this.mesh.worldToLocal(impactWorldPos.clone());
+    const localNormal = localPos.clone().normalize();
+
+    const s    = Math.min(speed / 120, 1.0);
+    const size = this.radius * (0.04 + s * 0.30) + Math.random() * this.radius * 0.04;
+    const geo  = new CircleGeometry(size, 20);
+    const tex  = makeCraterTexture();
+    const mat  = new MeshBasicMaterial({
+      map: tex, transparent: true, opacity: 0.92,
+      depthWrite: false,
+    });
+
+    const mesh = new Mesh(geo, mat);
+    mesh.renderOrder = 2;
+    // Place the disc just above the surface, oriented outward (+Z → normal)
+    mesh.position.copy(localNormal).multiplyScalar(this.radius + 0.5);
+    mesh.quaternion.setFromUnitVectors(new Vector3(0, 0, 1), localNormal);
+
+    this.mesh.add(mesh);
+    // Life 1→0 over ~8 seconds
+    this._craters.push({ mesh, geo, mat, tex, life: 1.0, rate: 0.06 + Math.random() * 0.04 });
+  }
+
   setOpacity(v) {
     if (v >= 0.99) {
       // Fully visible — use solid opaque material
@@ -482,6 +547,19 @@ export class Planet {
     // Moon orbits
     for (const m of this._moons) {
       m.orbit.rotation.y += m.speed * dt;
+    }
+
+    // Fade out craters
+    for (let i = this._craters.length - 1; i >= 0; i--) {
+      const cr = this._craters[i];
+      cr.life -= cr.rate * dt;
+      if (cr.life <= 0) {
+        this.mesh.remove(cr.mesh);
+        cr.geo.dispose(); cr.mat.dispose(); cr.tex.dispose();
+        this._craters.splice(i, 1);
+      } else {
+        cr.mat.opacity = cr.life * 0.92;
+      }
     }
 
     this.gravityField.update(dt);
@@ -512,5 +590,9 @@ export class Planet {
     for (const m of this._moons) {
       m.mesh.geometry.dispose(); m.mesh.material.dispose();
     }
+    for (const cr of this._craters) {
+      cr.geo.dispose(); cr.mat.dispose(); cr.tex.dispose();
+    }
+    this._craters = [];
   }
 }

@@ -70,16 +70,21 @@ export function stepBall(ball, planets, dt, gravityScale = 1.0) {
       _normal.subVectors(ball.position, planet.position).normalize();
       ball.position.copy(planet.position).addScaledVector(_normal, minDist);
 
-      // Reflect velocity off surface normal with damping
+      // Reflect velocity off surface normal with speed-dependent restitution.
+      // Slow impacts barely bounce (restitution → 0), fast impacts get full damping.
+      // This avoids both micro-bouncing at rest AND the floating problem.
       const dot = ball.velocity.dot(_normal);
       if (dot < 0) {
-        // Only bounce if moving into the planet
-        ball.velocity.addScaledVector(_normal, -(1 + PHYSICS.BOUNCE_DAMPING) * dot);
-        // Additional friction: reduce tangential component
+        const impactSpeed = -dot;
+        const restitution = PHYSICS.BOUNCE_DAMPING * Math.min(impactSpeed / 25.0, 1.0);
+        ball.velocity.addScaledVector(_normal, -(1 + restitution) * dot);
+        // Tangential friction always applies
         const vTangential = ball.velocity.clone().addScaledVector(_normal, -ball.velocity.dot(_normal));
-        ball.velocity.addScaledVector(vTangential, -0.2); // 20% tangential friction
-        bounced = true;
-        bouncePlanet = planet;
+        ball.velocity.addScaledVector(vTangential, -0.2);
+        if (impactSpeed > 2.0) {
+          bounced = true;
+          bouncePlanet = planet;
+        }
       }
     }
   }

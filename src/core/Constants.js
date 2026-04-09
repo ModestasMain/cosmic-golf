@@ -3,7 +3,7 @@
 // ============================================================
 
 export const PHYSICS = {
-  GRAVITY_STRENGTH: 420,   // stronger pull — ball drawn in, fewer long orbits
+  GRAVITY_STRENGTH: 260,   // reduced — ball can navigate around planets without getting trapped
   BALL_MASS: 1,
   BOUNCE_DAMPING: 0.25,    // 25% velocity retained on bounce — settles fast
   VELOCITY_DAMPING: 0.994, // stronger drag — orbital energy decays quickly
@@ -44,7 +44,7 @@ export const HOLE = {
 export const PLANET = {
   RADIUS_MIN: 10,
   RADIUS_MAX: 28,
-  MASS_FACTOR: 0.08,
+  MASS_FACTOR: 0.055,
 };
 
 export const CAMERA = {
@@ -137,6 +137,6 @@ export const COLOR_PALETTES = [
 ];
 
 export const WORLD = {
-  CLUSTER_SPREAD: 420,  // 2× bigger — galaxy scale, full power shot won't reach the cup
+  CLUSTER_SPREAD: 300,  // tee→cup ≈ 685–855 units — reachable with a full-power shot
   CLUSTER_OFFSET: 110,  // push cluster further from origin
 };

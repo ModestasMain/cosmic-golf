@@ -117,8 +117,8 @@ class Game {
       eventBus.emit(Events.MP_BALL_STATE, data);
     });
 
-    eventBus.on(Events.BALL_POS_SYNC, ({ pos, vel, holeIndex }) => {
-      if (!gameState.isSoloMode) this.mp.broadcastBallState(pos, vel, holeIndex);
+    eventBus.on(Events.BALL_POS_SYNC, ({ pos, vel, holeIndex, bounce }) => {
+      if (!gameState.isSoloMode) this.mp.broadcastBallState(pos, vel, holeIndex, bounce);
     });
 
     eventBus.on(Events.BALL_STOPPED, ({ pos, holeIndex }) => {

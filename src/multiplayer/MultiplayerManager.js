@@ -146,6 +146,7 @@ export class MultiplayerManager {
             vel: msg.vel,
             holeIndex: msg.holeIndex,
             ts: msg.ts,
+            bounce: msg.bounce ?? false,
           });
         }
         break;
@@ -195,13 +196,14 @@ export class MultiplayerManager {
     this._send({ type: 'join', playerId: this.playerId, name, color });
   }
 
-  broadcastBallState(pos, vel, holeIndex) {
+  broadcastBallState(pos, vel, holeIndex, bounce = false) {
     if (!this._isConnected || this._isSolo) return;
     this._send({
       type: 'ball_state',
       playerId: this.playerId,
       holeIndex,
       ts: Date.now(),
+      bounce,
       pos: { x: pos.x, y: pos.y, z: pos.z },
       vel: { x: vel.x, y: vel.y, z: vel.z },
     });

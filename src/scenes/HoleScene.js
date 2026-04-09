@@ -233,7 +233,7 @@ export class HoleScene {
     });
 
     // Remote ball position correction — dead-reckoning with smooth blend
-    eventBus.on(Events.MP_BALL_STATE, ({ playerId, pos, vel, holeIndex, ts }) => {
+    eventBus.on(Events.MP_BALL_STATE, ({ playerId, pos, vel, holeIndex, ts, bounce }) => {
       if (holeIndex !== undefined && holeIndex !== gameState.currentHole) return;
       let remote = this._remoteBalls.get(playerId);
       if (!remote && this._holeData) {
@@ -261,8 +261,10 @@ export class HoleScene {
       }
 
       const error = authPos.distanceTo(remote.ball.position);
-      if (error > 8) {
-        // Too far off — hard snap, reset correction
+      if (bounce || error > 8) {
+        // Bounce packets: always hard-snap — dead-reckoning is useless after a
+        // collision because a tiny position difference produces a wildly different
+        // reflection angle. Snap immediately so the ghost stays in sync.
         remote.ball.setPosition(authPos);
         remote.ball.setVelocity(authVel);
         remote._posCorrection.set(0, 0, 0);
@@ -676,6 +678,15 @@ export class HoleScene {
             position:   this.ball.position.clone(),
             planetType: result.bouncePlanet?.type ?? 'ROCKY',
             speed:      this.ball.velocity.length(),
+          });
+          // Priority sync: immediately broadcast post-bounce state so remote clients
+          // can hard-snap before their dead-reckoning diverges further.
+          this._syncFrameCounter = 0;
+          eventBus.emit(Events.BALL_POS_SYNC, {
+            pos:       this.ball.position,
+            vel:       this.ball.velocity,
+            holeIndex: gameState.currentHole,
+            bounce:    true,
           });
         }
       }

@@ -359,6 +359,132 @@ const sfx = {
   },
 };
 
+// ── Power charge drone ────────────────────────────────────
+//
+// Three-layer heavy charge sound — sub bass felt in the chest,
+// distorted sawtooth engine growl, and rising noise pressure.
+// Designed to feel like a weapon loading, not a coil charging.
+
+class PowerDrone {
+  constructor() {
+    this._gainNode   = null;
+    this._sub        = null;
+    this._saw        = null;
+    this._sawGain    = null;
+    this._noiseNode  = null;
+    this._noiseFilt  = null;
+    this._noiseGain  = null;
+    this._running    = false;
+  }
+
+  static _distCurve() {
+    const n = 512; const amount = 280;
+    const curve = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const x = (i * 2) / n - 1;
+      curve[i] = ((Math.PI + amount) * x) / (Math.PI + amount * Math.abs(x));
+    }
+    return curve;
+  }
+
+  _ensure() {
+    if (this._running) return;
+    const c = ctx();
+
+    this._gainNode = c.createGain();
+    this._gainNode.gain.value = 0;
+    this._gainNode.connect(master());
+
+    // ── Layer 1: sub bass sine — felt, not heard ──────────
+    this._sub = c.createOscillator();
+    this._sub.type = 'sine';
+    this._sub.frequency.value = 38;
+    const subGain = c.createGain();
+    subGain.gain.value = 1.4;
+    this._sub.connect(subGain);
+    subGain.connect(this._gainNode);
+
+    // ── Layer 2: sawtooth growl + heavy distortion ────────
+    this._saw = c.createOscillator();
+    this._saw.type = 'sawtooth';
+    this._saw.frequency.value = 90;
+
+    const shaper = c.createWaveShaper();
+    shaper.curve = PowerDrone._distCurve();
+    shaper.oversample = '4x';
+
+    // Lowpass after distortion — tames harsh aliasing
+    const lp = c.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 500;
+    lp.Q.value = 0.7;
+
+    this._sawGain = c.createGain();
+    this._sawGain.gain.value = 0;
+
+    this._saw.connect(shaper);
+    shaper.connect(lp);
+    lp.connect(this._sawGain);
+    this._sawGain.connect(this._gainNode);
+
+    // ── Layer 3: noise pressure burst ─────────────────────
+    const bufLen = c.sampleRate * 2;
+    const buf = c.createBuffer(1, bufLen, c.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1;
+
+    this._noiseNode = c.createBufferSource();
+    this._noiseNode.buffer = buf;
+    this._noiseNode.loop = true;
+
+    this._noiseFilt = c.createBiquadFilter();
+    this._noiseFilt.type = 'bandpass';
+    this._noiseFilt.frequency.value = 180;
+    this._noiseFilt.Q.value = 0.6;
+
+    this._noiseGain = c.createGain();
+    this._noiseGain.gain.value = 0;
+
+    this._noiseNode.connect(this._noiseFilt);
+    this._noiseFilt.connect(this._noiseGain);
+    this._noiseGain.connect(this._gainNode);
+
+    this._sub.start();
+    this._saw.start();
+    this._noiseNode.start();
+    this._running = true;
+  }
+
+  setPower(p) {
+    if (gameState.isMuted || p >= 0.99) {
+      if (this._gainNode) this._gainNode.gain.setTargetAtTime(0, ctx().currentTime, 0.05);
+      return;
+    }
+    this._ensure();
+    const now = ctx().currentTime;
+    const p2  = p * p;
+
+    // Sub creeps from 38 → 90 Hz — always present, gives instant weight
+    this._sub.frequency.setTargetAtTime(38 + p * 52, now, 0.05);
+
+    // Growl kicks in at 25% power, rises 90 → 260 Hz
+    this._saw.frequency.setTargetAtTime(90 + p2 * 170, now, 0.03);
+    this._sawGain.gain.setTargetAtTime(Math.max(0, (p - 0.25) / 0.75) * 0.5, now, 0.03);
+
+    // Noise pressure: filter sweeps 180 → 900 Hz, volume p²
+    this._noiseFilt.frequency.setTargetAtTime(180 + p2 * 720, now, 0.04);
+    this._noiseGain.gain.setTargetAtTime(p2 * 0.09, now, 0.04);
+
+    // Master — sub is present immediately, full stack at peak
+    const vol = p < 0.02 ? 0 : 0.14 + p2 * 0.20;
+    this._gainNode.gain.setTargetAtTime(vol, now, 0.03);
+  }
+
+  silence() {
+    if (this._gainNode) this._gainNode.gain.setTargetAtTime(0, ctx().currentTime, 0.08);
+  }
+}
+
 // ── Black hole proximity drone ─────────────────────────────
 //
 // A continuous eerie oscillator that ramps gain up as proximity → 1.
@@ -627,6 +753,7 @@ export class AudioManager {
     this._wired        = false;
     this._lastAimTick  = 0;
     this._bhDrone      = new BlackHoleDrone();
+    this._pwrDrone     = new PowerDrone();
     this._bgm          = new BGMSequencer();
   }
 
@@ -659,7 +786,17 @@ export class AudioManager {
 
     eventBus.on(Events.AIM_START, () => sfx.aimStart());
 
-    eventBus.on(Events.AIM_POWER_LOCKED, () => sfx.powerLocked());
+    eventBus.on(Events.AIM_POWER_UPDATE, ({ power }) => this._pwrDrone.setPower(power));
+
+    eventBus.on(Events.AIM_POWER_LOCKED, () => {
+      this._pwrDrone.silence();
+      sfx.powerLocked();
+    });
+
+    const silencePwrDrone = () => this._pwrDrone.silence();
+    eventBus.on(Events.AIM_CANCEL,  silencePwrDrone);
+    eventBus.on(Events.SHOT_TAKEN,  silencePwrDrone);
+    eventBus.on(Events.BALL_HOLED,  silencePwrDrone);
 
     eventBus.on(Events.GAME_COMPLETE, () => sfx.gameComplete());
 

@@ -202,6 +202,7 @@ export class InputSystem {
     this._corona.style.height      = `${cs}px`;
     this._corona.style.background  = `radial-gradient(circle,${glow}50 0%,transparent 68%)`;
     this._barOuter.style.boxShadow = `0 0 0 1px ${glow}33,0 0 ${10+p*20}px ${dim}44`;
+    eventBus.emit(Events.AIM_POWER_UPDATE, { power: p });
   }
 
   _isOverBar(x, y) {

@@ -148,7 +148,7 @@ export class HoleScene {
     this._aimArrow.visible = false;
     this.scene.add(this._aimArrow);
 
-    this.portalSystem.initScene();
+    // Portal placement deferred to loadHole (placePortals call with tee position)
   }
 
   _setupLighting() {
@@ -445,14 +445,8 @@ export class HoleScene {
     this.inputSystem.setBallPosition(this.ball.position);
     this.inputSystem.setPlanets(this.planets);
 
-    // Portal return setup — also spawns exit portal from hole 2 onwards
-    if (holeIndex === 0) {
-      this.portalSystem.initScene();
-    }
-    if (holeIndex >= 1 && this.ball) {
-      const pos = new Vector3(0, 30, -60); // fixed visible position above the scene
-      this.portalSystem.spawnExitPortal(pos);
-    }
+    // Place portals left/right of tee on every hole
+    this.portalSystem.placePortals(tee, this._facingDir);
 
     // Ghost balls are spawned on-demand when ball_state or shot arrives with matching holeIndex
     // (prevents showing ghosts for players who are on a different hole)
@@ -468,11 +462,7 @@ export class HoleScene {
       gameState.gameComplete = true;
       eventBus.emit(Events.GAME_COMPLETE, { players: gameState.players });
 
-      // Spawn exit portal at a nice visible position
-      if (this.ball) {
-        const pos = this.ball.position.clone().add(new Vector3(0, 25, 0));
-        this.portalSystem.spawnExitPortal(pos);
-      }
+      // Portals remain at their last hole positions — player can exit from there
       return;
     }
     this.loadHole(next);

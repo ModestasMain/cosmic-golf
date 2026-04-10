@@ -444,7 +444,7 @@ class PowerDrone {
   }
 
   setPower(p) {
-    if (gameState.isMuted || p >= 0.99) {
+    if (gameState.isMuted) {
       if (this._gainNode) this._gainNode.gain.setTargetAtTime(0, ctx().currentTime, 0.05);
       return;
     }

@@ -132,6 +132,7 @@ export class GolfBall {
     this.trail       = null;
 
     this.group = new Group();
+    this._chargePower = 0;
     this._buildMesh();
     this._buildCoronas();
     this._buildLights();
@@ -202,6 +203,22 @@ export class GolfBall {
     // Lights flicker
     this.lightOrange.intensity = 1.5 + Math.sin(t * 8.1) * 0.4 + heat * 1.2;
     this.lightYellow.intensity = 0.5 + Math.abs(Math.sin(t * 6.3)) * 0.3;
+
+    // Power-charge shake — smooth inharmonic vibration scales with charge level
+    const shakeAmp = this._chargePower * BALL.RADIUS * 0.45;
+    if (shakeAmp > 0.001) {
+      const sx = Math.sin(t * 47.0) * Math.sin(t * 31.3) * shakeAmp;
+      const sy = Math.sin(t * 53.7) * Math.cos(t * 28.9) * shakeAmp;
+      const sz = Math.cos(t * 41.2) * Math.sin(t * 37.1) * shakeAmp;
+      this.group.position.set(this.position.x + sx, this.position.y + sy, this.position.z + sz);
+    } else {
+      this.group.position.copy(this.position);
+    }
+  }
+
+  setPower(p) {
+    this._chargePower = Math.max(0, Math.min(1, p));
+    if (this.trail) this.trail.setChargeLevel(this._chargePower);
   }
 
   setPosition(pos) {

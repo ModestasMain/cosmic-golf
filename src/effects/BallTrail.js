@@ -84,10 +84,11 @@ export class BallTrail {
    * @param {number} color  Player color hex — tints the fire (e.g. 0xff4400)
    */
   constructor(scene, color = 0xff6600) {
-    this._history = [];
-    this._active  = false;
-    this._t       = 0;
-    this._color   = new Color(color);
+    this._history     = [];
+    this._active      = false;
+    this._chargeLevel = 0;
+    this._t           = 0;
+    this._color       = new Color(color);
 
     // Bright spine — tight core of the meteor
     this._core  = buildLayer(scene, HISTORY, 2.2, 91);
@@ -109,12 +110,20 @@ export class BallTrail {
     }
   }
 
+  setChargeLevel(p) {
+    this._chargeLevel = Math.max(0, Math.min(1, p));
+  }
+
   update(ballPos, dt = 0.016) {
     this._t += dt;
 
     if (!this._active) {
-      this._core.geo.setDrawRange(0, 0);
-      this._cloud.geo.setDrawRange(0, 0);
+      if (this._chargeLevel > 0.05) {
+        this._drawChargeAura(ballPos, this._t, this._color.r, this._color.g, this._color.b);
+      } else {
+        this._core.geo.setDrawRange(0, 0);
+        this._cloud.geo.setDrawRange(0, 0);
+      }
       return;
     }
 
@@ -173,6 +182,56 @@ export class BallTrail {
     this._cloud.geo.attributes.position.needsUpdate = true;
     this._cloud.geo.attributes.color.needsUpdate    = true;
     this._cloud.geo.setDrawRange(0, fi);
+  }
+
+  _drawChargeAura(ballPos, t, pr, pg, pb) {
+    const p  = this._chargeLevel;
+    const p2 = p * p;
+
+    // Orbit radius grows with power (tight halo → expanding swirl)
+    const radius = 0.6 + p2 * 2.4;
+
+    // ── Core: swirling arc of embers orbiting the ball ───────
+    const coreCount = Math.max(2, Math.floor(p * 28));
+    for (let i = 0; i < coreCount; i++) {
+      const phase = (i / coreCount) * Math.PI * 2;
+      const spin  = t * (2.5 + p * 3.0);   // faster spin at higher power
+      const angle = phase + spin;
+      const elev  = Math.sin(phase * 2.3 + t * 1.1) * 0.8;
+      const r     = radius * (0.7 + Math.sin(phase * 3.7 + t * 2.3) * 0.3);
+
+      this._core.pos[i * 3]     = ballPos.x + Math.cos(angle) * Math.cos(elev) * r;
+      this._core.pos[i * 3 + 1] = ballPos.y + Math.sin(elev) * r;
+      this._core.pos[i * 3 + 2] = ballPos.z + Math.sin(angle) * Math.cos(elev) * r;
+
+      const flicker = 0.5 + 0.5 * Math.abs(Math.sin(t * 13 + i * 1.9));
+      const [cr, cg, cb] = fireColor(p * flicker, pr, pg, pb);
+      this._core.col[i * 3]     = cr;
+      this._core.col[i * 3 + 1] = cg;
+      this._core.col[i * 3 + 2] = cb;
+    }
+    this._core.geo.attributes.position.needsUpdate = true;
+    this._core.geo.attributes.color.needsUpdate    = true;
+    this._core.geo.setDrawRange(0, coreCount);
+
+    // ── Ember cloud: turbulent scatter orbiting the ball ─────
+    const cloudCount = Math.floor(p2 * TOTAL * 0.45);
+    for (let i = 0; i < cloudCount; i++) {
+      const scatterR = radius * (0.3 + Math.abs(hash(i, 4, t * 0.4)));
+      this._cloud.pos[i * 3]     = ballPos.x + hash(i, 0, t * 1.8) * scatterR;
+      this._cloud.pos[i * 3 + 1] = ballPos.y + hash(i, 1, t * 2.1) * scatterR;
+      this._cloud.pos[i * 3 + 2] = ballPos.z + hash(i, 2, t * 1.6) * scatterR;
+
+      const flicker = 0.35 + 0.65 * Math.abs(Math.sin(t * 19 + i * 2.7));
+      const ef = p2 * flicker * 0.75;
+      const [cr, cg, cb] = fireColor(p * 0.75, pr, pg, pb);
+      this._cloud.col[i * 3]     = cr * ef;
+      this._cloud.col[i * 3 + 1] = cg * ef;
+      this._cloud.col[i * 3 + 2] = cb * ef;
+    }
+    this._cloud.geo.attributes.position.needsUpdate = true;
+    this._cloud.geo.attributes.color.needsUpdate    = true;
+    this._cloud.geo.setDrawRange(0, cloudCount);
   }
 
   dispose() {

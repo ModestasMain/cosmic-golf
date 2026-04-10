@@ -492,8 +492,19 @@ export class InputSystem {
 
     // Direction drag released — stop tracking, stay in AIMING
     if (e.pointerId === this._dirPtr) {
+      const wasTap = !this._dirMoved;
       this._dirPtr   = null;
       this._dirMoved = false;
+      // Tap on canvas (no drag): if power is set, fire with current facing direction
+      if (wasTap && this._power > 0.02) {
+        if (this._lastDragDist < 0.1) {
+          // Provide a non-zero default so _computeShotVelocity doesn't bail;
+          // HoleScene ignores the actual vector and uses _facingDir for direction.
+          this._lastDragVec.set(0, -10);
+          this._lastDragDist = 10;
+        }
+        this._fire();
+      }
     }
   }
 

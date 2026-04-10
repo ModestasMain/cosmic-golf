@@ -210,7 +210,12 @@ export class HoleScene {
       this._facingDir.copy(base);
     });
 
+    eventBus.on(Events.AIM_POWER_UPDATE, ({ power }) => {
+      if (this.ball) this.ball.setPower(power);
+    });
+
     eventBus.on(Events.AIM_CANCEL, () => {
+      if (this.ball) this.ball.setPower(0);
       if (this._state === 'AIMING') {
         this._state = 'IDLE';
         this.trajectoryPreview.hide();
@@ -219,6 +224,7 @@ export class HoleScene {
     });
 
     eventBus.on(Events.SHOT_TAKEN, (data) => {
+      if (this.ball) this.ball.setPower(0);
       if (this._state !== 'AIMING' && this._state !== 'IDLE') return;
       this._fireShot(data);
     });

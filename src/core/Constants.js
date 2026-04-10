@@ -19,7 +19,7 @@ export const BALL = {
 };
 
 export const AIM = {
-  MAX_POWER: 640,          // 2x world scale needs more range
+  MAX_POWER: 800,          // deeper holes need more range
   MAX_DRAG_DISTANCE: 120,  // px
   TRAJECTORY_STEPS: 160,
   TRAJECTORY_DT: 0.016,
@@ -27,16 +27,16 @@ export const AIM = {
 
 export const HOLE = {
   COUNT: 10,
-  PLANETS_MIN: 5,
-  PLANETS_MAX: 8,
+  PLANETS_MIN: 8,
+  PLANETS_MAX: 14,
   TEE_RADIUS: 3,
-  CUP_RADIUS: 20,              // 2x world scale
+  CUP_RADIUS: 20,
   CUP_SPEED_THRESHOLD: 180,
-  OUT_OF_BOUNDS_DISTANCE: 2800, // hard outer limit (origin distance)
+  OUT_OF_BOUNDS_DISTANCE: 4500, // wider world needs bigger hard limit
   OUT_OF_BOUNDS_PENALTY: 2,
   // Void detection — ball escaping the planet cluster
-  VOID_OOB_SURFACE_DIST: 620,  // units from nearest planet *surface* — beyond this = deep space = OOB
-  VOID_DRIFT_SPEED: 28,        // if ball is >160u from any surface AND slower than this → OOB
+  VOID_OOB_SURFACE_DIST: 950,  // units from nearest planet *surface* — beyond this = deep space = OOB
+  VOID_DRIFT_SPEED: 28,
   BLACK_HOLE_PULL_RADIUS: 90,
   BLACK_HOLE_GRAVITY: 60,
 };
@@ -50,17 +50,17 @@ export const PLANET = {
 export const CAMERA = {
   FOV: 70,
   NEAR: 0.1,
-  FAR: 6000,
+  FAR: 9500,
   FOLLOW_LERP: 0.07,
   DIR_LERP: 0.04,
-  FOLLOW_DISTANCE: 130,  // 2x world scale
+  FOLLOW_DISTANCE: 130,
   FOLLOW_HEIGHT: 24,
   AIM_LERP: 0.12,
 };
 
 export const STARFIELD = {
   COUNT: 4500,
-  RADIUS: 5600,
+  RADIUS: 9000,
 };
 
 export const MULTIPLAYER = {
@@ -137,6 +137,6 @@ export const COLOR_PALETTES = [
 ];
 
 export const WORLD = {
-  CLUSTER_SPREAD: 600,  // 2x world scale — tee→cup ≈ 1370–1710 units
-  CLUSTER_OFFSET: 220,  // push cluster further from origin
+  CLUSTER_SPREAD: 900,  // deep holes — tee→cup ≈ 2100–2700 units, 2-4 shots per hole
+  CLUSTER_OFFSET: 320,  // push cluster further from origin
 };

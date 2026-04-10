@@ -290,10 +290,14 @@ class Game {
     const cam = this.holeScene.camera;
     if (!cam) return;
 
-    // Update local player label
+    // Update local player label — hide during hole transition states
     const localId = gameState.players[0]?.id;
-    if (this.holeScene.ball) {
+    const hideLabel = this.holeScene._state === 'HOLE_COMPLETE'
+                   || this.holeScene._state === 'CINEMATIC';
+    if (this.holeScene.ball && !hideLabel) {
       this.playerLabels.setWorldPos(localId, this.holeScene.ball.position);
+    } else {
+      this.playerLabels.setWorldPos(localId, null);
     }
 
     // Update remote labels — clear first so players who left the hole disappear

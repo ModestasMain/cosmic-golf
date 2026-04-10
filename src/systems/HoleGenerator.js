@@ -78,19 +78,19 @@ function placeTeeAndCup(rng, distMult = 1.0) {
     (rng() - 0.5) * WORLD.CLUSTER_OFFSET,
   );
   const teeAngle = rng() * Math.PI * 2;
-  // tee is ~900–1100 from center — total tee↔cup distance ≈ 1900–2200
-  const teeDist  = WORLD.CLUSTER_SPREAD * 0.95 * distMult + 120 + rng() * 160;
+  // tee is ~1050–1350 from center — total tee↔cup distance ≈ 2100–2700
+  const teeDist  = WORLD.CLUSTER_SPREAD * 0.95 * distMult + 180 + rng() * 240;
   const tee      = center.clone().add(new Vector3(
     Math.cos(teeAngle) * teeDist,
-    (rng() - 0.5) * 80,
+    (rng() - 0.5) * 120,
     Math.sin(teeAngle) * teeDist,
   ));
   // cup is roughly opposite, ±50° offset so it's never trivially straight
   const cupAngle = teeAngle + Math.PI + (rng() - 0.5) * 1.0;
-  const cupDist  = WORLD.CLUSTER_SPREAD * 0.90 * distMult + 140 + rng() * 180;
+  const cupDist  = WORLD.CLUSTER_SPREAD * 0.90 * distMult + 200 + rng() * 260;
   const cup      = center.clone().add(new Vector3(
     Math.cos(cupAngle) * cupDist,
-    (rng() - 0.5) * 80,
+    (rng() - 0.5) * 120,
     Math.sin(cupAngle) * cupDist,
   ));
   return { center, tee, cup };
@@ -118,10 +118,10 @@ function buildPlanet(pos, rng, colors, idx, rMin = PLANET.RADIUS_MIN, rMax = PLA
 /** Push cup away from any planet surface it ended up inside */
 function finalizeCup(cup, planets) {
   for (let attempt = 0; attempt < 16; attempt++) {
-    const blocking = planets.find(p => cup.distanceTo(p.position) < p.radius + 44);
+    const blocking = planets.find(p => cup.distanceTo(p.position) < p.radius + 66);
     if (!blocking) break;
     const away = new Vector3().subVectors(cup, blocking.position).normalize();
-    cup.addScaledVector(away, blocking.radius + 44 - cup.distanceTo(blocking.position) + 16);
+    cup.addScaledVector(away, blocking.radius + 66 - cup.distanceTo(blocking.position) + 24);
   }
 }
 
@@ -140,7 +140,7 @@ function deoverlapPlanets(planets, iterations = 30) {
     for (let i = 0; i < planets.length; i++) {
       for (let j = i + 1; j < planets.length; j++) {
         const pa = planets[i], pb = planets[j];
-        const minDist = pa.radius + pb.radius + 110; // 110-unit gap — prevents merged gravity wells
+        const minDist = pa.radius + pb.radius + 165; // 165-unit gap — prevents merged gravity wells
         const d = pa.position.distanceTo(pb.position);
         if (d < minDist && d > 0.001) {
           const away = new Vector3().subVectors(pb.position, pa.position).normalize();
@@ -159,17 +159,17 @@ function deoverlapPlanets(planets, iterations = 30) {
  * Place large guardian planets that block the direct tee→cup corridor.
  * Every archetype calls this to guarantee the straight path is never free.
  */
-function addGuardPlanets(planets, taken, tee, cup, rng, colors, count = 2) {
+function addGuardPlanets(planets, taken, tee, cup, rng, colors, count = 3) {
   const dir  = new Vector3().subVectors(cup, tee).normalize();
   const perp = perpXZ(dir);
   for (let i = 0; i < count; i++) {
     // Stagger guards along the path: first at 30%, second at 60%
     const t    = 0.28 + (i / count) * 0.44 + (rng() - 0.5) * 0.10;
-    const side = (rng() - 0.5) * 110; // slight offset so they're not dead-center
+    const side = (rng() - 0.5) * 165; // slight offset so they're not dead-center
     for (let a = 0; a < 100; a++) {
       const pos = new Vector3().lerpVectors(tee, cup, t)
-        .addScaledVector(perp, side + (rng() - 0.5) * 44)
-        .add(new Vector3(0, (rng() - 0.5) * 76, 0));
+        .addScaledVector(perp, side + (rng() - 0.5) * 66)
+        .add(new Vector3(0, (rng() - 0.5) * 114, 0));
       if (isValidPos(pos, taken, tee, cup, PLANET.RADIUS_MAX * 2.8)) {
         taken.push(pos);
         planets.push(buildPlanet(pos, rng, colors, planets.length, 36, 56));
@@ -184,12 +184,12 @@ function addGuardPlanets(planets, taken, tee, cup, rng, colors, count = 2) {
 // Each returns { planets: Array<PlanetData>, tee: Vector3, cup: Vector3 }
 // ================================================================
 
-/** GAUNTLET — 6-8 planets squarely blocking the direct path, must thread the gaps */
+/** GAUNTLET — 8-11 planets squarely blocking the direct path, must thread the gaps */
 function genGAUNTLET(rng, colors) {
   const { center, tee, cup } = placeTeeAndCup(rng);
   const dir  = new Vector3().subVectors(cup, tee).normalize();
   const perp = perpXZ(dir);
-  const count = 6 + Math.floor(rng() * 3);
+  const count = 8 + Math.floor(rng() * 4);
   const taken = [], planets = [];
 
   for (let i = 0; i < count; i++) {
@@ -206,13 +206,13 @@ function genGAUNTLET(rng, colors) {
     planets.push(buildPlanet(pos, rng, colors, i, 28, 52));
   }
 
-  // 2-3 flanking planets to fill the space
-  for (let i = 0; i < 3; i++) {
+  // 4-5 flanking planets to fill the space
+  for (let i = 0; i < 5; i++) {
     const angle = rng() * Math.PI * 2;
-    const r     = 200 + rng() * WORLD.CLUSTER_SPREAD * 0.7;
+    const r     = 300 + rng() * WORLD.CLUSTER_SPREAD * 0.7;
     const pos   = new Vector3(
       Math.cos(angle) * r,
-      (rng() - 0.5) * 120,
+      (rng() - 0.5) * 180,
       Math.sin(angle) * r,
     ).add(center);
     if (isValidPos(pos, taken, tee, cup, PLANET.RADIUS_MAX * 2.5)) {
@@ -231,18 +231,18 @@ function genGAUNTLET(rng, colors) {
 function genASTEROID_BELT(rng, colors) {
   const { center, tee, cup } = placeTeeAndCup(rng);
   const mid        = new Vector3().lerpVectors(tee, cup, 0.5);
-  const ringRadius = 200 + rng() * 120;
-  const count      = 11 + Math.floor(rng() * 5);
+  const ringRadius = 300 + rng() * 180;
+  const count      = 14 + Math.floor(rng() * 6);
   const taken = [], planets = [];
 
   for (let i = 0; i < count; i++) {
     const angle = (i / count) * Math.PI * 2 + (rng() - 0.5) * 0.4;
     let pos;
     for (let a = 0; a < 60; a++) {
-      const r = ringRadius + (rng() - 0.5) * 36;
+      const r = ringRadius + (rng() - 0.5) * 54;
       pos = mid.clone().add(new Vector3(
         Math.cos(angle) * r,
-        (rng() - 0.5) * 80,
+        (rng() - 0.5) * 120,
         Math.sin(angle) * r,
       ));
       if (isValidPos(pos, taken, tee, cup, PLANET.RADIUS_MAX * 2.8)) break;
@@ -251,13 +251,13 @@ function genASTEROID_BELT(rng, colors) {
     planets.push(buildPlanet(pos, rng, colors, i, 10, 26)); // tiny asteroids
   }
 
-  // 2 large anchor planets outside the ring
-  for (let i = 0; i < 2; i++) {
+  // 3 large anchor planets outside the ring
+  for (let i = 0; i < 3; i++) {
     const angle = rng() * Math.PI * 2;
-    const r     = ringRadius * 1.9 + rng() * 110;
+    const r     = ringRadius * 1.9 + rng() * 165;
     const pos   = mid.clone().add(new Vector3(
       Math.cos(angle) * r,
-      (rng() - 0.5) * 80,
+      (rng() - 0.5) * 120,
       Math.sin(angle) * r,
     ));
     if (isValidPos(pos, taken, tee, cup, PLANET.RADIUS_MAX * 2.5)) {
@@ -282,29 +282,29 @@ function genTWIN_GIANTS(rng, colors) {
 
   // The two giants
   for (const side of [-1, 1]) {
-    const dist = 120 + rng() * 60;
+    const dist = 180 + rng() * 90;
     const pos  = mid.clone()
       .addScaledVector(perp, side * dist)
-      .add(new Vector3(0, (rng() - 0.5) * 40, 0));
+      .add(new Vector3(0, (rng() - 0.5) * 60, 0));
     taken.push(pos);
     planets.push(buildPlanet(pos, rng, colors, planets.length, 46, 56));
   }
 
-  // 5-7 smaller scattered planets
-  const extra = 5 + Math.floor(rng() * 3);
+  // 7-10 smaller scattered planets
+  const extra = 7 + Math.floor(rng() * 4);
   for (let i = 0; i < extra; i++) {
     const angle = rng() * Math.PI * 2;
-    const r     = 180 + rng() * WORLD.CLUSTER_SPREAD * 0.8;
+    const r     = 270 + rng() * WORLD.CLUSTER_SPREAD * 0.8;
     let pos = center.clone().add(new Vector3(
       Math.cos(angle) * r,
-      (rng() - 0.5) * 120,
+      (rng() - 0.5) * 180,
       Math.sin(angle) * r,
     ));
     for (let a = 0; a < 60; a++) {
       if (isValidPos(pos, taken, tee, cup, PLANET.RADIUS_MAX * 2.5)) break;
       pos = center.clone().add(new Vector3(
         (rng() - 0.5) * WORLD.CLUSTER_SPREAD * 1.8,
-        (rng() - 0.5) * 120,
+        (rng() - 0.5) * 180,
         (rng() - 0.5) * WORLD.CLUSTER_SPREAD * 1.8,
       ));
     }
@@ -320,20 +320,20 @@ function genTWIN_GIANTS(rng, colors) {
   return { planets, tee, cup };
 }
 
-/** LABYRINTH — 12-15 medium planets in a dense maze arrangement */
+/** LABYRINTH — 16-20 medium planets in a dense maze arrangement */
 function genLABYRINTH(rng, colors) {
   const { center, tee, cup } = placeTeeAndCup(rng, 0.9);
-  const count = 12 + Math.floor(rng() * 4);
+  const count = 16 + Math.floor(rng() * 5);
   const taken = [], planets = [];
 
   for (let i = 0; i < count; i++) {
     let pos;
     for (let a = 0; a < 200; a++) {
       const angle = rng() * Math.PI * 2;
-      const r     = 50 + rng() * WORLD.CLUSTER_SPREAD * 0.8;
+      const r     = 75 + rng() * WORLD.CLUSTER_SPREAD * 0.8;
       pos = center.clone().add(new Vector3(
         Math.cos(angle) * r,
-        (rng() - 0.5) * 100,
+        (rng() - 0.5) * 150,
         Math.sin(angle) * r,
       ));
       if (isValidPos(pos, taken, tee, cup, PLANET.RADIUS_MAX * 2.8)) break;
@@ -354,8 +354,8 @@ function genSPIRAL(rng, colors) {
   const dir         = new Vector3().subVectors(cup, tee).normalize();
   const perp        = perpXZ(dir);
   const up          = new Vector3(0, 1, 0);
-  const count       = 7 + Math.floor(rng() * 3);
-  const baseRadius  = 130 + rng() * 70;
+  const count       = 10 + Math.floor(rng() * 4);
+  const baseRadius  = 195 + rng() * 105;
   const turns       = 1.2 + rng() * 0.8;
   const taken = [], planets = [];
 
@@ -377,12 +377,12 @@ function genSPIRAL(rng, colors) {
     planets.push(buildPlanet(pos, rng, colors, i));
   }
 
-  // 3 outer ambient planets
-  for (let i = 0; i < 3; i++) {
+  // 4 outer ambient planets
+  for (let i = 0; i < 4; i++) {
     const angle = rng() * Math.PI * 2;
-    const r     = WORLD.CLUSTER_SPREAD * 0.9 + rng() * 160;
+    const r     = WORLD.CLUSTER_SPREAD * 0.9 + rng() * 240;
     const pos   = center.clone().add(new Vector3(
-      Math.cos(angle) * r, (rng() - 0.5) * 120, Math.sin(angle) * r,
+      Math.cos(angle) * r, (rng() - 0.5) * 180, Math.sin(angle) * r,
     ));
     if (isValidPos(pos, taken, tee, cup, PLANET.RADIUS_MAX * 2.5)) {
       taken.push(pos);
@@ -402,16 +402,16 @@ function genORBIT_TRAP(rng, colors) {
   const taken = [], planets = [];
 
   // The trap planet — place it and then orbit the cup around it
-  const trapR = 44 + rng() * 12;
+  const trapR = 66 + rng() * 18;
   const awayAngle = rng() * Math.PI * 2;
   const trapPos = cup.clone().add(new Vector3(
-    Math.cos(awayAngle) * (trapR + 40),
+    Math.cos(awayAngle) * (trapR + 60),
     0,
-    Math.sin(awayAngle) * (trapR + 40),
+    Math.sin(awayAngle) * (trapR + 60),
   ));
   // Re-seat cup just off the trap planet surface
   const awayDir = new Vector3().subVectors(cup, trapPos).normalize();
-  cup.copy(trapPos).addScaledVector(awayDir, trapR + 26);
+  cup.copy(trapPos).addScaledVector(awayDir, trapR + 39);
 
   taken.push(trapPos);
   // Exact radius — we already decided it
@@ -429,20 +429,20 @@ function genORBIT_TRAP(rng, colors) {
   for (let i = 0; i < 3; i++) {
     const t   = 0.25 + i * 0.2 + rng() * 0.1;
     const pos = new Vector3().lerpVectors(tee, cup, t)
-      .addScaledVector(perp, (rng() - 0.5) * 120)
-      .add(new Vector3(0, (rng() - 0.5) * 60, 0));
+      .addScaledVector(perp, (rng() - 0.5) * 180)
+      .add(new Vector3(0, (rng() - 0.5) * 90, 0));
     if (isValidPos(pos, taken, tee, cup, PLANET.RADIUS_MAX * 2.5)) {
       taken.push(pos);
       planets.push(buildPlanet(pos, rng, colors, planets.length, 30, 48));
     }
   }
 
-  // 7 ambient planets (increased from 5)
-  for (let i = 0; i < 7; i++) {
+  // 10 ambient planets
+  for (let i = 0; i < 10; i++) {
     const angle = rng() * Math.PI * 2;
-    const r     = 160 + rng() * WORLD.CLUSTER_SPREAD * 0.8;
+    const r     = 240 + rng() * WORLD.CLUSTER_SPREAD * 0.8;
     const pos   = center.clone().add(new Vector3(
-      Math.cos(angle) * r, (rng() - 0.5) * 120, Math.sin(angle) * r,
+      Math.cos(angle) * r, (rng() - 0.5) * 180, Math.sin(angle) * r,
     ));
     if (isValidPos(pos, taken, tee, cup, PLANET.RADIUS_MAX * 2.5)) {
       taken.push(pos);
@@ -456,20 +456,20 @@ function genORBIT_TRAP(rng, colors) {
   return { planets, tee, cup };
 }
 
-/** PINBALL — 10-14 small planets in a tight chaotic cluster */
+/** PINBALL — 15-20 small planets in a tight chaotic cluster */
 function genPINBALL(rng, colors) {
   const { tee, cup } = placeTeeAndCup(rng, 0.8);
   const mid   = new Vector3().lerpVectors(tee, cup, 0.5);
-  const count = 10 + Math.floor(rng() * 5);
+  const count = 15 + Math.floor(rng() * 6);
   const taken = [], planets = [];
 
   for (let i = 0; i < count; i++) {
     let pos;
     for (let a = 0; a < 180; a++) {
       const angle = rng() * Math.PI * 2;
-      const r     = 30 + rng() * 170;
+      const r     = 45 + rng() * 255;
       pos = mid.clone().add(new Vector3(
-        Math.cos(angle) * r, (rng() - 0.5) * 90, Math.sin(angle) * r,
+        Math.cos(angle) * r, (rng() - 0.5) * 135, Math.sin(angle) * r,
       ));
       if (isValidPos(pos, taken, tee, cup, PLANET.RADIUS_MAX * 2.8)) break;
     }
@@ -493,26 +493,26 @@ function genSLINGSHOT(rng, colors) {
   // Two slingshot anchors — offset perpendicular to corridor
   for (const side of [-1, 1]) {
     const t    = 0.35 + rng() * 0.3;
-    const dist = 140 + rng() * 80;
+    const dist = 210 + rng() * 120;
     const pos  = new Vector3().lerpVectors(tee, cup, t)
       .addScaledVector(perp, side * dist)
-      .add(new Vector3(0, (rng() - 0.5) * 44, 0));
+      .add(new Vector3(0, (rng() - 0.5) * 66, 0));
     taken.push(pos);
     planets.push(buildPlanet(pos, rng, colors, planets.length, 48, 56));
   }
 
   // 1 direct blocker
   const blocker = new Vector3().lerpVectors(tee, cup, 0.48 + (rng() - 0.5) * 0.08)
-    .add(new Vector3(0, (rng() - 0.5) * 30, 0));
+    .add(new Vector3(0, (rng() - 0.5) * 45, 0));
   if (isValidPos(blocker, taken, tee, cup, PLANET.RADIUS_MAX * 2.5)) {
     taken.push(blocker);
     planets.push(buildPlanet(blocker, rng, colors, planets.length, 32, 44));
   }
 
-  // 4-5 scattered small planets
-  for (let i = 0; i < 5; i++) {
+  // 6-7 scattered small planets
+  for (let i = 0; i < 7; i++) {
     const angle = rng() * Math.PI * 2;
-    const r     = 200 + rng() * 220;
+    const r     = 300 + rng() * 330;
     const pos   = center.clone().add(new Vector3(
       Math.cos(angle) * r, (rng() - 0.5) * 120, Math.sin(angle) * r,
     ));
@@ -528,11 +528,11 @@ function genSLINGSHOT(rng, colors) {
   return { planets, tee, cup };
 }
 
-/** VOID_CROSSING — epic sparse layout, 4-6 massive planets, feels vast */
+/** VOID_CROSSING — epic sparse layout, massive planets, feels vast */
 function genVOID_CROSSING(rng, colors) {
   const { center, tee, cup } = placeTeeAndCup(rng, 1.05);
-  // 3 giant solar systems along the corridor, plus ambient scattered mass
-  const count = 6 + Math.floor(rng() * 3);
+  // Giant solar systems along the corridor, plus ambient scattered mass
+  const count = 9 + Math.floor(rng() * 4);
   const taken = [], planets = [];
   const dir   = new Vector3().subVectors(cup, tee).normalize();
   const perp  = perpXZ(dir);
@@ -547,12 +547,12 @@ function genVOID_CROSSING(rng, colors) {
         const t = 0.15 + (i / count) * 0.7 + (rng() - 0.5) * 0.08;
         pos = new Vector3().lerpVectors(tee, cup, t)
           .addScaledVector(perp, (rng() - 0.5) * WORLD.CLUSTER_SPREAD * 0.45)
-          .add(new Vector3(0, (rng() - 0.5) * 180, 0));
+          .add(new Vector3(0, (rng() - 0.5) * 270, 0));
       } else {
         const angle = rng() * Math.PI * 2;
-        const r     = 180 + rng() * WORLD.CLUSTER_SPREAD * 1.0;
+        const r     = 270 + rng() * WORLD.CLUSTER_SPREAD * 1.0;
         pos = center.clone().add(new Vector3(
-          Math.cos(angle) * r, (rng() - 0.5) * 180, Math.sin(angle) * r,
+          Math.cos(angle) * r, (rng() - 0.5) * 270, Math.sin(angle) * r,
         ));
       }
       if (isValidPos(pos, taken, tee, cup, PLANET.RADIUS_MAX * 3.0)) break;
@@ -561,7 +561,7 @@ function genVOID_CROSSING(rng, colors) {
     planets.push(buildPlanet(pos, rng, colors, i, 40, 56)); // all massive
   }
 
-  addGuardPlanets(planets, taken, tee, cup, rng, colors, 3); // 3 guards for void
+  addGuardPlanets(planets, taken, tee, cup, rng, colors, 4); // 4 guards for void
   deoverlapPlanets(planets);
   finalizeCup(cup, planets);
   return { planets, tee, cup };
@@ -571,8 +571,8 @@ function genVOID_CROSSING(rng, colors) {
 function genGRAVITY_RING(rng, colors) {
   const { center, tee, cup } = placeTeeAndCup(rng);
   const mid        = new Vector3().lerpVectors(tee, cup, 0.48 + rng() * 0.08);
-  const ringCount  = 5 + Math.floor(rng() * 3);
-  const ringRadius = 180 + rng() * 100;
+  const ringCount  = 7 + Math.floor(rng() * 4);
+  const ringRadius = 270 + rng() * 150;
   const taken = [], planets = [];
 
   // Primary ring — at 40% along corridor
@@ -580,9 +580,9 @@ function genGRAVITY_RING(rng, colors) {
     const angle = (i / ringCount) * Math.PI * 2 + (rng() - 0.5) * 0.25;
     let pos;
     for (let a = 0; a < 60; a++) {
-      const r = ringRadius + (rng() - 0.5) * 36;
+      const r = ringRadius + (rng() - 0.5) * 54;
       pos = mid.clone().add(new Vector3(
-        Math.cos(angle) * r, (rng() - 0.5) * 84, Math.sin(angle) * r,
+        Math.cos(angle) * r, (rng() - 0.5) * 126, Math.sin(angle) * r,
       ));
       if (isValidPos(pos, taken, tee, cup, PLANET.RADIUS_MAX * 2.8)) break;
     }
@@ -592,15 +592,15 @@ function genGRAVITY_RING(rng, colors) {
 
   // Second smaller ring — at 65% along corridor (forces two crossings)
   const mid2      = new Vector3().lerpVectors(tee, cup, 0.62 + rng() * 0.08);
-  const ringCount2 = 4 + Math.floor(rng() * 2);
+  const ringCount2 = 5 + Math.floor(rng() * 3);
   const ringR2    = ringRadius * 0.65;
   for (let i = 0; i < ringCount2; i++) {
     const angle = (i / ringCount2) * Math.PI * 2 + rng() * 0.5;
     let pos;
     for (let a = 0; a < 60; a++) {
-      const r = ringR2 + (rng() - 0.5) * 24;
+      const r = ringR2 + (rng() - 0.5) * 36;
       pos = mid2.clone().add(new Vector3(
-        Math.cos(angle) * r, (rng() - 0.5) * 64, Math.sin(angle) * r,
+        Math.cos(angle) * r, (rng() - 0.5) * 96, Math.sin(angle) * r,
       ));
       if (isValidPos(pos, taken, tee, cup, PLANET.RADIUS_MAX * 2.8)) break;
     }
@@ -608,12 +608,12 @@ function genGRAVITY_RING(rng, colors) {
     planets.push(buildPlanet(pos, rng, colors, planets.length, 22, 40));
   }
 
-  // 3-4 outer anchor planets
-  for (let i = 0; i < 4; i++) {
+  // 4-5 outer anchor planets
+  for (let i = 0; i < 5; i++) {
     const angle = rng() * Math.PI * 2;
-    const r     = ringRadius * 2.2 + rng() * 160;
+    const r     = ringRadius * 2.2 + rng() * 240;
     const pos   = mid.clone().add(new Vector3(
-      Math.cos(angle) * r, (rng() - 0.5) * 120, Math.sin(angle) * r,
+      Math.cos(angle) * r, (rng() - 0.5) * 180, Math.sin(angle) * r,
     ));
     if (isValidPos(pos, taken, tee, cup, PLANET.RADIUS_MAX * 2.5)) {
       taken.push(pos);
@@ -632,8 +632,8 @@ function genCANYON(rng, colors) {
   const { tee, cup } = placeTeeAndCup(rng);
   const dir      = new Vector3().subVectors(cup, tee).normalize();
   const perp     = perpXZ(dir);
-  const wallN    = 5 + Math.floor(rng() * 3); // 5-7 per wall (denser)
-  const wallDist = 130 + rng() * 80;           // wider to match larger scale
+  const wallN    = 7 + Math.floor(rng() * 4); // 7-10 per wall
+  const wallDist = 195 + rng() * 120;          // wider to match larger scale
   const taken = [], planets = [];
 
   for (const side of [-1, 1]) {
@@ -641,10 +641,10 @@ function genCANYON(rng, colors) {
       const t   = 0.1 + (i / (wallN - 1)) * 0.8;
       let pos;
       for (let a = 0; a < 60; a++) {
-        const jitter = (rng() - 0.5) * 36;
+        const jitter = (rng() - 0.5) * 54;
         pos = new Vector3().lerpVectors(tee, cup, t)
           .addScaledVector(perp, side * (wallDist + jitter))
-          .add(new Vector3(0, (rng() - 0.5) * 64, 0));
+          .add(new Vector3(0, (rng() - 0.5) * 96, 0));
         if (isValidPos(pos, taken, tee, cup, PLANET.RADIUS_MAX * 2.8)) break;
       }
       taken.push(pos);
@@ -652,12 +652,12 @@ function genCANYON(rng, colors) {
     }
   }
 
-  // 3 hazard rocks inside the canyon
-  for (let i = 0; i < 3; i++) {
-    const t   = 0.2 + rng() * 0.6;
+  // 5 hazard rocks inside the canyon
+  for (let i = 0; i < 5; i++) {
+    const t   = 0.15 + rng() * 0.7;
     const pos = new Vector3().lerpVectors(tee, cup, t)
       .addScaledVector(perp, (rng() - 0.5) * wallDist * 0.55)
-      .add(new Vector3(0, (rng() - 0.5) * 40, 0));
+      .add(new Vector3(0, (rng() - 0.5) * 60, 0));
     if (isValidPos(pos, taken, tee, cup, PLANET.RADIUS_MAX * 2.8)) {
       taken.push(pos);
       planets.push(buildPlanet(pos, rng, colors, planets.length, 18, 34));
@@ -674,16 +674,16 @@ function genCANYON(rng, colors) {
 function genCLUSTER_BOMB(rng, colors) {
   const { tee, cup } = placeTeeAndCup(rng, 0.9);
   const mid   = new Vector3().lerpVectors(tee, cup, 0.5);
-  const count = 9 + Math.floor(rng() * 4);
+  const count = 15 + Math.floor(rng() * 5);
   const taken = [], planets = [];
 
   for (let i = 0; i < count; i++) {
     let pos;
     for (let a = 0; a < 160; a++) {
       const angle = rng() * Math.PI * 2;
-      const r     = 36 + rng() * 130;
+      const r     = 54 + rng() * 195;
       pos = mid.clone().add(new Vector3(
-        Math.cos(angle) * r, (rng() - 0.5) * 90, Math.sin(angle) * r,
+        Math.cos(angle) * r, (rng() - 0.5) * 135, Math.sin(angle) * r,
       ));
       if (isValidPos(pos, taken, tee, cup, PLANET.RADIUS_MAX * 2.8)) break;
     }
@@ -704,28 +704,28 @@ function genCROSSROADS(rng, colors) {
   const perp     = perpXZ(dir);
   const crossT   = 0.38 + rng() * 0.24;
   const crossMid = new Vector3().lerpVectors(tee, cup, crossT);
-  const wallN    = 3 + Math.floor(rng() * 3);
+  const wallN    = 4 + Math.floor(rng() * 4);
   const taken = [], planets = [];
 
   for (let i = 0; i < wallN; i++) {
-    const offset = (i - (wallN - 1) / 2) * 104 + (rng() - 0.5) * 36;
+    const offset = (i - (wallN - 1) / 2) * 156 + (rng() - 0.5) * 54;
     let pos;
     for (let a = 0; a < 60; a++) {
       pos = crossMid.clone()
         .addScaledVector(perp, offset)
-        .add(new Vector3(0, (rng() - 0.5) * 64, 0));
+        .add(new Vector3(0, (rng() - 0.5) * 96, 0));
       if (isValidPos(pos, taken, tee, cup, PLANET.RADIUS_MAX * 2.8)) break;
     }
     taken.push(pos);
     planets.push(buildPlanet(pos, rng, colors, i, 32, 52));
   }
 
-  // 5 scattered ambient planets
-  for (let i = 0; i < 5; i++) {
+  // 7 scattered ambient planets
+  for (let i = 0; i < 7; i++) {
     const angle = rng() * Math.PI * 2;
-    const r     = 170 + rng() * WORLD.CLUSTER_SPREAD * 0.75;
+    const r     = 255 + rng() * WORLD.CLUSTER_SPREAD * 0.75;
     const pos   = center.clone().add(new Vector3(
-      Math.cos(angle) * r, (rng() - 0.5) * 120, Math.sin(angle) * r,
+      Math.cos(angle) * r, (rng() - 0.5) * 180, Math.sin(angle) * r,
     ));
     if (isValidPos(pos, taken, tee, cup, PLANET.RADIUS_MAX * 2.5)) {
       taken.push(pos);
@@ -744,17 +744,17 @@ function genHELIX(rng, colors) {
   const { center, tee, cup } = placeTeeAndCup(rng);
   const dir   = new Vector3().subVectors(cup, tee).normalize();
   const perp  = perpXZ(dir);
-  const count = 8 + Math.floor(rng() * 3);
+  const count = 12 + Math.floor(rng() * 5);
   const taken = [], planets = [];
 
   for (let i = 0; i < count; i++) {
     const t       = 0.08 + (i / count) * 0.84;
     const side    = i % 2 === 0 ? 1 : -1;
-    const yOffset = side * (56 + rng() * 44);
+    const yOffset = side * (84 + rng() * 66);
     let pos;
     for (let a = 0; a < 80; a++) {
       pos = new Vector3().lerpVectors(tee, cup, t)
-        .addScaledVector(perp, (rng() - 0.5) * 76)
+        .addScaledVector(perp, (rng() - 0.5) * 114)
         .add(new Vector3(0, yOffset, 0));
       if (isValidPos(pos, taken, tee, cup, PLANET.RADIUS_MAX * 2.8)) break;
     }
@@ -762,12 +762,12 @@ function genHELIX(rng, colors) {
     planets.push(buildPlanet(pos, rng, colors, i));
   }
 
-  // 3 outer roamers
-  for (let i = 0; i < 3; i++) {
+  // 5 outer roamers
+  for (let i = 0; i < 5; i++) {
     const angle = rng() * Math.PI * 2;
-    const r     = 200 + rng() * 180;
+    const r     = 300 + rng() * 270;
     const pos   = center.clone().add(new Vector3(
-      Math.cos(angle) * r, (rng() - 0.5) * 120, Math.sin(angle) * r,
+      Math.cos(angle) * r, (rng() - 0.5) * 180, Math.sin(angle) * r,
     ));
     if (isValidPos(pos, taken, tee, cup, PLANET.RADIUS_MAX * 2.5)) {
       taken.push(pos);
@@ -786,8 +786,8 @@ function genSCATTER(rng, colors) {
   const { center, tee, cup } = placeTeeAndCup(rng);
   const dir        = new Vector3().subVectors(cup, tee).normalize();
   const perp       = perpXZ(dir);
-  const count      = 14 + Math.floor(rng() * 5);
-  const blockerN   = 5; // more forced path blockers
+  const count      = 20 + Math.floor(rng() * 7);
+  const blockerN   = 7; // more forced path blockers
   const taken = [], planets = [];
 
   for (let i = 0; i < count; i++) {
@@ -800,12 +800,12 @@ function genSCATTER(rng, colors) {
         const side = (rng() - 0.5) * WORLD.CLUSTER_SPREAD * 0.22;
         pos = new Vector3().lerpVectors(tee, cup, t)
           .addScaledVector(perp, side)
-          .add(new Vector3(0, (rng() - 0.5) * 100, 0));
+          .add(new Vector3(0, (rng() - 0.5) * 150, 0));
       } else {
         const angle = rng() * Math.PI * 2;
         const r     = WORLD.CLUSTER_OFFSET * 0.3 + rng() * WORLD.CLUSTER_SPREAD * 0.95;
         pos = center.clone().add(new Vector3(
-          Math.cos(angle) * r, (rng() - 0.5) * 140, Math.sin(angle) * r,
+          Math.cos(angle) * r, (rng() - 0.5) * 210, Math.sin(angle) * r,
         ));
       }
       if (isValidPos(pos, taken, tee, cup, PLANET.RADIUS_MAX * 2.8)) break;
@@ -876,22 +876,22 @@ function placeWormholes(rng, tee, cup, planets) {
   // Try a few candidate positions; take first that clears all planets
   for (let attempt = 0; attempt < 12; attempt++) {
     const t    = 0.25 + rng() * 0.20;                // 25-45% along path
-    const side = (rng() < 0.5 ? 1 : -1) * (110 + rng() * 110); // 110-220 u perpendicular
-    const vert = (rng() - 0.5) * 80;
+    const side = (rng() < 0.5 ? 1 : -1) * (165 + rng() * 165); // 165-330 u perpendicular
+    const vert = (rng() - 0.5) * 120;
 
     const candidate = new Vector3()
       .lerpVectors(tee, cup, t)
       .addScaledVector(perp, side)
       .add(new Vector3(0, vert, 0));
 
-    const tooClose = planets.some(p => candidate.distanceTo(p.position) < p.radius + 70);
+    const tooClose = planets.some(p => candidate.distanceTo(p.position) < p.radius + 105);
     if (!tooClose) return [candidate];
   }
 
   // Fallback: dead perpendicular at 35% with a fixed offset
   const fallback = new Vector3()
     .lerpVectors(tee, cup, 0.35)
-    .addScaledVector(perp, 160);
+    .addScaledVector(perp, 240);
   return [fallback];
 }
 

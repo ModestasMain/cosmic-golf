@@ -54,7 +54,7 @@ export class PortalSystem {
     const group = new Group();
 
     // Torus ring
-    const torusGeo = new TorusGeometry(6, 1, 12, 48);
+    const torusGeo = new TorusGeometry(15, 2.5, 12, 48);
     const torusMat = new MeshBasicMaterial({
       color,
       transparent: true,
@@ -65,7 +65,7 @@ export class PortalSystem {
     group.add(torus);
 
     // Inner glow ring (slightly larger, more transparent)
-    const glowGeo = new TorusGeometry(6, 2.5, 8, 48);
+    const glowGeo = new TorusGeometry(15, 6.25, 8, 48);
     const col = new Color(color);
     const glowMat = new MeshBasicMaterial({
       color: col.clone().multiplyScalar(0.6),
@@ -79,7 +79,7 @@ export class PortalSystem {
 
     // Label sprite
     const labelSprite = this._makeTextSprite(label, color);
-    labelSprite.position.set(0, 9, 0);
+    labelSprite.position.set(0, 22.5, 0);
     group.add(labelSprite);
 
     group._torus = torus;
@@ -105,7 +105,7 @@ export class PortalSystem {
     const texture = new CanvasTexture(canvas);
     const mat = new SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
     const sprite = new Sprite(mat);
-    sprite.scale.set(20, 5, 1);
+    sprite.scale.set(50, 12.5, 1);
     return sprite;
   }
 
@@ -122,7 +122,7 @@ export class PortalSystem {
 
   _spawnReturnPortal() {
     if (this._returnPortal) return;
-    const pos = new Vector3(-30, 0, 0); // Near tee
+    const pos = new Vector3(-75, 0, 0); // Near tee
 
     this._returnPortal = this._buildPortalMesh(0xff4444, 'RETURN PORTAL');
     this._returnPortal.position.copy(pos);
@@ -137,13 +137,13 @@ export class PortalSystem {
   checkPortalEntry(ballPos) {
     if (this._exitPortal) {
       const dist = ballPos.distanceTo(this._exitPortal.position);
-      if (dist < 7) {
+      if (dist < 17.5) {
         this._enterExitPortal();
       }
     }
     if (this._returnPortal) {
       const dist = ballPos.distanceTo(this._returnPortal.position);
-      if (dist < 7) {
+      if (dist < 17.5) {
         this._enterReturnPortal();
       }
     }

@@ -7,7 +7,7 @@ export const PHYSICS = {
   BALL_MASS: 1,
   BOUNCE_DAMPING: 0.25,    // 25% velocity retained on bounce — settles fast
   VELOCITY_DAMPING: 0.994, // stronger drag — orbital energy decays quickly
-  MAX_SPEED: 800,
+  MAX_SPEED: 780,
   BOUNCE_COOLDOWN_MS: 300, // min ms between BALL_BOUNCED events (prevents audio spam)
   REST_VELOCITY: 3.0,      // speed below which ball is considered at rest
   STUCK_FRAMES: 80,        // frames near planet surface before forcing IDLE

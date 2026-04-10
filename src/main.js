@@ -62,15 +62,15 @@ class Game {
     this.composer.addPass(new RenderPass(scene, camera));
 
     const bloom = new BloomEffect({
-      intensity: 1.4,
-      luminanceThreshold: 0.38,
-      luminanceSmoothing: 0.1,
+      intensity: 2.2,
+      luminanceThreshold: 0.22,
+      luminanceSmoothing: 0.08,
       mipmapBlur: true,
     });
 
     const vignette = new VignetteEffect({
-      offset: 0.4,
-      darkness: 0.7,
+      offset: 0.38,
+      darkness: 0.65,
     });
 
     this.composer.addPass(new EffectPass(camera, bloom, vignette));

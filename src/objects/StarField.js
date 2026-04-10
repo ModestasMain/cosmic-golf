@@ -192,6 +192,24 @@ export class StarField {
     this._layers.push({ pts, geo, mat, baseClr, clr });
   }
 
+  /** Animate star shimmer — call every frame. */
+  update(dt) {
+    this._t = (this._t ?? 0) + dt;
+    const t = this._t;
+    // Each layer breathes at a slightly different frequency and phase
+    const freqs   = [0.41, 0.37, 0.29, 0.53, 0.23, 0.19, 0.47, 0.61, 0.33, 0.58, 0.44, 0.38];
+    const phases  = [0.00, 1.13, 2.27, 0.71, 1.88, 3.14, 0.44, 2.53, 1.05, 1.62, 2.91, 0.82];
+    for (let li = 0; li < this._layers.length; li++) {
+      const { mat } = this._layers[li];
+      const freq    = freqs[li % freqs.length];
+      const phase   = phases[li % phases.length];
+      // Tiny opacity shimmer — barely perceptible, just enough to feel alive
+      const base   = mat._baseOpacity ?? mat.opacity;
+      if (!mat._baseOpacity) mat._baseOpacity = mat.opacity;
+      mat.opacity  = base * (0.88 + 0.12 * Math.sin(t * freq + phase));
+    }
+  }
+
   /**
    * Tint all stars toward the palette color.
    * Applied once per hole — blends from per-star base color.

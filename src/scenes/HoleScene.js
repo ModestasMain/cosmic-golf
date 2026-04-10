@@ -15,6 +15,7 @@ import { generateHole } from '../systems/HoleGenerator.js';
 import { stepBall } from '../systems/GravitySystem.js';
 import { TrajectoryPreview } from '../systems/TrajectoryPreview.js';
 import { Planet } from '../objects/Planet.js';
+// import { EarthPlanet } from '../objects/EarthPlanet.js';
 import { GolfBall } from '../objects/GolfBall.js';
 import { HoleCup } from '../objects/HoleCup.js';
 import { TeeMarker } from '../objects/TeeMarker.js';
@@ -28,6 +29,8 @@ import { GhostBall } from '../objects/GhostBall.js';
 import { LaunchWarp } from '../effects/LaunchWarp.js';
 import { Wormhole, WORMHOLE_CAPTURE_RADIUS } from '../objects/Wormhole.js';
 import { audioManager } from '../audio/AudioManager.js';
+import { CometSystem } from '../effects/CometSystem.js';
+import { CinematicController } from './CinematicController.js';
 
 export class HoleScene {
   constructor(renderer, inputSystem) {
@@ -98,6 +101,29 @@ export class HoleScene {
 
     // Current palette background color for tweening
     this._bgColor = { r: 0, g: 0, b: 0 };
+
+    // Idle camera drift
+    this._idleDriftT = 0;
+
+    // Comet system — shared across holes
+    this.cometSystem = new CometSystem(this.scene);
+
+    // Hole-intro cinematic
+    this.cinematic = new CinematicController(this.camera, () => {
+      // Sync lerp origin so camera doesn't snap when normal follow takes over
+      this._cameraPos.copy(this.camera.position);
+      if (this.ball) {
+        this._cameraTarget.copy(
+          this.ball.position.clone().addScaledVector(this._facingDir, 8),
+        );
+      }
+      // Re-enable input and unlock gameplay
+      this.inputSystem.enabled = true;
+      if (this._state === 'CINEMATIC') {
+        this._state = 'IDLE';
+        gameState.aimState = 'IDLE';
+      }
+    });
 
     // Systems
     this.trajectoryPreview = new TrajectoryPreview(this.scene);
@@ -352,6 +378,16 @@ export class HoleScene {
       this.planetObjects.push(pObj);
     }
 
+    // TEST: Earth planet on hole 1 — commented out while EarthPlanet is WIP
+    // if (holeIndex === 0) {
+    //   const earthPos  = tee.clone().add(new Vector3(0, 0, 90));
+    //   const earthData = { position: earthPos, radius: 16, mass: 2000 };
+    //   const earthObj  = new EarthPlanet({ ...earthData, seed: 42 });
+    //   earthObj.addToScene(this.scene);
+    //   this.planets.push(earthData);
+    //   this.planetObjects.push(earthObj);
+    // }
+
     // Place ball at tee
     this.ball = new GolfBall(palette.ball);
     this.ball.setPosition(tee.clone().add(new Vector3(0, BALL.RADIUS + 0.2, 0)));
@@ -386,6 +422,15 @@ export class HoleScene {
     this._facingDir.subVectors(cup, tee).normalize();
     if (this._facingDir.lengthSq() < 0.01) this._facingDir.set(0, 0, -1);
 
+    // Kick off hole-intro cinematic — block all input until done/skipped
+    this.inputSystem.enabled = false;
+    this._state = 'CINEMATIC';
+    gameState.aimState = 'CINEMATIC';
+    this.cinematic.start(
+      cup.clone(), tee.clone(), this._facingDir.clone(),
+      CAMERA.FOLLOW_DISTANCE, CAMERA.FOLLOW_HEIGHT,
+    );
+
     // Reset ball trail for this hole
     if (this.ball?.trail) this.ball.trail.setActive(false);
 
@@ -404,6 +449,8 @@ export class HoleScene {
 
     // Ghost balls are spawned on-demand when ball_state or shot arrives with matching holeIndex
     // (prevents showing ghosts for players who are on a different hole)
+
+    if (this.cometSystem) this.cometSystem.onHoleLoaded();
 
     eventBus.emit(Events.HOLE_LOADED, { holeIndex, archetype: this._holeData.archetype });
   }
@@ -563,6 +610,17 @@ export class HoleScene {
   update(dt) {
     if (!this._holeData || !this.ball) return;
 
+    // Cinematic intro — world animates but gameplay is fully locked
+    if (this._state === 'CINEMATIC') {
+      for (const p of this.planetObjects) p.update(dt);
+      if (this.cup) this.cup.update(dt);
+      if (this.starField)   this.starField.update(dt);
+      if (this.cometSystem) this.cometSystem.update(dt);
+      this.cinematic.update(dt);
+      tweenUpdate();
+      return;
+    }
+
     // Remote balls — always simulate regardless of local state
     if (this._state !== 'HOLE_COMPLETE') this._updateRemoteBalls(dt);
 
@@ -585,6 +643,10 @@ export class HoleScene {
         this._aimArrow.setDirection(this._facingDir.clone().normalize());
       }
     }
+
+    // Update background ambiance
+    if (this.starField)   this.starField.update(dt);
+    if (this.cometSystem) this.cometSystem.update(dt);
 
     // Update planet gravity fields
     for (const p of this.planetObjects) p.update(dt);
@@ -869,6 +931,7 @@ export class HoleScene {
 
   _updateCamera(dt) {
     if (!this.ball) return;
+    if (this._state === 'CINEMATIC') return; // cinematic owns the camera
 
     const ballPos = this.ball.position;
 
@@ -894,6 +957,14 @@ export class HoleScene {
       .addScaledVector(behind, CAMERA.FOLLOW_DISTANCE)
       .addScaledVector(camUp,  CAMERA.FOLLOW_HEIGHT);
 
+    // Idle/aiming: gentle cinematic drift — universe never feels frozen
+    if (this._state === 'IDLE' || this._state === 'AIMING') {
+      this._idleDriftT += dt * 0.13;
+      const d = 3.5;
+      targetPos.x += Math.sin(this._idleDriftT)        * d;
+      targetPos.y += Math.cos(this._idleDriftT * 0.63) * d * 0.35;
+    }
+
     this._cameraPos.lerp(targetPos, CAMERA.FOLLOW_LERP);
     this.camera.position.copy(this._cameraPos).add(this.screenShake.shakeOffset);
 
@@ -909,6 +980,16 @@ export class HoleScene {
     gameState.ballInFlight = false;
     gameState.holeComplete = true;
     gameState.aimState = 'HOLE_COMPLETE';
+
+    // Nearest planet celebrates
+    if (this.cup && this.planetObjects.length > 0) {
+      let nearest = null, nearestDist = Infinity;
+      for (const p of this.planetObjects) {
+        const d = p.group.position.distanceTo(this.cup.position);
+        if (d < nearestDist) { nearestDist = d; nearest = p; }
+      }
+      if (nearest) nearest.triggerCelebration();
+    }
 
     // Suck ball into black hole — spiral inward animation
     if (this.ball && this.cup) {
@@ -1173,6 +1254,8 @@ export class HoleScene {
     // ball trail disposed inside ball.removeFromScene()
     this.launchBurst.dispose();
     this.launchWarp.dispose();
+    if (this.cinematic) this.cinematic.dispose();
+    if (this.cometSystem) this.cometSystem.dispose();
     this.scene.clear();
   }
 }

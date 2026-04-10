@@ -5,7 +5,7 @@
 import {
   Mesh, SphereGeometry, MeshStandardMaterial, MeshBasicMaterial,
   TorusGeometry, CircleGeometry, BackSide, Color, Group, AdditiveBlending,
-  CanvasTexture, Vector3,
+  CanvasTexture, Vector3, BufferGeometry, Float32BufferAttribute, Points, PointsMaterial,
 } from 'three';
 import { GravityField } from '../effects/GravityField.js';
 
@@ -210,35 +210,112 @@ function makeTextureRocky(color, seed) {
   const hex = toHex(color); const [r,g,b] = parseRGB(hex);
   const seq = makeSeq(seed);
 
-  ctx.fillStyle = hex; ctx.fillRect(0,0,R,R);
+  // ── Dark, varied base ──────────────────────────────────────
+  ctx.fillStyle = `rgb(${Math.max(r-30,0)},${Math.max(g-30,0)},${Math.max(b-30,0)})`;
+  ctx.fillRect(0,0,R,R);
 
-  // Large craters with clear dark floor + bright rim
-  for (let i = 0; i < 10; i++) {
-    const cx=seq()*R, cy=seq()*R, cr=15+seq()*50;
-    // Dark floor
-    ctx.beginPath(); ctx.arc(cx,cy,cr*0.75,0,Math.PI*2);
-    ctx.fillStyle = `rgb(${Math.max(r-80,0)},${Math.max(g-80,0)},${Math.max(b-80,0)})`;
+  // ── Macro rock patches — large irregular blobs ────────────
+  for (let i = 0; i < 18; i++) {
+    const px = seq()*R, py = seq()*R;
+    const prad = 20 + seq()*70;
+    const bright = seq() > 0.5;
+    const amt = 30 + seq()*50;
+    const rr = bright ? Math.min(r+amt,255) : Math.max(r-amt,0);
+    const gg = bright ? Math.min(g+amt*0.9,255) : Math.max(g-amt*0.9,0);
+    const bb = bright ? Math.min(b+amt*0.8,255) : Math.max(b-amt*0.8,0);
+    const pts = 5 + Math.floor(seq()*4);
+    ctx.beginPath();
+    for (let v = 0; v < pts; v++) {
+      const a = (v/pts)*Math.PI*2 + seq()*0.6;
+      const dist = prad * (0.55 + seq()*0.45);
+      v === 0
+        ? ctx.moveTo(px + Math.cos(a)*dist, py + Math.sin(a)*dist)
+        : ctx.lineTo(px + Math.cos(a)*dist, py + Math.sin(a)*dist);
+    }
+    ctx.closePath();
+    ctx.fillStyle = `rgba(${rr},${gg},${bb},${0.35 + seq()*0.3})`;
     ctx.fill();
+  }
+
+  // ── Rock facets — medium irregular polygons with facet shading ──
+  for (let i = 0; i < 40; i++) {
+    const px = seq()*R, py = seq()*R;
+    const sz = 8 + seq()*30;
+    const sides = 4 + Math.floor(seq()*3); // 4–6 sides
+    const lightAmt = (seq()-0.5) * 80; // positive = lit face, negative = shadow
+    const rr = Math.max(0,Math.min(255, r + lightAmt));
+    const gg = Math.max(0,Math.min(255, g + lightAmt*0.95));
+    const bb = Math.max(0,Math.min(255, b + lightAmt*0.90));
+    ctx.beginPath();
+    for (let v = 0; v < sides; v++) {
+      const a = (v/sides)*Math.PI*2 + seq()*0.5;
+      const dist = sz * (0.5 + seq()*0.5);
+      v === 0
+        ? ctx.moveTo(px + Math.cos(a)*dist, py + Math.sin(a)*dist)
+        : ctx.lineTo(px + Math.cos(a)*dist, py + Math.sin(a)*dist);
+    }
+    ctx.closePath();
+    ctx.fillStyle = `rgba(${rr},${gg},${bb},${0.5 + seq()*0.35})`;
+    ctx.fill();
+    // Thin dark edge line — crevice between facets
+    ctx.strokeStyle = `rgba(${Math.max(r-60,0)},${Math.max(g-60,0)},${Math.max(b-60,0)},0.6)`;
+    ctx.lineWidth = 0.8 + seq()*1.2;
+    ctx.stroke();
+  }
+
+  // ── Surface scratches and fracture lines ──────────────────
+  for (let i = 0; i < 35; i++) {
+    const x1=seq()*R, y1=seq()*R;
+    const len = 10 + seq()*60;
+    const ang = seq()*Math.PI;
+    const x2 = x1 + Math.cos(ang)*len;
+    const y2 = y1 + Math.sin(ang)*len;
+    const dark = seq() > 0.3; // mostly dark crevices, some bright veins
+    ctx.strokeStyle = dark
+      ? `rgba(${Math.max(r-70,0)},${Math.max(g-70,0)},${Math.max(b-70,0)},${0.4+seq()*0.4})`
+      : `rgba(${Math.min(r+60,255)},${Math.min(g+55,255)},${Math.min(b+50,255)},${0.15+seq()*0.2})`;
+    ctx.lineWidth = 0.5 + seq()*2.0;
+    ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+  }
+
+  // ── Craters with depth gradient ───────────────────────────
+  for (let i = 0; i < 8; i++) {
+    const cx=seq()*R, cy=seq()*R, cr=12+seq()*45;
+    // Shadow interior — radial gradient for depth illusion
+    const shadow = ctx.createRadialGradient(cx-cr*0.2, cy-cr*0.2, 0, cx, cy, cr);
+    shadow.addColorStop(0,   `rgba(${Math.min(r+20,255)},${Math.min(g+20,255)},${Math.min(b+20,255)},0.3)`);
+    shadow.addColorStop(0.4, `rgba(${Math.max(r-50,0)},${Math.max(g-50,0)},${Math.max(b-50,0)},0.7)`);
+    shadow.addColorStop(0.8, `rgba(${Math.max(r-90,0)},${Math.max(g-90,0)},${Math.max(b-90,0)},0.9)`);
+    shadow.addColorStop(1.0, `rgba(0,0,0,0)`);
+    ctx.beginPath(); ctx.arc(cx, cy, cr, 0, Math.PI*2);
+    ctx.fillStyle = shadow; ctx.fill();
     // Bright ejecta rim
-    const rim = ctx.createRadialGradient(cx,cy,cr*0.7,cx,cy,cr*1.1);
-    rim.addColorStop(0, `rgba(${Math.min(r+80,255)},${Math.min(g+80,255)},${Math.min(b+80,255)},0.9)`);
+    const rim = ctx.createRadialGradient(cx,cy,cr*0.82,cx,cy,cr*1.15);
+    rim.addColorStop(0, `rgba(${Math.min(r+70,255)},${Math.min(g+65,255)},${Math.min(b+60,255)},0.8)`);
     rim.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.beginPath(); ctx.arc(cx,cy,cr*1.1,0,Math.PI*2);
+    ctx.beginPath(); ctx.arc(cx,cy,cr*1.15,0,Math.PI*2);
     ctx.fillStyle = rim; ctx.fill();
   }
-  // Small craters
-  for (let i = 0; i < 20; i++) {
-    const cx=seq()*R, cy=seq()*R, cr=4+seq()*12;
+
+  // ── Small pebble craters ──────────────────────────────────
+  for (let i = 0; i < 28; i++) {
+    const cx=seq()*R, cy=seq()*R, cr=2+seq()*9;
+    const g2 = ctx.createRadialGradient(cx-cr*0.3,cy-cr*0.3,0,cx,cy,cr);
+    g2.addColorStop(0,   `rgba(${Math.min(r+30,255)},${Math.min(g+30,255)},${Math.min(b+25,255)},0.5)`);
+    g2.addColorStop(0.6, `rgba(${Math.max(r-60,0)},${Math.max(g-60,0)},${Math.max(b-55,0)},0.8)`);
+    g2.addColorStop(1,   'rgba(0,0,0,0)');
     ctx.beginPath(); ctx.arc(cx,cy,cr,0,Math.PI*2);
-    ctx.fillStyle = `rgba(${Math.max(r-70,0)},${Math.max(g-70,0)},${Math.max(b-70,0)},0.85)`;
+    ctx.fillStyle = g2; ctx.fill();
+  }
+
+  // ── Specular glints — bright mineral flecks ───────────────
+  for (let i = 0; i < 22; i++) {
+    const gx=seq()*R, gy=seq()*R, gs=1+seq()*4;
+    ctx.beginPath(); ctx.arc(gx,gy,gs,0,Math.PI*2);
+    ctx.fillStyle = `rgba(${Math.min(r+120,255)},${Math.min(g+110,255)},${Math.min(b+100,255)},${0.25+seq()*0.35})`;
     ctx.fill();
   }
-  // Rocky surface noise — coarse blocks
-  for (let i = 0; i < 60; i++) {
-    const lum = seq() > 0.5 ? 50 : -50;
-    ctx.fillStyle = `rgba(${lum>0?255:0},${lum>0?255:0},${lum>0?255:0},0.12)`;
-    ctx.fillRect(seq()*R, seq()*R, 6+seq()*14, 6+seq()*14);
-  }
+
   return new CanvasTexture(c);
 }
 
@@ -403,6 +480,9 @@ export class Planet {
     this._buildExtras(seq, seed);
 
     this.gravityField = new GravityField(position, radius, mass, color);
+
+    this._celebrationRings = [];   // { mesh, life, rate, startR, maxR }
+    this._celebrationAuroraT = 0; // > 0 while aurora is active
   }
 
   _buildMesh(seq) {
@@ -422,14 +502,21 @@ export class Planet {
     this._textures.push(texture);
 
     const isLava = this.type === 'LAVA';
+    const isGas  = this.type === 'GAS' || this.type === 'RINGED';
+    const isIce  = this.type === 'ICE';
     const col    = new Color(this.color);
+
+    const emissiveInt = isLava ? 0.35
+                      : isGas  ? 0.18
+                      : isIce  ? 0.10
+                      : 0.12;
 
     const sharedProps = {
       map:               texture,
-      roughness:         this.type === 'ICE' ? 0.1 : this.type === 'GAS' ? 0.55 : 0.82,
-      metalness:         this.type === 'ICE' ? 0.1 : 0.0,
+      roughness:         isIce ? 0.1 : isGas ? 0.55 : 0.78,
+      metalness:         isIce ? 0.15 : 0.0,
       emissive:          isLava ? new Color(0xff2200) : col,
-      emissiveIntensity: isLava ? 0.2 : 0.05,
+      emissiveIntensity: emissiveInt,
     };
 
     // Opaque material — default, writes depth, fully solid
@@ -449,16 +536,34 @@ export class Planet {
   }
 
   _buildAtmosphere() {
-    const scale   = this.type === 'LAVA' ? 1.2 : 1.13;
-    const opacity = this.type === 'LAVA' ? 0.1 : this.type === 'ICE' ? 0.07 : 0.04;
-    const col     = this.type === 'LAVA' ? new Color(0xff4400) : new Color(this.color);
-    const geo     = new SphereGeometry(this.radius * scale, 24, 18);
-    const mat     = new MeshBasicMaterial({
+    const isLava = this.type === 'LAVA';
+    const isGas  = this.type === 'GAS' || this.type === 'RINGED';
+    const isIce  = this.type === 'ICE';
+
+    const scale   = isLava ? 1.22 : isGas ? 1.18 : 1.14;
+    const opacity = isLava ? 0.22 : isGas ? 0.18 : isIce ? 0.12 : 0.09;
+    const col     = isLava ? new Color(0xff4400) : new Color(this.color);
+
+    // Outer halo
+    const geo = new SphereGeometry(this.radius * scale, 24, 18);
+    const mat = new MeshBasicMaterial({
       color: col, side: BackSide, transparent: true, opacity,
       depthWrite: false, blending: AdditiveBlending,
     });
     this.glowMesh = new Mesh(geo, mat);
     this.bodyGroup.add(this.glowMesh);
+
+    // Inner rim glow — tighter, brighter ring that catches bloom
+    const innerScale   = isLava ? 1.10 : 1.07;
+    const innerOpacity = isLava ? 0.18 : isGas ? 0.14 : 0.07;
+    const innerCol     = col.clone().lerp(new Color(0xffffff), 0.3);
+    const innerGeo     = new SphereGeometry(this.radius * innerScale, 20, 14);
+    const innerMat     = new MeshBasicMaterial({
+      color: innerCol, side: BackSide, transparent: true, opacity: innerOpacity,
+      depthWrite: false, blending: AdditiveBlending,
+    });
+    this._innerGlowMesh = new Mesh(innerGeo, innerMat);
+    this.bodyGroup.add(this._innerGlowMesh);
   }
 
   _buildExtras(seq, seed) {
@@ -490,6 +595,35 @@ export class Planet {
     for (let i = 0; i < moonCount; i++) {
       this._moons.push(buildMoon(this.group, this.radius, this.color, seed + i * 1000 + 77));
     }
+
+    // Gravitational lensing glow — large planets only (approx photon sphere)
+    if (this.radius >= 18) {
+      this._buildLensingGlow();
+    }
+  }
+
+  _buildLensingGlow() {
+    // A thin blue-white halo just outside the atmosphere — mimics photon-sphere lensing
+    const scale   = 1.22;
+    const geo     = new SphereGeometry(this.radius * scale, 24, 18);
+    const col     = new Color(this.color);
+    // Shift toward blue-white to suggest light bending
+    col.lerp(new Color(0x88ccff), 0.55);
+    const mat = new MeshBasicMaterial({
+      color: col, side: BackSide, transparent: true, opacity: 0.055,
+      depthWrite: false, blending: AdditiveBlending,
+    });
+    this._lensingMesh = new Mesh(geo, mat);
+    this.bodyGroup.add(this._lensingMesh);
+
+    // Second, tighter ring — brighter limb edge
+    const geo2 = new SphereGeometry(this.radius * 1.16, 20, 14);
+    const mat2 = new MeshBasicMaterial({
+      color: new Color(0xbbddff), side: BackSide, transparent: true, opacity: 0.04,
+      depthWrite: false, blending: AdditiveBlending,
+    });
+    this._lensingMesh2 = new Mesh(geo2, mat2);
+    this.bodyGroup.add(this._lensingMesh2);
   }
 
   /**
@@ -528,6 +662,38 @@ export class Planet {
     this._craters.push({ mesh, geo, mat, tex, life: 1.0, rate: 0.06 + Math.random() * 0.04 });
   }
 
+  /**
+   * Fire a celebratory burst: three expanding ring pulses + aurora flash.
+   * Call when the player holes out near this planet.
+   */
+  triggerCelebration() {
+    const col = new Color(this.color);
+    col.lerp(new Color(0xffffff), 0.4);
+
+    // Three rings, staggered delays
+    for (let i = 0; i < 3; i++) {
+      const delay = i * 0.18; // seconds before ring starts expanding
+      const geo = new TorusGeometry(this.radius * 1.4, 0.4, 4, 64);
+      const mat = new MeshBasicMaterial({
+        color: col, transparent: true, opacity: 0.0,
+        depthWrite: false, blending: AdditiveBlending,
+      });
+      const mesh = new Mesh(geo, mat);
+      mesh.rotation.x = Math.PI / 2;
+      this.group.add(mesh);
+      this._celebrationRings.push({
+        mesh, life: 1.0, rate: 0.55,
+        startR: this.radius * 1.4,
+        maxR:   this.radius * 4.5,
+        delay,
+        elapsed: -delay,
+      });
+    }
+
+    // Aurora: briefly ramp up atmosphere glow opacity then fade
+    this._celebrationAuroraT = 1.8;
+  }
+
   setOpacity(v) {
     if (v >= 0.99) {
       // Fully visible — use solid opaque material
@@ -547,6 +713,37 @@ export class Planet {
     // Moon orbits
     for (const m of this._moons) {
       m.orbit.rotation.y += m.speed * dt;
+    }
+
+    // Celebration ring pulses
+    for (let i = this._celebrationRings.length - 1; i >= 0; i--) {
+      const cr = this._celebrationRings[i];
+      cr.elapsed += dt;
+      if (cr.elapsed < 0) continue; // still in delay
+      cr.life -= cr.rate * dt;
+      if (cr.life <= 0) {
+        this.group.remove(cr.mesh);
+        cr.mesh.geometry.dispose();
+        cr.mesh.material.dispose();
+        this._celebrationRings.splice(i, 1);
+        continue;
+      }
+      const progress = 1 - cr.life;
+      const scale = cr.startR + (cr.maxR - cr.startR) * progress;
+      cr.mesh.scale.setScalar(scale / cr.startR);
+      // Peak opacity at 20% then fade
+      const opacityEnv = progress < 0.2 ? (progress / 0.2) : cr.life;
+      cr.mesh.material.opacity = opacityEnv * 0.55;
+    }
+
+    // Celebration aurora: temporarily boost atmosphere glow
+    if (this._celebrationAuroraT > 0) {
+      this._celebrationAuroraT -= dt;
+      const auroraFrac = Math.min(1, this._celebrationAuroraT / 1.0);
+      if (this.glowMesh) {
+        const baseOpacity = this.type === 'LAVA' ? 0.1 : this.type === 'ICE' ? 0.07 : 0.04;
+        this.glowMesh.material.opacity = baseOpacity + auroraFrac * 0.45;
+      }
     }
 
     // Fade out craters
@@ -583,6 +780,7 @@ export class Planet {
     for (const t of this._textures) t.dispose();
     this.glowMesh.geometry.dispose();
     this.glowMesh.material.dispose();
+    if (this._innerGlowMesh) { this._innerGlowMesh.geometry.dispose(); this._innerGlowMesh.material.dispose(); }
     if (this._ringGroup) {
       this._ringGroup.traverse(c => { if (c.isMesh) { c.geometry.dispose(); c.material.dispose(); } });
     }
@@ -594,5 +792,13 @@ export class Planet {
       cr.geo.dispose(); cr.mat.dispose(); cr.tex.dispose();
     }
     this._craters = [];
+
+    for (const cr of this._celebrationRings) {
+      cr.mesh.geometry.dispose(); cr.mesh.material.dispose();
+    }
+    this._celebrationRings = [];
+
+    if (this._lensingMesh)  { this._lensingMesh.geometry.dispose();  this._lensingMesh.material.dispose(); }
+    if (this._lensingMesh2) { this._lensingMesh2.geometry.dispose(); this._lensingMesh2.material.dispose(); }
   }
 }

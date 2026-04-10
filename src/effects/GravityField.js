@@ -43,7 +43,7 @@ export class GravityField {
       r.phase = (r.phase + dt * r.speed) % 1;
       const scale = r.maxR + (r.minR - r.maxR) * r.phase;
       r.mesh.scale.setScalar(scale);
-      r.mesh.material.opacity = Math.sin(r.phase * Math.PI) * 0.06;
+      r.mesh.material.opacity = Math.sin(r.phase * Math.PI) * 0.10;
     }
   }
 

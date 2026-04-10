@@ -3,7 +3,7 @@
 // ============================================================
 
 import {
-  Mesh, SphereGeometry, TorusGeometry,
+  Mesh, SphereGeometry, TorusGeometry, CylinderGeometry,
   MeshBasicMaterial, Group, Color,
   AdditiveBlending, BackSide, PointLight,
   BufferGeometry, Float32BufferAttribute, Points, PointsMaterial,
@@ -29,6 +29,7 @@ export class HoleCup {
     this._buildDisk();
     this._buildVortex();
     this._buildGravRings();
+    this._buildJets();
     this._buildLight();
   }
 
@@ -164,36 +165,40 @@ export class HoleCup {
     }
   }
 
-  // ── Polar relativistic jets ────────────────────────────────
+  // ── Pulsar beacon — rotating lighthouse beam ──────────────
 
   _buildJets() {
-    const jetGeo = new CylinderGeometry(0.15, 0.6, HORIZON_R * 8, 6);
+    // All jet geometry lives inside a single group so we can rotate it as a unit
+    this.jetGroup = new Group();
+    this.group.add(this.jetGroup);
+
+    const jetGeo = new CylinderGeometry(0.15, 0.6, HORIZON_R * 9, 6);
     const jetMat = new MeshBasicMaterial({
       color: 0x6699ff, transparent: true, opacity: 0.18,
       depthWrite: false, blending: AdditiveBlending,
     });
 
     this.jetNorth = new Mesh(jetGeo, jetMat);
-    this.jetNorth.position.y = HORIZON_R * 4;
-    this.group.add(this.jetNorth);
+    this.jetNorth.position.y = HORIZON_R * 4.5;
+    this.jetGroup.add(this.jetNorth);
 
     this.jetSouth = new Mesh(jetGeo.clone(), jetMat.clone());
-    this.jetSouth.position.y = -HORIZON_R * 4;
+    this.jetSouth.position.y = -HORIZON_R * 4.5;
     this.jetSouth.rotation.z = Math.PI;
-    this.group.add(this.jetSouth);
+    this.jetGroup.add(this.jetSouth);
 
-    // Jet core — brighter thin beam
-    const coreGeo = new CylinderGeometry(0.04, 0.04, HORIZON_R * 10, 4);
+    // Bright thin core beam
+    const coreGeo = new CylinderGeometry(0.04, 0.04, HORIZON_R * 11, 4);
     const coreMat = new MeshBasicMaterial({
-      color: 0xaaccff, transparent: true, opacity: 0.5,
+      color: 0xaaccff, transparent: true, opacity: 0.55,
       depthWrite: false, blending: AdditiveBlending,
     });
     this.jetCoreN = new Mesh(coreGeo, coreMat);
-    this.jetCoreN.position.y = HORIZON_R * 5;
-    this.group.add(this.jetCoreN);
+    this.jetCoreN.position.y = HORIZON_R * 5.5;
+    this.jetGroup.add(this.jetCoreN);
     this.jetCoreS = new Mesh(coreGeo.clone(), coreMat.clone());
-    this.jetCoreS.position.y = -HORIZON_R * 5;
-    this.group.add(this.jetCoreS);
+    this.jetCoreS.position.y = -HORIZON_R * 5.5;
+    this.jetGroup.add(this.jetCoreS);
   }
 
   // ── Lighting ─────────────────────────────────────────────
@@ -241,6 +246,17 @@ export class HoleCup {
     // Horizon pulse — barely perceptible breathe
     const hs = 1 + Math.sin(t * 1.3) * 0.02;
     this.horizon.scale.setScalar(hs);
+
+    // Pulsar beacon — lighthouse sweep
+    if (this.jetGroup) {
+      this.jetGroup.rotation.y += dt * 1.6;
+      // Pulse beam opacity in sync with the sweep
+      const beamPulse = 0.85 + Math.sin(t * 3.1) * 0.15;
+      if (this.jetNorth) this.jetNorth.material.opacity = 0.18 * beamPulse;
+      if (this.jetSouth) this.jetSouth.material.opacity = 0.18 * beamPulse;
+      if (this.jetCoreN) this.jetCoreN.material.opacity = 0.55 * beamPulse;
+      if (this.jetCoreS) this.jetCoreS.material.opacity = 0.55 * beamPulse;
+    }
 
     // Suck intensification
     if (this._sucking) {
@@ -294,5 +310,11 @@ export class HoleCup {
     [this.vortex, this.vortex2].forEach(v => {
       v.geometry.dispose(); v.material.dispose();
     });
+
+    if (this.jetGroup) {
+      this.jetGroup.traverse(c => {
+        if (c.isMesh) { c.geometry.dispose(); c.material.dispose(); }
+      });
+    }
   }
 }

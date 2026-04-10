@@ -21,7 +21,7 @@ import {
 } from 'three';
 
 export const WORMHOLE_CAPTURE_RADIUS = 18;
-export const WORMHOLE_ENTER_RADIUS   = 4;
+export const WORMHOLE_ENTER_RADIUS   = 3.2;
 
 const BALL_RADIUS_REF = 0.8;
 const RIM_R           = 4.5; // visible portal mouth radius (matches gameplay enter radius visually)

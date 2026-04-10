@@ -33,9 +33,9 @@ function glowSprite() {
 }
 
 // ── Config ────────────────────────────────────────────────────
-const COMET_RADIUS  = 1600; // spawn/despawn sphere radius
+const COMET_RADIUS  = 3200; // spawn/despawn sphere radius
 const TRAIL_STEPS   = 32;   // history points for the tail
-const COMET_SPEED   = 340;  // world units per second
+const COMET_SPEED   = 680;  // world units per second
 const MIN_INTERVAL  = 3;    // seconds between comets (min)
 const MAX_INTERVAL  = 9;    // seconds between comets (max)
 const MAX_ACTIVE    = 4;    // max simultaneous comets

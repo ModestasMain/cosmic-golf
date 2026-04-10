@@ -69,7 +69,8 @@ export class HoleScene {
     // Bounce cooldown + stuck detection
     this._lastBounceTime = 0;
     this._stuckFrames = 0;
-    this._launchGraceFrames = 0; // counts down after shot — gravity ramps up
+    this._launchGraceFrames = 0;  // counts down after shot — gravity ramps up
+    this._bounceGraceFrames = 0;  // counts down after bounce — suppresses drift-OOB
 
     // Camera facing direction — rotated by aim drag, trails velocity in flight
     this._facingDir  = new Vector3(0, 0, -1);
@@ -727,6 +728,7 @@ export class HoleScene {
         const now = Date.now();
         if (now - this._lastBounceTime > PHYSICS.BOUNCE_COOLDOWN_MS) {
           this._lastBounceTime = now;
+          this._bounceGraceFrames = 90; // ~3s grace — suppresses drift-OOB after damped bounce
           // Hit-freeze: pause physics for a few frames (biggest feel upgrade)
           this._hitFreezeFrames = Math.max(this._hitFreezeFrames, 4);
           // Bounce particles at impact point
@@ -851,7 +853,11 @@ export class HoleScene {
       }
 
       // Slow drift: away from all anchors and barely moving → OOB
-      if (nearestSafeDist > 80 && ballSpeed < HOLE.VOID_DRIFT_SPEED) {
+      // Suppress for a few seconds after a bounce — bounce damping can drop speed
+      // below the threshold even when the ball is still on a valid path.
+      if (this._bounceGraceFrames > 0) {
+        this._bounceGraceFrames--;
+      } else if (nearestSafeDist > 160 && ballSpeed < HOLE.VOID_DRIFT_SPEED) {
         this._onOutOfBounds();
         return;
       }
@@ -922,7 +928,7 @@ export class HoleScene {
       if (d2 < threshold) {
         // Planet is in the way — fade it based on how centred the occlusion is
         const t = Math.max(0, Math.sqrt(d2) / planet.radius); // 0=dead-centre, 1=edge
-        pObj.setOpacity(0.25 + t * 0.45); // range 0.25 → 0.70
+        pObj.setOpacity(0.10 + t * 0.35); // range 0.10 → 0.45 — very see-through
       } else {
         pObj.setOpacity(1.0);
       }
@@ -1069,31 +1075,12 @@ export class HoleScene {
   _onWormholeEnter(wormhole) {
     if (!this.ball || !this.cup) return;
 
-    const cupPos = this.cup.position;
-
-    if (Math.random() < 0.25) {
-      // ── 25%: Success — fly straight into the black hole ──────────
-      // Teleport to 38 units along the wormhole→cup line — inside the
-      // black hole's 45-unit gravity pull radius so it gets assisted in.
-      const towardCup = new Vector3().subVectors(cupPos, wormhole.position).normalize();
-      this.ball.setPosition(cupPos.clone().addScaledVector(towardCup, -38));
-      this.ball.setVelocity(towardCup.multiplyScalar(55));
-    } else {
-      // ── 80%: Miss — wormhole deflects the ball ───────────────────
-      // Ball is spat back out sideways from the wormhole — no
-      // teleport near the cup. Wormhole "rejected" the entry.
-      const wormPos = wormhole.position;
-      const towardCup = new Vector3().subVectors(cupPos, wormPos).normalize();
-      // Perpendicular kick in XZ plane so ball stays in the playfield
-      const perpKick = new Vector3(-towardCup.z, 0, towardCup.x);
-      perpKick.multiplyScalar(Math.random() < 0.5 ? 1 : -1);
-      // Mix perpendicular + slight backwards so it's not going toward cup
-      const deflect = perpKick.clone()
-        .addScaledVector(towardCup, -0.4)
-        .normalize();
-      this.ball.setPosition(wormPos.clone().addScaledVector(deflect, 6));
-      this.ball.setVelocity(deflect.multiplyScalar(160));
-    }
+    // 100% hole-in-one — teleport to just inside the black hole's pull radius
+    const cupPos    = this.cup.position;
+    const towardCup = new Vector3().subVectors(cupPos, wormhole.position).normalize();
+    const dropDist  = HOLE.BLACK_HOLE_PULL_RADIUS * 0.75; // well inside pull zone
+    this.ball.setPosition(cupPos.clone().addScaledVector(towardCup, -dropDist));
+    this.ball.setVelocity(towardCup.multiplyScalar(110));
 
     this._launchGraceFrames = 0;
     eventBus.emit(Events.WORMHOLE_ENTER, { position: wormhole.position.clone() });

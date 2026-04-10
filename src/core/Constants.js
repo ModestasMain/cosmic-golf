@@ -7,7 +7,7 @@ export const PHYSICS = {
   BALL_MASS: 1,
   BOUNCE_DAMPING: 0.25,    // 25% velocity retained on bounce — settles fast
   VELOCITY_DAMPING: 0.994, // stronger drag — orbital energy decays quickly
-  MAX_SPEED: 400,
+  MAX_SPEED: 800,
   BOUNCE_COOLDOWN_MS: 300, // min ms between BALL_BOUNCED events (prevents audio spam)
   REST_VELOCITY: 3.0,      // speed below which ball is considered at rest
   STUCK_FRAMES: 80,        // frames near planet surface before forcing IDLE
@@ -19,7 +19,7 @@ export const BALL = {
 };
 
 export const AIM = {
-  MAX_POWER: 320,          // bigger world needs more range
+  MAX_POWER: 640,          // 2x world scale needs more range
   MAX_DRAG_DISTANCE: 120,  // px
   TRAJECTORY_STEPS: 160,
   TRAJECTORY_DT: 0.016,
@@ -29,38 +29,38 @@ export const HOLE = {
   COUNT: 10,
   PLANETS_MIN: 5,
   PLANETS_MAX: 8,
-  TEE_RADIUS: 1.5,
-  CUP_RADIUS: 10,              // slightly bigger — hole is harder to reach so easier to sink
-  CUP_SPEED_THRESHOLD: 90,
-  OUT_OF_BOUNDS_DISTANCE: 1400, // hard outer limit (origin distance)
+  TEE_RADIUS: 3,
+  CUP_RADIUS: 20,              // 2x world scale
+  CUP_SPEED_THRESHOLD: 180,
+  OUT_OF_BOUNDS_DISTANCE: 2800, // hard outer limit (origin distance)
   OUT_OF_BOUNDS_PENALTY: 2,
   // Void detection — ball escaping the planet cluster
-  VOID_OOB_SURFACE_DIST: 310,  // units from nearest planet *surface* — beyond this = deep space = OOB
-  VOID_DRIFT_SPEED: 14,        // if ball is >80u from any surface AND slower than this → OOB
-  BLACK_HOLE_PULL_RADIUS: 45,
+  VOID_OOB_SURFACE_DIST: 620,  // units from nearest planet *surface* — beyond this = deep space = OOB
+  VOID_DRIFT_SPEED: 28,        // if ball is >160u from any surface AND slower than this → OOB
+  BLACK_HOLE_PULL_RADIUS: 90,
   BLACK_HOLE_GRAVITY: 60,
 };
 
 export const PLANET = {
-  RADIUS_MIN: 10,
-  RADIUS_MAX: 28,
+  RADIUS_MIN: 20,
+  RADIUS_MAX: 56,
   MASS_FACTOR: 0.055,
 };
 
 export const CAMERA = {
   FOV: 70,
   NEAR: 0.1,
-  FAR: 3000,
+  FAR: 6000,
   FOLLOW_LERP: 0.07,
   DIR_LERP: 0.04,
-  FOLLOW_DISTANCE: 65,  // pulled back — world feels bigger
-  FOLLOW_HEIGHT: 12,
+  FOLLOW_DISTANCE: 130,  // 2x world scale
+  FOLLOW_HEIGHT: 24,
   AIM_LERP: 0.12,
 };
 
 export const STARFIELD = {
   COUNT: 4500,
-  RADIUS: 2800,
+  RADIUS: 5600,
 };
 
 export const MULTIPLAYER = {
@@ -137,6 +137,6 @@ export const COLOR_PALETTES = [
 ];
 
 export const WORLD = {
-  CLUSTER_SPREAD: 300,  // tee→cup ≈ 685–855 units — reachable with a full-power shot
-  CLUSTER_OFFSET: 110,  // push cluster further from origin
+  CLUSTER_SPREAD: 600,  // 2x world scale — tee→cup ≈ 1370–1710 units
+  CLUSTER_OFFSET: 220,  // push cluster further from origin
 };

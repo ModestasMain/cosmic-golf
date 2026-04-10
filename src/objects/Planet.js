@@ -530,6 +530,9 @@ export class Planet {
       opacity:     0.3,
     });
 
+    // Store base values so setOpacity can desaturate without drifting
+    this._baseEmissiveIntensity = emissiveInt;
+
     this._mat = this._matOpaque; // start opaque
     this.mesh = new Mesh(geo, this._mat);
     this.bodyGroup.add(this.mesh);
@@ -552,6 +555,7 @@ export class Planet {
     });
     this.glowMesh = new Mesh(geo, mat);
     this.bodyGroup.add(this.glowMesh);
+    this._baseGlowOpacity = opacity; // stored for setOpacity desaturation
 
     // Inner rim glow — tighter, brighter ring that catches bloom
     const innerScale   = isLava ? 1.10 : 1.07;
@@ -564,6 +568,7 @@ export class Planet {
     });
     this._innerGlowMesh = new Mesh(innerGeo, innerMat);
     this.bodyGroup.add(this._innerGlowMesh);
+    this._baseInnerGlowOpacity = innerOpacity; // stored for setOpacity desaturation
   }
 
   _buildExtras(seq, seed) {
@@ -696,12 +701,23 @@ export class Planet {
 
   setOpacity(v) {
     if (v >= 0.99) {
-      // Fully visible — use solid opaque material
+      // Fully visible — restore opaque material and full glow
       this.mesh.material = this._matOpaque;
+      if (this.glowMesh)       this.glowMesh.material.opacity       = this._baseGlowOpacity;
+      if (this._innerGlowMesh) this._innerGlowMesh.material.opacity = this._baseInnerGlowOpacity;
     } else {
-      // Ball behind planet — swap to transparent material
-      this._matTransparent.opacity = v;
-      this.mesh.material = this._matTransparent;
+      // Ball behind planet — desaturate + kill emissive so trajectory shows through clearly
+      const mat = this._matTransparent;
+      mat.opacity = v;
+      // Grey out the texture tint: lerp mat.color from white toward mid-grey as it fades
+      const grey = 0.30 + v * 0.70; // 0.30 at fully faded, 1.0 at opaque
+      mat.color.setScalar(grey);
+      // Crush emissive — bloom from a bright emissive drowns the cyan trajectory dots
+      mat.emissiveIntensity = this._baseEmissiveIntensity * v * 0.25;
+      this.mesh.material = mat;
+      // Fade atmosphere glow so it doesn't bleed through and obscure the trajectory
+      if (this.glowMesh)       this.glowMesh.material.opacity       = this._baseGlowOpacity * v * 0.4;
+      if (this._innerGlowMesh) this._innerGlowMesh.material.opacity = this._baseInnerGlowOpacity * v * 0.4;
     }
   }
 

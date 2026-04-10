@@ -11,7 +11,7 @@ import {
 } from 'three';
 import { HOLE } from '../core/Constants.js';
 
-const HORIZON_R  = 4;
+const HORIZON_R  = 8;
 const DISK_TILT  = 0.35;
 
 export class HoleCup {
@@ -204,10 +204,10 @@ export class HoleCup {
   // ── Lighting ─────────────────────────────────────────────
 
   _buildLight() {
-    this.light = new PointLight(0xff6600, 2.0, 80);
+    this.light = new PointLight(0xff6600, 2.0, 160);
     this.group.add(this.light);
     // Second blue light for jet effect
-    this.lightBlue = new PointLight(0x4466ff, 0.6, 40);
+    this.lightBlue = new PointLight(0x4466ff, 0.6, 80);
     this.group.add(this.lightBlue);
   }
 

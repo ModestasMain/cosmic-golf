@@ -649,29 +649,26 @@ class FlightDrone {
 
 // ── BGM Step Sequencer ────────────────────────────────────
 //
-// A slow space-ambient loop: bass pulse + filtered pads + sparse melody.
-// Runs as a lookahead scheduler using setTimeout + AudioContext.currentTime
-// for sample-accurate timing that survives JS jitter.
+// Upbeat cosmic jam: 128 BPM with kick/snare/hi-hat, funky bass,
+// catchy square-wave lead and chord stabs. 32-step loop (2 bars).
+// Lookahead scheduler for sample-accurate timing despite JS jitter.
 
 class BGMSequencer {
   constructor() {
     this._running    = false;
-    this._nextBeat   = 0;    // AudioContext time of next scheduled beat
-    this._beatIdx    = 0;    // step counter (0–63, 64 steps = 4 bars)
+    this._nextBeat   = 0;
+    this._beatIdx    = 0;
     this._timeoutId  = null;
     this._gainNode   = null;
 
-    // BPM 72 → beat duration in seconds
-    this._bpm        = 72;
-    this._beatSec    = 60 / this._bpm;   // ~0.833 s per quarter note
-    this._stepSec    = this._beatSec / 4; // 16th note = 0.208 s
-    this._lookahead  = 0.1;  // seconds ahead to schedule
-    this._scheduleHz = 50;   // ms between scheduling runs
+    // 128 BPM → 16th note = 0.117 s
+    this._bpm        = 128;
+    this._beatSec    = 60 / this._bpm;
+    this._stepSec    = this._beatSec / 4;
+    this._lookahead  = 0.1;
+    this._scheduleHz = 50;
 
-    // 64-step pattern (4 bars of 16 steps each)
-    // Each entry: { bass, pad, melody } where values are semitone offsets
-    // from a root (C2=65.4Hz for bass, C4=261.6Hz for pad, C5=523.25Hz for mel)
-    // null = rest
+    // 32-step pattern (2 bars of 16th notes)
     this._pattern = this._buildPattern();
   }
 
@@ -680,103 +677,187 @@ class BGMSequencer {
   }
 
   _buildPattern() {
-    // MIDI note numbers
-    const C2  = 36, G2 = 43, F2 = 41, Bb2 = 46;
-    const C4  = 60, E4 = 64, G4 = 67, Bb4 = 70, F4 = 65;
-    const C5  = 72, E5 = 76, G5 = 79, A5  = 81, D5 = 74;
+    // 32 steps = 2 bars at 128 BPM (16th notes)
+    // Each step: { kick, snare, hat, bass, lead, stab }
+    const pattern = Array.from({ length: 32 }, () => ({
+      kick: false, snare: false, hat: false,
+      bass: null, lead: null, stab: null,
+    }));
 
-    // 64 steps. Each step: { bass, pad, melody } or null fields = rest
-    // Bass hits on steps 0,8,16,24,32,40,48,56 (every half-bar)
-    // Pad swells on steps 0,16,32,48
-    // Melody sparse — handful of hits across 4 bars
-    const pattern = Array.from({ length: 64 }, () => ({ bass: null, pad: null, melody: null }));
+    // ── Drums ───────────────────────────────────────────────
+    // Kick — 4-on-the-floor (every 8 steps = every quarter note)
+    [0, 8, 16, 24].forEach(s => { pattern[s].kick = true; });
+    // Snare — beat 2 and 4 of each bar (steps 4, 12, 20, 28)
+    [4, 12, 20, 28].forEach(s => { pattern[s].snare = true; });
+    // Hi-hat — off-beat 8ths (between every beat)
+    [2, 6, 10, 14, 18, 22, 26, 30].forEach(s => { pattern[s].hat = true; });
 
-    // Bass line — slow root movement
-    const bassHits = [
-      [0, C2], [8, G2], [16, F2], [24, C2],
-      [32, Bb2], [40, G2], [48, F2], [56, C2],
+    // ── Bass line (C major, funky root movement) ────────────
+    // MIDI: C2=36 G2=43 F2=41 A2=45 Bb2=46
+    const bassLine = [
+    //  0    1    2    3    4    5    6    7
+       36, null,  36, null,  43, null,  43, null,
+    //  8    9   10   11   12   13   14   15
+       41, null,  41, null,  43, null,  43, null,
+    // 16   17   18   19   20   21   22   23
+       36, null,  36, null,  46, null,  43, null,
+    // 24   25   26   27   28   29   30   31
+       41, null,  41, null,  43, null,  36, null,
     ];
-    bassHits.forEach(([step, note]) => { pattern[step].bass = note; });
+    bassLine.forEach((note, i) => { if (note !== null) pattern[i].bass = note; });
 
-    // Pad — slow chord swells every 16 steps (one per bar)
-    const padHits = [
-      [0,  [C4, G4]],
-      [16, [F4, C4]],
-      [32, [Bb4, F4]],
-      [48, [G4, E4]],
+    // ── Lead melody (catchy 2-bar hook, C major pentatonic) ─
+    // C5=72 D5=74 E5=76 G5=79 A5=81 C6=84
+    const leadLine = [
+    //  0    1    2    3    4    5    6    7
+       72, null,  76, null,  79, null,  81, null,
+    //  8    9   10   11   12   13   14   15
+       79, null,  76, null,  72, null,  74, null,
+    // 16   17   18   19   20   21   22   23
+       76, null,  79, null,  81, null,  84, null,
+    // 24   25   26   27   28   29   30   31
+       81, null,  79, null,  76, null,  74, null,
     ];
-    padHits.forEach(([step, notes]) => { pattern[step].pad = notes; });
+    leadLine.forEach((note, i) => { if (note !== null) pattern[i].lead = note; });
 
-    // Melody — sparse high notes scattered for eerie feel
-    const melHits = [
-      [4, C5], [20, G5], [28, E5], [36, A5], [44, D5], [58, G5],
-    ];
-    melHits.forEach(([step, note]) => { pattern[step].melody = note; });
+    // ── Chord stabs (short, punchy) ─────────────────────────
+    // C4=60 E4=64 G4=67 F4=65 A4=69 B4=71 D5=74
+    const Cmaj = [60, 64, 67];
+    const Fmaj = [65, 69, 72];
+    const Gmaj = [67, 71, 74];
+    [
+      [0, Cmaj], [8, Fmaj], [12, Gmaj],
+      [16, Cmaj], [24, Fmaj], [28, Gmaj],
+    ].forEach(([step, chord]) => { pattern[step].stab = chord; });
 
     return pattern;
   }
 
   _scheduleStep(step, time) {
     if (gameState.isMuted) return;
-    const c   = ctx();
-    const p   = this._pattern[step % 64];
-    const vol = this._gainNode.gain.value;
+    const c = ctx();
+    const p = this._pattern[step % 32];
 
-    // Bass — sine wave, long attack + slow decay (cosmic pulse)
-    if (p.bass !== null) {
-      const hz = this._midiToHz(p.bass);
+    // ── Kick drum (sine pitch-drop: 85 → 28 Hz) ────────────
+    if (p.kick) {
       const osc  = c.createOscillator();
       const gain = c.createGain();
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(hz, time);
-      gain.gain.setValueAtTime(0.0001, time);
-      gain.gain.linearRampToValueAtTime(0.32, time + 0.12);
-      gain.gain.exponentialRampToValueAtTime(0.0001, time + this._stepSec * 7);
+      osc.frequency.setValueAtTime(85, time);
+      osc.frequency.exponentialRampToValueAtTime(28, time + 0.22);
+      gain.gain.setValueAtTime(0.9, time);
+      gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.28);
       osc.connect(gain);
       gain.connect(this._gainNode);
       osc.start(time);
-      osc.stop(time + this._stepSec * 8);
+      osc.stop(time + 0.30);
     }
 
-    // Pad — triangle waves, heavily filtered, very slow fade
-    if (p.pad !== null) {
-      p.pad.forEach(midi => {
+    // ── Snare (triangle body + bandpass noise) ──────────────
+    if (p.snare) {
+      const osc = c.createOscillator();
+      const og  = c.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(220, time);
+      osc.frequency.exponentialRampToValueAtTime(100, time + 0.08);
+      og.gain.setValueAtTime(0.30, time);
+      og.gain.exponentialRampToValueAtTime(0.0001, time + 0.10);
+      osc.connect(og);
+      og.connect(this._gainNode);
+      osc.start(time);
+      osc.stop(time + 0.12);
+
+      const bufLen = Math.ceil(c.sampleRate * 0.14);
+      const buf    = c.createBuffer(1, bufLen, c.sampleRate);
+      const data   = buf.getChannelData(0);
+      for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1;
+      const src = c.createBufferSource();
+      src.buffer = buf;
+      const bp  = c.createBiquadFilter();
+      bp.type = 'bandpass'; bp.frequency.value = 1800; bp.Q.value = 0.7;
+      const ng  = c.createGain();
+      ng.gain.setValueAtTime(0.40, time);
+      ng.gain.exponentialRampToValueAtTime(0.0001, time + 0.13);
+      src.connect(bp); bp.connect(ng); ng.connect(this._gainNode);
+      src.start(time);
+      src.stop(time + 0.15);
+    }
+
+    // ── Hi-hat (highpass noise, very short) ─────────────────
+    if (p.hat) {
+      const bufLen = Math.ceil(c.sampleRate * 0.038);
+      const buf    = c.createBuffer(1, bufLen, c.sampleRate);
+      const data   = buf.getChannelData(0);
+      for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1;
+      const src = c.createBufferSource();
+      src.buffer = buf;
+      const hp  = c.createBiquadFilter();
+      hp.type = 'highpass'; hp.frequency.value = 7000; hp.Q.value = 0.5;
+      const hg  = c.createGain();
+      hg.gain.setValueAtTime(0.16, time);
+      hg.gain.exponentialRampToValueAtTime(0.0001, time + 0.032);
+      src.connect(hp); hp.connect(hg); hg.connect(this._gainNode);
+      src.start(time);
+      src.stop(time + 0.04);
+    }
+
+    // ── Bass synth (sawtooth + filter envelope) ─────────────
+    if (p.bass !== null) {
+      const hz   = this._midiToHz(p.bass);
+      const osc  = c.createOscillator();
+      const filt = c.createBiquadFilter();
+      const gain = c.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(hz, time);
+      filt.type = 'lowpass';
+      filt.frequency.setValueAtTime(80, time);
+      filt.frequency.linearRampToValueAtTime(700, time + 0.02);
+      filt.frequency.exponentialRampToValueAtTime(220, time + 0.15);
+      filt.Q.value = 2.8;
+      gain.gain.setValueAtTime(0.0001, time);
+      gain.gain.linearRampToValueAtTime(0.52, time + 0.005);
+      gain.gain.setValueAtTime(0.52, time + this._stepSec * 1.6);
+      gain.gain.exponentialRampToValueAtTime(0.0001, time + this._stepSec * 2.4);
+      osc.connect(filt); filt.connect(gain); gain.connect(this._gainNode);
+      osc.start(time);
+      osc.stop(time + this._stepSec * 2.6);
+    }
+
+    // ── Lead synth (square wave, punchy envelope) ────────────
+    if (p.lead !== null) {
+      const hz   = this._midiToHz(p.lead);
+      const osc  = c.createOscillator();
+      const filt = c.createBiquadFilter();
+      const gain = c.createGain();
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(hz, time);
+      filt.type = 'lowpass'; filt.frequency.value = 1800; filt.Q.value = 1.4;
+      gain.gain.setValueAtTime(0.0001, time);
+      gain.gain.linearRampToValueAtTime(0.13, time + 0.006);
+      gain.gain.setValueAtTime(0.13, time + this._stepSec * 1.3);
+      gain.gain.exponentialRampToValueAtTime(0.0001, time + this._stepSec * 2.1);
+      osc.connect(filt); filt.connect(gain); gain.connect(this._gainNode);
+      osc.start(time);
+      osc.stop(time + this._stepSec * 2.3);
+    }
+
+    // ── Chord stab (triangle, short, slightly filtered) ──────
+    if (p.stab !== null) {
+      for (const midi of p.stab) {
         const hz   = this._midiToHz(midi);
         const osc  = c.createOscillator();
         const filt = c.createBiquadFilter();
         const gain = c.createGain();
         osc.type = 'triangle';
         osc.frequency.value = hz;
-        filt.type            = 'lowpass';
-        filt.frequency.value = 600;
-        filt.Q.value         = 0.8;
-        // Slow swell in
+        filt.type = 'lowpass'; filt.frequency.value = 950; filt.Q.value = 0.9;
         gain.gain.setValueAtTime(0.0001, time);
-        gain.gain.linearRampToValueAtTime(0.10, time + 1.2);
-        gain.gain.setValueAtTime(0.10, time + this._stepSec * 13);
-        gain.gain.exponentialRampToValueAtTime(0.0001, time + this._stepSec * 16);
-        osc.connect(filt);
-        filt.connect(gain);
-        gain.connect(this._gainNode);
+        gain.gain.linearRampToValueAtTime(0.065, time + 0.010);
+        gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.26);
+        osc.connect(filt); filt.connect(gain); gain.connect(this._gainNode);
         osc.start(time);
-        osc.stop(time + this._stepSec * 16 + 0.1);
-      });
-    }
-
-    // Melody — pure sine, single hits with long ring
-    if (p.melody !== null) {
-      const hz  = this._midiToHz(p.melody);
-      const osc  = c.createOscillator();
-      const gain = c.createGain();
-      osc.type = 'sine';
-      osc.frequency.value = hz;
-      gain.gain.setValueAtTime(0.0001, time);
-      gain.gain.linearRampToValueAtTime(0.09, time + 0.04);
-      gain.gain.exponentialRampToValueAtTime(0.0001, time + this._stepSec * 5);
-      osc.connect(gain);
-      gain.connect(this._gainNode);
-      osc.start(time);
-      osc.stop(time + this._stepSec * 5 + 0.1);
+        osc.stop(time + 0.30);
+      }
     }
   }
 
@@ -787,7 +868,7 @@ class BGMSequencer {
 
     while (this._nextBeat < end) {
       this._scheduleStep(this._beatIdx, this._nextBeat);
-      this._beatIdx  = (this._beatIdx + 1) % 64;
+      this._beatIdx  = (this._beatIdx + 1) % 32;
       this._nextBeat += this._stepSec;
     }
 
@@ -802,11 +883,11 @@ class BGMSequencer {
     this._gainNode.gain.value = 0.0001;
     this._gainNode.connect(master());
 
-    // Fade BGM in slowly over 4 seconds
-    this._gainNode.gain.linearRampToValueAtTime(0.55, c.currentTime + 4);
+    // Fade BGM in over 3 seconds
+    this._gainNode.gain.linearRampToValueAtTime(0.52, c.currentTime + 3);
 
     this._running  = true;
-    this._nextBeat = c.currentTime + 0.1; // slight offset to let context settle
+    this._nextBeat = c.currentTime + 0.1;
     this._beatIdx  = 0;
     this._tick();
   }
@@ -821,7 +902,7 @@ class BGMSequencer {
 
   setMuted(muted) {
     if (!this._gainNode) return;
-    const target = muted ? 0 : 0.55;
+    const target = muted ? 0 : 0.52;
     this._gainNode.gain.setTargetAtTime(target, ctx().currentTime, 0.3);
   }
 }

@@ -258,6 +258,71 @@ export class HoleCup {
       if (this.jetCoreS) this.jetCoreS.material.opacity = 0.55 * beamPulse;
     }
 
+    // Supernova animation
+    if (this._supernova && this._novaParticles) {
+      this._supernovaT += dt;
+      const st  = this._supernovaT;
+      const dur = 2.8;
+
+      // Animate particle positions
+      const posAttr = this._novaParticles.geometry.getAttribute('position');
+      for (let i = 0; i < posAttr.count; i++) {
+        const drag = Math.max(0, 1 - st * 0.6);
+        posAttr.setXYZ(
+          i,
+          this._novaVelArray[i * 3]     * st * drag,
+          this._novaVelArray[i * 3 + 1] * st * drag,
+          this._novaVelArray[i * 3 + 2] * st * drag,
+        );
+      }
+      posAttr.needsUpdate = true;
+
+      // Fade particles after peak
+      const fadeStart = dur * 0.3;
+      if (st > fadeStart) {
+        this._novaParticles.material.opacity = Math.max(0, 1 - (st - fadeStart) / (dur - fadeStart));
+      }
+
+      // Horizon explodes then collapses
+      const horizonScale = st < 0.5
+        ? 1 + st * 16          // rapid expansion
+        : Math.max(1, 9 - (st - 0.5) * 12); // collapse back
+      this.horizon.scale.setScalar(horizonScale);
+
+      // Ring shockwave
+      if (this._novaRing) {
+        const ringScale = 1 + st * 25;
+        this._novaRing.mesh.scale.setScalar(ringScale);
+        this._novaRing.mesh.material.opacity = Math.max(0, 1 - st / 1.2);
+      }
+
+      // Disk rings flash and spin wildly
+      for (const r of this._diskRings) {
+        r.mesh.rotation.z   += dt * r.spinSpeed * (1 + st * 8);
+        r.mesh.material.opacity = Math.min(1, r.baseOpacity + st * 2) * Math.max(0, 1 - st / dur);
+      }
+
+      // Lights surge
+      this.light.intensity     = Math.min(30, 2 + st * 40);
+      this.lightBlue.intensity = Math.min(15, 0.5 + st * 20);
+
+      if (st >= dur) {
+        // Clean up particles
+        this.group.remove(this._novaParticles);
+        this._novaParticles.geometry.dispose();
+        this._novaParticles.material.dispose();
+        this._novaParticles = null;
+        // Clean up ring shockwave
+        if (this._novaRing) {
+          this.diskGroup.remove(this._novaRing.mesh);
+          this._novaRing.mesh.geometry.dispose();
+          this._novaRing.mesh.material.dispose();
+          this._novaRing = null;
+        }
+        this._supernova = false;
+      }
+    }
+
     // Suck intensification
     if (this._sucking) {
       this._suckT = Math.min(1, this._suckT + dt * 1.2);
@@ -283,6 +348,66 @@ export class HoleCup {
   activateSuck() {
     this._sucking = true;
     this._suckT   = 0;
+  }
+
+  // ── Supernova — triggered on hole-in-one ─────────────────
+
+  triggerSupernova() {
+    if (this._supernova) return;
+    this._supernova    = true;
+    this._supernovaT   = 0;
+    this._novaParticles = null;
+    this._novaVelArray  = null;
+
+    this._buildNovaParticles();
+  }
+
+  _buildNovaParticles() {
+    const count = 320;
+    const pos   = new Float32Array(count * 3);
+    const col   = new Float32Array(count * 3);
+    this._novaVelArray = new Float32Array(count * 3);
+
+    for (let i = 0; i < count; i++) {
+      // All particles start at center (world space is offset by group.position)
+      pos[i * 3] = pos[i * 3 + 1] = pos[i * 3 + 2] = 0;
+
+      // Random spherical direction
+      const phi   = Math.random() * Math.PI * 2;
+      const theta = Math.acos(2 * Math.random() - 1);
+      const speed = 60 + Math.random() * 280;
+      this._novaVelArray[i * 3]     = Math.sin(theta) * Math.cos(phi) * speed;
+      this._novaVelArray[i * 3 + 1] = Math.cos(theta) * speed;
+      this._novaVelArray[i * 3 + 2] = Math.sin(theta) * Math.sin(phi) * speed;
+
+      // Spectrum: inner orange→yellow, outer cyan→white
+      const hue = Math.random();
+      if (hue < 0.3) {
+        col[i * 3] = 1;   col[i * 3 + 1] = 0.6 + Math.random() * 0.4;   col[i * 3 + 2] = 0.1;
+      } else if (hue < 0.6) {
+        col[i * 3] = 1;   col[i * 3 + 1] = 1;   col[i * 3 + 2] = 0.4 + Math.random() * 0.6;
+      } else {
+        col[i * 3] = 0.4 + Math.random() * 0.6;   col[i * 3 + 1] = 0.8 + Math.random() * 0.2;   col[i * 3 + 2] = 1;
+      }
+    }
+
+    const geo = new BufferGeometry();
+    geo.setAttribute('position', new Float32BufferAttribute(pos, 3));
+    geo.setAttribute('color',    new Float32BufferAttribute(col, 3));
+
+    this._novaParticles = new Points(geo, new PointsMaterial({
+      size: 3.0, vertexColors: true,
+      transparent: true, opacity: 1.0,
+      depthWrite: false, blending: AdditiveBlending,
+      sizeAttenuation: true,
+    }));
+    this.group.add(this._novaParticles);
+
+    // Ring shockwave
+    this._novaRing = this._ring(HORIZON_R * 1.5, 2.5, 0xffffff, 1.0, 0);
+    this._novaRing.mesh.rotation.x = Math.random() * Math.PI;
+    this._novaRing.mesh.rotation.z = Math.random() * Math.PI;
+    this._novaRing._expanding = true;
   }
 
   // ── Collision ─────────────────────────────────────────────

@@ -147,19 +147,49 @@ export class MultiplayerManager {
             holeIndex: msg.holeIndex,
             ts: msg.ts,
             bounce: msg.bounce ?? false,
+            planetIdx: msg.planetIdx ?? null,
+            normal: msg.normal ?? null,
           });
         }
         break;
 
       case 'ball_stopped':
         if (msg.playerId !== this.playerId) {
-          eventBus.emit(Events.MP_BALL_STOPPED, { playerId: msg.playerId, pos: msg.pos, holeIndex: msg.holeIndex });
+          eventBus.emit(Events.MP_BALL_STOPPED, {
+            playerId: msg.playerId,
+            pos: msg.pos,
+            holeIndex: msg.holeIndex,
+            planetIdx: msg.planetIdx ?? null,
+            normal: msg.normal ?? null,
+          });
         }
         break;
 
       case 'hole_complete':
         if (msg.playerId !== this.playerId) {
           eventBus.emit(Events.MP_HOLE_COMPLETE, { playerId: msg.playerId, strokes: msg.strokes, timeMs: msg.timeMs });
+        }
+        break;
+
+      case 'collected':
+        if (msg.playerId !== this.playerId) {
+          eventBus.emit(Events.COLLECTIBLE_COLLECTED, {
+            type: msg.collectibleType, id: msg.collectibleId,
+            playerId: msg.playerId, holeIndex: msg.holeIndex,
+            remote: true,
+          });
+        }
+        break;
+
+      case 'ball_hit':
+        if (msg.targetId === this.playerId) {
+          // Someone hit our ball — apply the impulse
+          eventBus.emit(Events.BILLIARD_HIT, {
+            targetId: msg.targetId,
+            normal:   msg.normal,
+            impulse:  msg.impulse,
+            remote:   true,
+          });
         }
         break;
 
@@ -196,9 +226,9 @@ export class MultiplayerManager {
     this._send({ type: 'join', playerId: this.playerId, name, color });
   }
 
-  broadcastBallState(pos, vel, holeIndex, bounce = false) {
+  broadcastBallState(pos, vel, holeIndex, bounce = false, planetIdx = null, normal = null) {
     if (!this._isConnected || this._isSolo) return;
-    this._send({
+    const msg = {
       type: 'ball_state',
       playerId: this.playerId,
       holeIndex,
@@ -206,16 +236,42 @@ export class MultiplayerManager {
       bounce,
       pos: { x: pos.x, y: pos.y, z: pos.z },
       vel: { x: vel.x, y: vel.y, z: vel.z },
-    });
+    };
+    if (planetIdx != null && planetIdx >= 0) {
+      msg.planetIdx = planetIdx;
+      if (normal) msg.normal = { x: normal.x, y: normal.y, z: normal.z };
+    }
+    this._send(msg);
   }
 
-  broadcastBallStopped(pos, holeIndex) {
+  broadcastBallStopped(pos, holeIndex, planetIdx = null, normal = null) {
     if (!this._isConnected || this._isSolo) return;
-    this._send({
+    const msg = {
       type: 'ball_stopped',
       playerId: this.playerId,
       holeIndex,
       pos: { x: pos.x, y: pos.y, z: pos.z },
+    };
+    if (planetIdx != null && planetIdx >= 0) {
+      msg.planetIdx = planetIdx;
+      if (normal) msg.normal = { x: normal.x, y: normal.y, z: normal.z };
+    }
+    this._send(msg);
+  }
+
+  broadcastCollected(collectibleId, collectibleType, holeIndex) {
+    if (!this._isConnected || this._isSolo) return;
+    this._send({ type: 'collected', playerId: this.playerId, collectibleId, collectibleType, holeIndex });
+  }
+
+  broadcastBallHit(targetId, normal, impulse) {
+    if (!this._isConnected || this._isSolo) return;
+    this._send({
+      type:     'ball_hit',
+      playerId: this.playerId,
+      targetId,
+      normal:   { x: normal.x, y: normal.y, z: normal.z },
+      impulse,
     });
   }
 

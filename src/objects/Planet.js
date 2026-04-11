@@ -357,6 +357,35 @@ function makeTextureSand(color, seed) {
 
 // ── Crater texture — dark scorched disc with bright ejecta rim ─
 
+// ── City-lights texture — scattered warm/cool dots for TERRAN night side ─
+
+function makeTextureCityLights(seed) {
+  const c = document.createElement('canvas'); c.width = c.height = R;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#000000'; ctx.fillRect(0, 0, R, R);
+  const seq = makeSeq(seed + 9999);
+
+  const clusters = 6 + Math.floor(seq() * 7);
+  for (let i = 0; i < clusters; i++) {
+    const cx = seq() * R;
+    const cy = seq() * R;
+    const dots = 6 + Math.floor(seq() * 18);
+    for (let j = 0; j < dots; j++) {
+      const x = cx + (seq() - 0.5) * 80;
+      const y = cy + (seq() - 0.5) * 55;
+      const r = 0.6 + seq() * 2.4;
+      const warm = seq() > 0.55; // orange-warm or blue-cool
+      const a = 0.5 + seq() * 0.5;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fillStyle = warm
+        ? `rgba(255,${180 + Math.floor(seq() * 75)},${80 + Math.floor(seq() * 80)},${a})`
+        : `rgba(${160 + Math.floor(seq() * 80)},${200 + Math.floor(seq() * 55)},255,${a})`;
+      ctx.fill();
+    }
+  }
+  return new CanvasTexture(c);
+}
+
 function makeCraterTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = 128;
@@ -466,6 +495,8 @@ export class Planet {
     this._textures   = [];
     this._moons      = [];
     this._craters    = [];
+
+    this._t = 0; // time accumulator for animations
 
     this.group = new Group();
     this.group.position.copy(position);
@@ -592,6 +623,23 @@ export class Planet {
       this._cloudMesh     = new Mesh(cloudGeo, cloudMat);
       this._cloudSpinRate = (seq() - 0.5) * 0.08;
       this.bodyGroup.add(this._cloudMesh);
+    }
+
+    // City lights for TERRAN — visible on the night side only (additive overlay)
+    if (this.type === 'TERRAN') {
+      const lightsTex = makeTextureCityLights(seed + 7777);
+      this._textures.push(lightsTex);
+      const lightsMat = new MeshBasicMaterial({
+        map: lightsTex, transparent: true,
+        opacity: 0.55, depthWrite: false, blending: AdditiveBlending,
+      });
+      this._cityLightsMesh = new Mesh(
+        new SphereGeometry(this.radius * 1.002, 28, 20),
+        lightsMat,
+      );
+      // City lights rotate very slowly opposite to clouds — subtle parallax
+      this._cityLightsRate = -(this._cloudSpinRate ?? 0.04) * 0.3;
+      this.bodyGroup.add(this._cityLightsMesh);
     }
 
     // 0–2 moons — larger planets more likely to have them
@@ -722,9 +770,27 @@ export class Planet {
   }
 
   update(dt) {
+    this._t += dt;
+    const t = this._t;
+
     // Self-rotation
     this.mesh.rotation.y += this._spinSpeed * dt;
-    if (this._cloudMesh) this._cloudMesh.rotation.y += this._cloudSpinRate * dt;
+    if (this._cloudMesh)     this._cloudMesh.rotation.y     += this._cloudSpinRate  * dt;
+    if (this._cityLightsMesh) this._cityLightsMesh.rotation.y += this._cityLightsRate * dt;
+
+    // Lava planet: emissive flicker — cracked glowing crust effect
+    if (this.type === 'LAVA') {
+      const flicker = 0.28 + Math.sin(t * 3.9) * 0.09 + Math.sin(t * 7.3) * 0.05
+                           + Math.sin(t * 13.1) * 0.02;
+      this._matOpaque.emissiveIntensity    = flicker;
+      this._matTransparent.emissiveIntensity = flicker * 0.25;
+    }
+
+    // Atmosphere breathe — gentle sine pulse on glow (skip while celebration is active)
+    if (this.glowMesh && this._celebrationAuroraT <= 0) {
+      const pulse = 0.88 + Math.sin(t * 0.7 + this._axialTilt * 3) * 0.12;
+      this.glowMesh.material.opacity = this._baseGlowOpacity * pulse;
+    }
 
     // Moon orbits
     for (const m of this._moons) {
@@ -800,7 +866,8 @@ export class Planet {
     if (this._ringGroup) {
       this._ringGroup.traverse(c => { if (c.isMesh) { c.geometry.dispose(); c.material.dispose(); } });
     }
-    if (this._cloudMesh) { this._cloudMesh.geometry.dispose(); this._cloudMesh.material.dispose(); }
+    if (this._cloudMesh)      { this._cloudMesh.geometry.dispose();      this._cloudMesh.material.dispose(); }
+    if (this._cityLightsMesh) { this._cityLightsMesh.geometry.dispose(); this._cityLightsMesh.material.dispose(); }
     for (const m of this._moons) {
       m.mesh.geometry.dispose(); m.mesh.material.dispose();
     }

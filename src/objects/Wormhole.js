@@ -21,10 +21,10 @@ import {
 } from 'three';
 
 export const WORMHOLE_CAPTURE_RADIUS = 18;
-export const WORMHOLE_ENTER_RADIUS   = 3.2;
+export const WORMHOLE_ENTER_RADIUS   = 5;
 
 const BALL_RADIUS_REF = 0.8;
-const RIM_R           = 4.5; // visible portal mouth radius (matches gameplay enter radius visually)
+const RIM_R           = 5; // visible portal mouth radius (matches gameplay enter radius visually)
 
 export class Wormhole {
   constructor(position, teePos) {

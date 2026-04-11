@@ -94,4 +94,14 @@ export const Events = {
 
   // Wormhole
   WORMHOLE_ENTER:     'wormhole:enter', // { position: Vector3 }
+
+  // Server events
+  SERVER_EVENT:       'server:event',   // { type: string, phase: 'start'|'end' }
+
+  // Billiard (ball-ball collision)
+  BILLIARD_HIT:       'billiard:hit',   // { targetId: string, ownGoal: bool }
+
+  // Collectibles
+  COLLECTIBLE_COLLECTED: 'collectible:collected', // { type, id, playerId, holeIndex }
+  COLLECTIBLE_SPAWNED:   'collectible:spawned',   // { id, holeIndex }
 };

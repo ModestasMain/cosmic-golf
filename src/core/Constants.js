@@ -140,3 +140,18 @@ export const WORLD = {
   CLUSTER_SPREAD: 900,  // deep holes — tee→cup ≈ 2100–2700 units, 2-4 shots per hole
   CLUSTER_OFFSET: 320,  // push cluster further from origin
 };
+
+export const SERVER_EVENTS = {
+  INTERVAL_MS: 90_000, // new event every 90 seconds
+  TYPES: ['ZERO_GRAVITY', 'MAP_FLIP', 'STATIC', 'ASTEROID_STORM'],
+};
+
+export const COLLECTIBLE = {
+  COLLECT_RADIUS:     6,
+  GRAVITY_BOOT_DUR:   7,  // seconds
+  SPEED_CRYSTAL_DUR:  6,
+  SHIELD_DUR:        30,  // lasts until next OOB or 30s
+  SPEED_MULTIPLIER:   1.6,
+  HOVER_AMPLITUDE:    2.5,
+  HOVER_SPEED:        1.2,
+};

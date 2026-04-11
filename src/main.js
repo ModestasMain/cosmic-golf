@@ -15,6 +15,8 @@ import { MultiplayerManager } from './multiplayer/MultiplayerManager.js';
 import { MultiplayerUI } from './ui/MultiplayerUI.js';
 import { NameEntryOverlay } from './ui/NameEntryOverlay.js';
 import { PlayerLabels } from './ui/PlayerLabels.js';
+import { AnnouncerUI } from './ui/AnnouncerUI.js';
+import { EventHUD } from './ui/EventHUD.js';
 import { audioManager } from './audio/AudioManager.js';
 
 class Game {
@@ -105,10 +107,15 @@ class Game {
     this.mpUI      = new MultiplayerUI();
     this.nameEntry = new NameEntryOverlay();
     this.playerLabels = new PlayerLabels();
+    this.announcer  = new AnnouncerUI();
+    this.eventHUD   = new EventHUD();
   }
 
   _setupMultiplayer() {
     this.mp = new MultiplayerManager();
+
+    // Give HoleScene a reference to MP so it can broadcast billiard hits
+    this.holeScene.mp = this.mp;
 
     this.mp.onShotReceived((data) => {
       eventBus.emit(Events.SHOT_RECEIVED, data);
@@ -117,12 +124,12 @@ class Game {
       eventBus.emit(Events.MP_BALL_STATE, data);
     });
 
-    eventBus.on(Events.BALL_POS_SYNC, ({ pos, vel, holeIndex, bounce }) => {
-      if (!gameState.isSoloMode) this.mp.broadcastBallState(pos, vel, holeIndex, bounce);
+    eventBus.on(Events.BALL_POS_SYNC, ({ pos, vel, holeIndex, bounce, planetIdx, normal }) => {
+      if (!gameState.isSoloMode) this.mp.broadcastBallState(pos, vel, holeIndex, bounce, planetIdx, normal);
     });
 
-    eventBus.on(Events.BALL_STOPPED, ({ pos, holeIndex }) => {
-      if (!gameState.isSoloMode) this.mp.broadcastBallStopped(pos, holeIndex);
+    eventBus.on(Events.BALL_STOPPED, ({ pos, holeIndex, planetIdx, normal }) => {
+      if (!gameState.isSoloMode) this.mp.broadcastBallStopped(pos, holeIndex, planetIdx, normal);
     });
 
     eventBus.on(Events.SHOT_TAKEN, (data) => {

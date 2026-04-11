@@ -31,6 +31,8 @@ import { Wormhole, WORMHOLE_CAPTURE_RADIUS } from '../objects/Wormhole.js';
 import { audioManager } from '../audio/AudioManager.js';
 import { CometSystem } from '../effects/CometSystem.js';
 import { CinematicController } from './CinematicController.js';
+import { ServerEventSystem } from '../systems/ServerEventSystem.js';
+import { CollectibleSystem } from '../systems/CollectibleSystem.js';
 
 export class HoleScene {
   constructor(renderer, inputSystem) {
@@ -106,6 +108,22 @@ export class HoleScene {
     // Idle camera drift
     this._idleDriftT = 0;
 
+    // World time — always accumulates, used for default planet sway
+    this._worldT = 0;
+
+    // Planet attachment — ball follows the planet it rests on as it sways
+    this._attachedPlanetIdx = -1;
+    this._attachedNormal    = new Vector3();
+
+    // Consecutive bounce tracking — pin ball after 3 bounces on the same planet
+    this._bouncePlanetIdx  = -1;
+    this._bounceStreak     = 0;
+
+    // Last-valid-position save — stores planet attachment so OOB reset
+    // respawns on the planet's *current* position, not old world coords
+    this._lastValidPlanetIdx = -1;
+    this._lastValidNormal    = new Vector3();
+
     // Comet system — shared across holes
     this.cometSystem = new CometSystem(this.scene);
 
@@ -129,6 +147,11 @@ export class HoleScene {
     // Systems
     this.trajectoryPreview = new TrajectoryPreview(this.scene);
     this.portalSystem = new PortalSystem(this.scene);
+    this.serverEvents  = new ServerEventSystem(this.scene);
+    this.collectibles  = new CollectibleSystem(this.scene);
+
+    // Multiplayer manager reference — set externally by main.js after construction
+    this.mp = null;
 
     this._setupLighting();
     this._setupEventListeners();
@@ -265,8 +288,8 @@ export class HoleScene {
       this._loadNextHole();
     });
 
-    // Remote ball position correction — dead-reckoning with smooth blend
-    eventBus.on(Events.MP_BALL_STATE, ({ playerId, pos, vel, holeIndex, ts, bounce }) => {
+    // Remote ball state — buffer for interpolation (100 ms render delay)
+    eventBus.on(Events.MP_BALL_STATE, ({ playerId, pos, vel, holeIndex, ts, bounce, planetIdx, normal }) => {
       if (holeIndex !== undefined && holeIndex !== gameState.currentHole) return;
       let remote = this._remoteBalls.get(playerId);
       if (!remote && this._holeData) {
@@ -277,52 +300,43 @@ export class HoleScene {
       }
       if (!remote || remote.holed) return;
 
-      // Latency-compensated authoritative position: extrapolate forward by one-way RTT
+      const recvTs = ts ?? Date.now();
       const authPos = new Vector3(pos.x, pos.y, pos.z);
       const authVel = new Vector3(vel.x, vel.y, vel.z);
-      if (ts) {
-        const latencyS = Math.min((Date.now() - ts) / 1000, 0.15); // cap at 150 ms
-        authPos.addScaledVector(authVel, latencyS);
-      }
 
-      // Only enable physics simulation if ball is actually in motion.
-      // At-rest heartbeat syncs (vel ≈ 0) must NOT trigger gravity simulation
-      // — that's what causes the "pulled then snapping back" ghost artifact.
+      // Push state into the interpolation buffer (keep last 30 states ≈ 1 s at 30 Hz)
+      remote._stateBuffer.push({ ts: recvTs, pos: authPos, vel: authVel });
+      if (remote._stateBuffer.length > 30) remote._stateBuffer.shift();
+
+      // Activate trail when ball starts moving
       if (!remote.inFlight && authVel.length() > PHYSICS.REST_VELOCITY) {
         remote.inFlight = true;
+        remote._attachedPlanetIdx = -1; // detach on launch
         if (remote.ball.trail) remote.ball.trail.setActive(true);
       }
 
-      const error = authPos.distanceTo(remote.ball.position);
-      if (bounce || error > 8) {
-        // Bounce packets: always hard-snap — dead-reckoning is useless after a
-        // collision because a tiny position difference produces a wildly different
-        // reflection angle. Snap immediately so the ghost stays in sync.
-        remote.ball.setPosition(authPos);
-        remote.ball.setVelocity(authVel);
-        remote._posCorrection.set(0, 0, 0);
-        remote._corrFrames = 0;
-      } else {
-        // Smooth correction: blend remaining error over next 6 frames
-        remote._posCorrection.subVectors(authPos, remote.ball.position);
-        remote._corrFrames = 6;
-        // Partial velocity snap — velocity diverges faster than position
-        remote.ball.velocity.lerp(authVel, 0.5);
+      // Update planet attachment from at-rest heartbeats
+      if (planetIdx != null && !remote.inFlight) {
+        remote._attachedPlanetIdx = planetIdx;
+        if (normal && planetIdx >= 0) remote._attachedNormal.set(normal.x, normal.y, normal.z);
       }
     });
 
-    // Remote ball stopped — immediately settle ghost, no waiting for physics
-    eventBus.on(Events.MP_BALL_STOPPED, ({ playerId, pos, holeIndex }) => {
+    // Remote ball stopped — settle ghost and store planet attachment
+    eventBus.on(Events.MP_BALL_STOPPED, ({ playerId, pos, holeIndex, planetIdx, normal }) => {
       if (holeIndex !== undefined && holeIndex !== gameState.currentHole) return;
       const remote = this._remoteBalls.get(playerId);
       if (!remote || remote.holed) return;
       remote.inFlight = false;
-      remote.stuckFrames = 0;
-      remote._corrFrames = 0;
-      remote._posCorrection.set(0, 0, 0);
+      remote._stateBuffer = []; // clear interpolation buffer
       if (pos) remote.ball.setPosition(new Vector3(pos.x, pos.y, pos.z));
       remote.ball.setVelocity(new Vector3());
       if (remote.ball.trail) remote.ball.trail.setActive(false);
+      // Store planet attachment so ghost follows sway
+      remote._attachedPlanetIdx = (planetIdx != null) ? planetIdx : -1;
+      if (normal && remote._attachedPlanetIdx >= 0) {
+        remote._attachedNormal.set(normal.x, normal.y, normal.z);
+      }
     });
 
     // Screen shake triggers
@@ -332,6 +346,26 @@ export class HoleScene {
 
     eventBus.on(Events.BALL_HOLED, () => {
       this.screenShake.trigger(0.8, 0.6);
+    });
+
+    // Remote player collected — remove from our scene
+    eventBus.on(Events.COLLECTIBLE_COLLECTED, (data) => {
+      if (data.remote && data.holeIndex === gameState.currentHole) {
+        this.collectibles?.removeById(data.id);
+      }
+      // Broadcast local collections to others
+      if (!data.remote && this.mp) {
+        this.mp.broadcastCollected(data.id, data.type, data.holeIndex);
+      }
+    });
+
+    // Remote ball hit our ball
+    eventBus.on(Events.BILLIARD_HIT, ({ remote, normal, impulse }) => {
+      if (remote && this.ball && this._state === 'BALL_IN_FLIGHT') {
+        const n = new Vector3(normal.x, normal.y, normal.z);
+        this.ball.velocity.addScaledVector(n, impulse ?? 80);
+        this.screenShake.trigger(0.5, 0.4);
+      }
     });
   }
 
@@ -379,10 +413,12 @@ export class HoleScene {
 
     // Place planets
     this.planets = planets;
+    this._planetBasePos = [];  // base positions for server event effects
     for (const p of planets) {
       const pObj = new Planet(p);
       pObj.addToScene(this.scene);
       this.planetObjects.push(pObj);
+      this._planetBasePos.push(p.position.clone());
     }
 
     // TEST: Earth planet on hole 1 — commented out while EarthPlanet is WIP
@@ -453,6 +489,12 @@ export class HoleScene {
 
     if (this.cometSystem) this.cometSystem.onHoleLoaded();
 
+    // Spawn collectibles for this hole
+    const holeSeedNum = typeof holeSeed === 'string'
+      ? holeSeed.split('').reduce((h, c) => (Math.imul(31, h) + c.charCodeAt(0)) | 0, 0)
+      : holeSeed;
+    this.collectibles.spawnForHole(this._holeData, Math.abs(holeSeedNum) + holeIndex * 997);
+
     eventBus.emit(Events.HOLE_LOADED, { holeIndex, archetype: this._holeData.archetype });
   }
 
@@ -469,6 +511,11 @@ export class HoleScene {
   }
 
   _clearCurrentHole() {
+    this._attachedPlanetIdx  = -1;
+    this._lastValidPlanetIdx = -1;
+    this._bouncePlanetIdx    = -1;
+    this._bounceStreak       = 0;
+
     // Remove planets
     for (const p of this.planetObjects) {
       p.removeFromScene(this.scene);
@@ -503,6 +550,9 @@ export class HoleScene {
       remote.ball.removeFromScene(this.scene);
     }
     this._remoteBalls.clear();
+
+    // Clear collectibles
+    if (this.collectibles) this.collectibles.clear();
 
     // Reset per-hole state
     this._holeCompleteEmitted = false;
@@ -563,7 +613,13 @@ export class HoleScene {
 
     if (!velocity) return;
 
-    this._lastValidPos.copy(this.ball.position); // snapshot pre-shot position for OOB reset
+    // Snapshot pre-shot position + planet attachment for OOB recovery
+    this._lastValidPos.copy(this.ball.position);
+    this._lastValidPlanetIdx = this._attachedPlanetIdx;
+    this._lastValidNormal.copy(this._attachedNormal);
+    this._attachedPlanetIdx = -1; // detach from planet on shot
+    this._bouncePlanetIdx   = -1; // reset bounce streak on new shot
+    this._bounceStreak      = 0;
     this.ball.setVelocity(velocity);
     this._state = 'BALL_IN_FLIGHT';
     gameState.ballInFlight = true;
@@ -607,6 +663,9 @@ export class HoleScene {
   update(dt) {
     if (!this._holeData || !this.ball) return;
 
+    // Always accumulate world time for default planet sway
+    this._worldT += dt;
+
     // Cinematic intro — world animates but gameplay is fully locked
     if (this._state === 'CINEMATIC') {
       for (const p of this.planetObjects) p.update(dt);
@@ -639,6 +698,30 @@ export class HoleScene {
         this._aimArrow.position.copy(this.ball.position);
         this._aimArrow.setDirection(this._facingDir.clone().normalize());
       }
+    }
+
+    // Server events (deterministic wall-clock events)
+    this.serverEvents.update(dt);
+
+    // Apply server event effects to planet positions (MAP_FLIP + default sway)
+    this._applyPlanetEventEffects();
+
+    // Ball follows its attached planet while resting (IDLE / AIMING)
+    if (this._attachedPlanetIdx >= 0 && this._state !== 'BALL_IN_FLIGHT') {
+      const planet = this.planets[this._attachedPlanetIdx];
+      if (planet) {
+        this.ball.position
+          .copy(planet.position)
+          .addScaledVector(this._attachedNormal, planet.radius + BALL.RADIUS);
+        this.ball.syncMesh();
+      }
+    }
+
+    // Collectibles
+    if (this._state === 'BALL_IN_FLIGHT') {
+      this.collectibles.update(dt, this.ball);
+    } else {
+      this.collectibles.update(dt, null); // still animate gems, skip collect check
     }
 
     // Update background ambiance
@@ -682,6 +765,8 @@ export class HoleScene {
           pos: this.ball.position,
           vel: this.ball.velocity,
           holeIndex: gameState.currentHole,
+          planetIdx: this._attachedPlanetIdx,
+          normal: this._attachedNormal,
         });
       }
     }
@@ -694,9 +779,31 @@ export class HoleScene {
         gravityScale = 1.0 - (this._launchGraceFrames / PHYSICS.LAUNCH_GRACE_FRAMES);
       }
 
+      // Combine gravity scale from server events + collectibles
+      const combinedGravityScale = gravityScale
+        * this.serverEvents.gravityScale
+        * this.collectibles.gravityScale;
+
       // Integrate physics
-      const result = stepBall(this.ball, this._holeData.planets, dt, gravityScale);
+      const result = stepBall(this.ball, this._holeData.planets, dt, combinedGravityScale);
+
+      // ZERO_GRAVITY sticky: ball touches a planet → kill velocity, stay on surface
+      if (this.serverEvents.gravityScale === 0.0) {
+        for (const planet of this.planets) {
+          const dist = this.ball.position.distanceTo(planet.position);
+          if (dist < planet.radius + BALL.RADIUS + 0.5) {
+            const normal = this.ball.position.clone().sub(planet.position).normalize();
+            this.ball.position.copy(planet.position).addScaledVector(normal, planet.radius + BALL.RADIUS);
+            this.ball.velocity.set(0, 0, 0);
+            break;
+          }
+        }
+      }
+
       this.ball.syncMesh();
+
+      // Billiard: check ball-ball collisions with remote ghosts
+      this._checkBallCollisions();
 
       // Track facing direction from velocity
       const speed = this.ball.velocity.length();
@@ -709,9 +816,9 @@ export class HoleScene {
       // Update input system with current ball position
       this.inputSystem.setBallPosition(this.ball.position);
 
-      // Broadcast ball state to remote players every 3 frames (~20 Hz) for sync correction
+      // Broadcast ball state to remote players every 2 frames (~30 Hz)
       this._syncFrameCounter++;
-      if (this._syncFrameCounter >= 3) {
+      if (this._syncFrameCounter >= 2) {
         this._syncFrameCounter = 0;
         eventBus.emit(Events.BALL_POS_SYNC, {
           pos: this.ball.position,
@@ -724,23 +831,68 @@ export class HoleScene {
         const now = Date.now();
         if (now - this._lastBounceTime > PHYSICS.BOUNCE_COOLDOWN_MS) {
           this._lastBounceTime = now;
-          this._bounceGraceFrames = 90; // ~3s grace — suppresses drift-OOB after damped bounce
-          // Hit-freeze: pause physics for a few frames (biggest feel upgrade)
+          this._bounceGraceFrames = 90;
           this._hitFreezeFrames = Math.max(this._hitFreezeFrames, 4);
-          // Bounce particles at impact point
           if (this._holeData) this.launchBurst.triggerBounce(this.ball.position.clone(), this._holeData.palette);
-          // Crater decal on the Planet instance (bouncePlanet is raw data; look up the live object)
-          if (result.bouncePlanet) {
-            const idx = this._holeData.planets.indexOf(result.bouncePlanet);
-            if (idx >= 0) this.planetObjects[idx]?.addCrater(this.ball.position.clone(), this.ball.velocity.length());
+
+          const planetIdx = result.bouncePlanet
+            ? this._holeData.planets.indexOf(result.bouncePlanet)
+            : -1;
+
+          if (planetIdx >= 0) {
+            this.planetObjects[planetIdx]?.addCrater(this.ball.position.clone(), this.ball.velocity.length());
+
+            // Track consecutive bounces on the same planet
+            if (planetIdx === this._bouncePlanetIdx) {
+              this._bounceStreak++;
+            } else {
+              this._bouncePlanetIdx = planetIdx;
+              this._bounceStreak    = 1;
+            }
+
+            // 3rd bounce on the same planet → pin the ball
+            if (this._bounceStreak >= 3) {
+              this._bounceStreak    = 0;
+              this._bouncePlanetIdx = -1;
+              this.ball.velocity.set(0, 0, 0);
+              // Snap cleanly to surface
+              const planet = this.planets[planetIdx];
+              const normal = this.ball.position.clone().sub(planet.position).normalize();
+              this.ball.position.copy(planet.position).addScaledVector(normal, planet.radius + BALL.RADIUS);
+              this.ball.syncMesh();
+              // Attach so ball travels with the planet
+              this._attachedPlanetIdx = planetIdx;
+              this._attachedNormal.copy(normal);
+              this._lastValidPlanetIdx = planetIdx;
+              this._lastValidNormal.copy(normal);
+              // Transition to IDLE
+              if (this.ball?.trail) this.ball.trail.setActive(false);
+              gameState.ballInFlight = false;
+              gameState.aimState = 'IDLE';
+              this._state = 'IDLE';
+              if (this.cup) {
+                const toCup = new Vector3().subVectors(this.cup.position, this.ball.position);
+                if (toCup.lengthSq() > 0.01) this._facingDir.copy(toCup.normalize());
+              }
+              eventBus.emit(Events.BALL_STOPPED, {
+                pos: this.ball.position.clone(),
+                holeIndex: gameState.currentHole,
+                planetIdx: this._attachedPlanetIdx,
+                normal: this._attachedNormal.clone(),
+              });
+              return; // skip remaining flight logic this frame
+            }
+          } else {
+            // Bounced off something that isn't a tracked planet — reset streak
+            this._bouncePlanetIdx = -1;
+            this._bounceStreak    = 0;
           }
+
           eventBus.emit(Events.BALL_BOUNCED, {
             position:   this.ball.position.clone(),
             planetType: result.bouncePlanet?.type ?? 'ROCKY',
             speed:      this.ball.velocity.length(),
           });
-          // Priority sync: immediately broadcast post-bounce state so remote clients
-          // can hard-snap before their dead-reckoning diverges further.
           this._syncFrameCounter = 0;
           eventBus.emit(Events.BALL_POS_SYNC, {
             pos:       this.ball.position,
@@ -816,8 +968,21 @@ export class HoleScene {
         return;
       }
 
-      // Track last valid in-bounds position (updated before OOB check)
-      if (nearSurface) this._lastValidPos.copy(this.ball.position);
+      // Track last valid in-bounds position + planet attachment (updated before OOB check)
+      if (nearSurface) {
+        this._lastValidPos.copy(this.ball.position);
+        let bestDist = Infinity;
+        this._lastValidPlanetIdx = -1;
+        for (let i = 0; i < this.planets.length; i++) {
+          const d = this.ball.position.distanceTo(this.planets[i].position);
+          if (d < bestDist) { bestDist = d; this._lastValidPlanetIdx = i; }
+        }
+        if (this._lastValidPlanetIdx >= 0) {
+          this._lastValidNormal
+            .subVectors(this.ball.position, this.planets[this._lastValidPlanetIdx].position)
+            .normalize();
+        }
+      }
 
       // Hard outer limit (shouldn't normally trigger with the void checks below)
       if (this.ball.position.length() > HOLE.OUT_OF_BOUNDS_DISTANCE) {
@@ -867,8 +1032,30 @@ export class HoleScene {
         if (this.ball?.trail) this.ball.trail.setActive(false);
         gameState.ballInFlight = false;
         gameState.aimState = 'IDLE';
-        // Broadcast stop immediately so ghosts settle on peers without waiting for next sync tick
-        eventBus.emit(Events.BALL_STOPPED, { pos: this.ball.position.clone(), holeIndex: gameState.currentHole });
+
+        // Attach ball to the planet it's resting on so it travels with sway
+        this._attachedPlanetIdx = -1;
+        let closestDist = Infinity;
+        for (let i = 0; i < this.planets.length; i++) {
+          const d = this.ball.position.distanceTo(this.planets[i].position);
+          if (d < this.planets[i].radius + BALL.RADIUS * 4 && d < closestDist) {
+            closestDist = d;
+            this._attachedPlanetIdx = i;
+          }
+        }
+        if (this._attachedPlanetIdx >= 0) {
+          this._attachedNormal
+            .subVectors(this.ball.position, this.planets[this._attachedPlanetIdx].position)
+            .normalize();
+        }
+
+        // Broadcast stop with planet attachment so peers can follow sway
+        eventBus.emit(Events.BALL_STOPPED, {
+          pos: this.ball.position.clone(),
+          holeIndex: gameState.currentHole,
+          planetIdx: this._attachedPlanetIdx,
+          normal: this._attachedNormal.clone(),
+        });
 
         // Reset facing direction toward cup so trajectory always has a valid
         // default — avoids the "pointing into planet" problem after landing
@@ -1050,6 +1237,12 @@ export class HoleScene {
     const strokes = gameState.currentStrokes;
     const timeMs = this._holeStartTime ? Date.now() - this._holeStartTime : 0;
 
+    // Hole-in-one: trigger supernova on the black hole
+    if (strokes === 1 && this.cup) {
+      this.cup.triggerSupernova();
+      this.screenShake.trigger(2.0, 1.0);
+    }
+
     // Record strokes + time for current player
     const player = gameState.currentPlayer;
     if (player) {
@@ -1084,17 +1277,29 @@ export class HoleScene {
 
   _onOutOfBounds() {
     if (this.ball?.trail) this.ball.trail.setActive(false);
+
+    // Compute reset position using *current* planet position so the ball
+    // lands on the planet surface even if it has swayed since the snapshot
+    const resetPos = this._resolveLastValidPos();
+
+    // Shield collectible blocks penalty
+    if (this.collectibles?.consumeShield()) {
+      this.ball.setPosition(resetPos);
+      this.ball.setVelocity(new Vector3());
+      this._restoreLastValidAttachment();
+      this._state = 'IDLE';
+      gameState.ballInFlight = false;
+      gameState.aimState = 'IDLE';
+      eventBus.emit(Events.BALL_RESET_TO_TEE); // reuse event for UI flash
+      return;
+    }
+
     gameState.currentStrokes += HOLE.OUT_OF_BOUNDS_PENALTY;
     eventBus.emit(Events.BALL_OUT_OF_BOUNDS);
 
-    // Reset to last known in-bounds position (golf rules — not back to tee)
-    const resetPos = this._lastValidPos.lengthSq() > 0.01
-      ? this._lastValidPos.clone().add(new Vector3(0, BALL.RADIUS + 0.5, 0))
-      : this._holeData?.tee.clone().add(new Vector3(0, BALL.RADIUS + 0.2, 0));
-    if (resetPos) {
-      this.ball.setPosition(resetPos);
-      this.ball.setVelocity(new Vector3());
-    }
+    this.ball.setPosition(resetPos);
+    this.ball.setVelocity(new Vector3());
+    this._restoreLastValidAttachment();
 
     this._state = 'IDLE';
     gameState.ballInFlight = false;
@@ -1102,10 +1307,110 @@ export class HoleScene {
     this.inputSystem.setAiming(false);
   }
 
+  // Compute the OOB spawn position — on the planet's current location if possible
+  _resolveLastValidPos() {
+    if (this._lastValidPlanetIdx >= 0) {
+      const planet = this.planets[this._lastValidPlanetIdx];
+      if (planet) {
+        return planet.position.clone()
+          .addScaledVector(this._lastValidNormal, planet.radius + BALL.RADIUS + 0.5);
+      }
+    }
+    if (this._lastValidPos.lengthSq() > 0.01) {
+      return this._lastValidPos.clone().add(new Vector3(0, BALL.RADIUS + 0.5, 0));
+    }
+    return this._holeData?.tee.clone().add(new Vector3(0, BALL.RADIUS + 0.2, 0)) ?? new Vector3();
+  }
+
+  // Restore attachment so ball continues travelling with the planet after OOB reset
+  _restoreLastValidAttachment() {
+    this._attachedPlanetIdx = this._lastValidPlanetIdx;
+    this._attachedNormal.copy(this._lastValidNormal);
+  }
+
+  // ── Server event planet effects ───────────────────────────────
+
+  _applyPlanetEventEffects() {
+    if (!this._planetBasePos || this._planetBasePos.length === 0) return;
+
+    const flip   = this.serverEvents.mapFlipProgress;
+    const frozen = this.serverEvents.staticActive;
+    // Use wall-clock seconds so all clients have identical planet positions
+    // regardless of frame rate or when they joined.
+    const t = Date.now() / 1000;
+
+    for (let i = 0; i < this.planetObjects.length; i++) {
+      const base = this._planetBasePos[i];
+
+      // MAP_FLIP: lerp Y from baseY → -baseY as flip goes 0→1
+      let x = base.x;
+      let y = base.y * (1 - 2 * flip);
+      let z = base.z;
+
+      // Default sway — always on unless STATIC event is active
+      if (!frozen) {
+        const phase = i * 1.618; // golden ratio offset per planet
+        x += Math.sin(t * 0.38 + phase)       * 38;
+        y += Math.cos(t * 0.31 + phase * 1.4) * 28;
+        z += Math.sin(t * 0.42 + phase * 0.8) * 34;
+      }
+
+      // Update physics data, visual mesh, and gravity field rings
+      this.planets[i].position.set(x, y, z);
+      this.planetObjects[i].group.position.set(x, y, z);
+      this.planetObjects[i].gravityField.group.position.set(x, y, z);
+    }
+  }
+
+  // ── Billiard ball-ball collision ──────────────────────────────
+
+  _checkBallCollisions() {
+    if (!this.ball || this._remoteBalls.size === 0) return;
+
+    for (const [playerId, remote] of this._remoteBalls) {
+      if (remote.holed) continue;
+
+      const diff = new Vector3().subVectors(this.ball.position, remote.ball.position);
+      const dist = diff.length();
+      const minDist = BALL.RADIUS * 2.2; // slightly larger for satisfying hit feel
+
+      if (dist < minDist && dist > 0.001) {
+        const normal = diff.normalize();
+        const v1n = this.ball.velocity.dot(normal);
+        const v2n = remote.ball.velocity.dot(normal);
+
+        // Only resolve if balls are approaching each other
+        if (v1n - v2n < 0) {
+          // Equal-mass elastic collision: exchange velocity components along normal
+          this.ball.velocity.addScaledVector(normal, v2n - v1n);
+          remote.ball.velocity.addScaledVector(normal, v1n - v2n);
+          remote.ball.syncMesh();
+
+          // Positional correction — push balls apart
+          const overlap = minDist - dist;
+          this.ball.position.addScaledVector(normal, overlap * 0.5);
+          remote.ball.position.addScaledVector(normal, -overlap * 0.5);
+          this.ball.syncMesh();
+          remote.ball.syncMesh();
+
+          // Broadcast hit to the target player
+          if (this.mp) {
+            const impulse = Math.abs(v1n - v2n);
+            this.mp.broadcastBallHit(playerId, normal, impulse);
+          }
+
+          this.screenShake.trigger(0.45, 0.35);
+          eventBus.emit(Events.BILLIARD_HIT, { targetId: playerId, ownGoal: false });
+        }
+      }
+    }
+  }
+
   resetBallToTee() {
     if (!this._holeData || !this.ball) return;
-    // Always kill trail on reset regardless of state
     if (this.ball.trail) this.ball.trail.setActive(false);
+    this._attachedPlanetIdx  = -1;
+    this._lastValidPlanetIdx = -1;
     this.ball.setPosition(this._holeData.tee.clone().add(new Vector3(0, BALL.RADIUS + 0.2, 0)));
     this.ball.setVelocity(new Vector3());
     this._state = 'IDLE';
@@ -1124,9 +1429,11 @@ export class HoleScene {
     ball.setPosition(teePos);
     ball.addToScene(this.scene);
     this._remoteBalls.set(playerId, {
-      ball, inFlight: false, holed: false, stuckFrames: 0, launchGrace: 0,
-      _posCorrection: new Vector3(), _corrFrames: 0,
+      ball, inFlight: false, holed: false,
+      _stateBuffer: [],          // { ts, pos, vel }[] — sorted oldest→newest
       _lastValidPos: teePos.clone(),
+      _attachedPlanetIdx: -1,    // planet the remote ball is resting on
+      _attachedNormal: new Vector3(),
     });
   }
 
@@ -1141,80 +1448,87 @@ export class HoleScene {
     if (!remote || remote.holed) return;
     const vel = new Vector3(direction.x, direction.y, direction.z).normalize().multiplyScalar(power);
     remote.ball.setVelocity(vel);
-    remote.inFlight    = true;
-    remote.stuckFrames = 0;
-    remote.launchGrace = PHYSICS.LAUNCH_GRACE_FRAMES;
+    remote.inFlight = true;
+    remote._stateBuffer = []; // clear stale states on new shot
     if (remote.ball.trail) remote.ball.trail.setActive(true);
   }
+
+  // Interpolation render delay — remote balls are shown this many ms in the past.
+  // Must be larger than send interval (33 ms at 30 Hz) + typical network jitter.
+  static INTERP_DELAY_MS = 100;
 
   _updateRemoteBalls(dt) {
     if (this._remoteBalls.size === 0 || !this._holeData) return;
 
+    const renderTs = Date.now() - HoleScene.INTERP_DELAY_MS;
+
     for (const [playerId, remote] of this._remoteBalls) {
-      if (!remote.inFlight || remote.holed) continue;
+      if (remote.holed) continue;
 
-      let gravScale = 1.0;
-      if (remote.launchGrace > 0) {
-        remote.launchGrace--;
-        gravScale = 1.0 - (remote.launchGrace / PHYSICS.LAUNCH_GRACE_FRAMES);
+      const buf = remote._stateBuffer;
+
+      if (remote.inFlight && buf.length >= 1) {
+        // ── Interpolation between buffered authoritative states ───────────
+        // Find the two states that bracket the render timestamp.
+        let before = null;
+        let after  = null;
+        for (let i = buf.length - 1; i >= 0; i--) {
+          if (buf[i].ts <= renderTs) { before = buf[i]; break; }
+        }
+        for (let i = 0; i < buf.length; i++) {
+          if (buf[i].ts >= renderTs) { after = buf[i]; break; }
+        }
+
+        if (before && after && before !== after) {
+          // Normal case: smooth lerp between two known states
+          const t = Math.max(0, Math.min(1, (renderTs - before.ts) / (after.ts - before.ts)));
+          remote.ball.position.lerpVectors(before.pos, after.pos, t);
+          remote.ball.velocity.lerpVectors(before.vel, after.vel, t);
+        } else if (before) {
+          // Render timestamp is ahead of all buffered states — extrapolate briefly
+          const ageS = (renderTs - before.ts) / 1000;
+          if (ageS < 0.25) {
+            remote.ball.position.copy(before.pos).addScaledVector(before.vel, ageS);
+          }
+          remote.ball.velocity.copy(before.vel);
+        } else if (after) {
+          // Not enough history yet — snap to earliest available state
+          remote.ball.position.copy(after.pos);
+          remote.ball.velocity.copy(after.vel);
+        }
+
+        // Track last valid in-bounds position
+        if (remote.ball.position.length() < HOLE.OUT_OF_BOUNDS_DISTANCE) {
+          remote._lastValidPos.copy(remote.ball.position);
+        }
+
+        // Detect ball stopped: newest state has near-zero velocity
+        const newest = buf[buf.length - 1];
+        if (newest && newest.vel.length() < PHYSICS.REST_VELOCITY) {
+          remote.inFlight = false;
+          if (remote.ball.trail) remote.ball.trail.setActive(false);
+        }
       }
 
-      stepBall(remote.ball, this._holeData.planets, dt, gravScale);
-
-      // Apply smooth position correction from last authoritative update
-      if (remote._corrFrames > 0) {
-        const step = remote._posCorrection.clone().divideScalar(remote._corrFrames);
-        remote.ball.position.add(step);
-        remote._posCorrection.sub(step);
-        remote._corrFrames--;
-      }
-
-      // Black hole pull for remote balls (same logic as local ball)
-      if (this.cup) {
-        const cupDist = remote.ball.position.distanceTo(this.cup.position);
-        if (cupDist < HOLE.BLACK_HOLE_PULL_RADIUS && cupDist > HOLE.CUP_RADIUS) {
-          const t = 1 - cupDist / HOLE.BLACK_HOLE_PULL_RADIUS;
-          const distSq = Math.max(cupDist * cupDist, HOLE.CUP_RADIUS * HOLE.CUP_RADIUS);
-          const strength = HOLE.BLACK_HOLE_GRAVITY * t * t / distSq;
-          const toCup = new Vector3().subVectors(this.cup.position, remote.ball.position).normalize();
-          remote.ball.velocity.addScaledVector(toCup, strength * dt * 60);
+      // At-rest: follow the planet the remote ball is attached to
+      if (!remote.inFlight && remote._attachedPlanetIdx >= 0) {
+        const planet = this.planets[remote._attachedPlanetIdx];
+        if (planet) {
+          remote.ball.position
+            .copy(planet.position)
+            .addScaledVector(remote._attachedNormal, planet.radius + BALL.RADIUS);
         }
       }
 
       remote.ball.syncMesh();
-      remote.ball.update(dt); // handles spin + trail internally
+      remote.ball.update(dt); // spin + trail
 
-      const speed = remote.ball.velocity.length();
-      const nearSurface = this._holeData.planets.some(p =>
-        remote.ball.position.distanceTo(p.position) < p.radius + BALL.RADIUS * 3,
-      );
-      if (nearSurface && speed < 12) remote.stuckFrames++;
-      else remote.stuckFrames = 0;
-
-      // Track last valid in-bounds position for OOB reset
-      if (nearSurface) remote._lastValidPos.copy(remote.ball.position);
-
-      if (speed < PHYSICS.REST_VELOCITY || remote.stuckFrames > PHYSICS.STUCK_FRAMES) {
-        remote.inFlight = false;
-        remote.stuckFrames = 0;
-        if (remote.ball.trail) remote.ball.trail.setActive(false);
-      }
-
-      // OOB — reset to last valid position (not tee)
-      if (remote.ball.position.length() > HOLE.OUT_OF_BOUNDS_DISTANCE) {
-        remote.inFlight = false;
-        if (remote.ball.trail) remote.ball.trail.setActive(false);
-        const resetPos = remote._lastValidPos.clone().add(new Vector3(0, BALL.RADIUS + 0.5, 0));
-        remote.ball.setPosition(resetPos);
-        remote.ball.setVelocity(new Vector3());
-      }
-
-      // Check hole — trail disposed inside removeFromScene
+      // Check hole-cup
       if (this.cup && remote.ball.position.distanceTo(this.cup.position) < HOLE.CUP_RADIUS) {
         this._playersHoled.add(playerId);
         remote.ball.removeFromScene(this.scene);
         this._remoteBalls.delete(playerId);
-        break; // map was mutated, exit loop
+        break; // map mutated — exit loop
       }
     }
   }

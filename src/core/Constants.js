@@ -37,6 +37,9 @@ export const HOLE = {
   // Void detection — ball escaping the planet cluster
   VOID_OOB_SURFACE_DIST: 950,  // units from nearest planet *surface* — beyond this = deep space = OOB
   VOID_DRIFT_SPEED: 28,
+  // Zero-gravity void: ball floating farther than this from any planet surface for too long → OOB
+  VOID_ZERO_G_SURFACE_DIST: 250,
+  VOID_ZERO_G_GRACE_FRAMES: 240, // ~4 s at 60 fps — enough time to cross to another planet
   BLACK_HOLE_PULL_RADIUS: 90,
   BLACK_HOLE_GRAVITY: 60,
 };

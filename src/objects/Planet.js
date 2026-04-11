@@ -3,9 +3,10 @@
 // ============================================================
 
 import {
-  Mesh, SphereGeometry, MeshStandardMaterial, MeshBasicMaterial,
+  Mesh, SphereGeometry, MeshStandardMaterial, MeshBasicMaterial, ShaderMaterial,
   TorusGeometry, CircleGeometry, BackSide, Color, Group, AdditiveBlending,
   CanvasTexture, Vector3, BufferGeometry, Float32BufferAttribute, Points, PointsMaterial,
+  RepeatWrapping,
 } from 'three';
 import { GravityField } from '../effects/GravityField.js';
 
@@ -574,32 +575,56 @@ export class Planet {
     const isGas  = this.type === 'GAS' || this.type === 'RINGED';
     const isIce  = this.type === 'ICE';
 
-    const scale   = isLava ? 1.22 : isGas ? 1.18 : 1.14;
-    const opacity = isLava ? 0.22 : isGas ? 0.18 : isIce ? 0.12 : 0.09;
-    const col     = isLava ? new Color(0xff4400) : new Color(this.color);
+    const scale    = isLava ? 1.30 : isGas ? 1.24 : 1.20;
+    const baseCol  = isLava ? new Color(0xff4400) : new Color(this.color);
+    // Fresnel power: lower = wider glow, higher = tighter limb-only glow
+    const power    = isIce ? 2.0 : isGas ? 2.6 : 3.2;
+    const strength = isLava ? 0.85 : isGas ? 0.55 : isIce ? 0.38 : 0.30;
 
-    // Outer halo
-    const geo = new SphereGeometry(this.radius * scale, 24, 18);
-    const mat = new MeshBasicMaterial({
-      color: col, side: BackSide, transparent: true, opacity,
-      depthWrite: false, blending: AdditiveBlending,
+    this._baseGlowOpacity = strength;
+
+    // ShaderMaterial fresnel — works with WebGLRenderer, same visual as TSL version.
+    // Using abs(nDotV) handles BackSide normals correctly (edge-on = 0 → bright rim).
+    const mat = new ShaderMaterial({
+      uniforms: {
+        glowColor: { value: baseCol.clone() },
+        power:     { value: power },
+        glowMult:  { value: strength },
+      },
+      vertexShader: /* glsl */`
+        varying vec3 vWorldNormal;
+        varying vec3 vWorldPosition;
+        void main() {
+          vWorldNormal    = normalize(mat3(modelMatrix) * normal);
+          vWorldPosition  = (modelMatrix * vec4(position, 1.0)).xyz;
+          gl_Position     = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */`
+        uniform vec3  glowColor;
+        uniform float power;
+        uniform float glowMult;
+        varying vec3  vWorldNormal;
+        varying vec3  vWorldPosition;
+        void main() {
+          vec3  viewDir = normalize(cameraPosition - vWorldPosition);
+          float nDotV   = abs(dot(normalize(vWorldNormal), viewDir));
+          float fresnel = pow(1.0 - nDotV, power);
+          gl_FragColor  = vec4(glowColor * fresnel * glowMult, 1.0);
+        }
+      `,
+      transparent: true,
+      depthWrite:  false,
+      blending:    AdditiveBlending,
+      side:        BackSide,
     });
+
+    // Expose the uniform object — setOpacity() and update() write to .value directly
+    this._glowMult = mat.uniforms.glowMult;
+
+    const geo = new SphereGeometry(this.radius * scale, 24, 18);
     this.glowMesh = new Mesh(geo, mat);
     this.bodyGroup.add(this.glowMesh);
-    this._baseGlowOpacity = opacity; // stored for setOpacity desaturation
-
-    // Inner rim glow — tighter, brighter ring that catches bloom
-    const innerScale   = isLava ? 1.10 : 1.07;
-    const innerOpacity = isLava ? 0.18 : isGas ? 0.14 : 0.07;
-    const innerCol     = col.clone().lerp(new Color(0xffffff), 0.3);
-    const innerGeo     = new SphereGeometry(this.radius * innerScale, 20, 14);
-    const innerMat     = new MeshBasicMaterial({
-      color: innerCol, side: BackSide, transparent: true, opacity: innerOpacity,
-      depthWrite: false, blending: AdditiveBlending,
-    });
-    this._innerGlowMesh = new Mesh(innerGeo, innerMat);
-    this.bodyGroup.add(this._innerGlowMesh);
-    this._baseInnerGlowOpacity = innerOpacity; // stored for setOpacity desaturation
   }
 
   _buildExtras(seq, seed) {
@@ -653,6 +678,11 @@ export class Planet {
     if (this.radius >= 18) {
       this._buildLensingGlow();
     }
+
+    // Lava: animated TSL overlay makes glowing cracks appear to flow
+    if (this.type === 'LAVA') {
+      this._buildLavaAnimation();
+    }
   }
 
   _buildLensingGlow() {
@@ -677,6 +707,28 @@ export class Planet {
     });
     this._lensingMesh2 = new Mesh(geo2, mat2);
     this.bodyGroup.add(this._lensingMesh2);
+  }
+
+  _buildLavaAnimation() {
+    // Overlay mesh with a cloned, tiling copy of the lava texture.
+    // UV offset is incremented each frame in update() to make cracks appear to flow.
+    // Additive blending: bright cracks/pools accumulate, dark crust stays invisible.
+    const lavaTex = this._textures[0].clone();
+    lavaTex.wrapS = lavaTex.wrapT = RepeatWrapping;
+    lavaTex.needsUpdate = true;
+    this._textures.push(lavaTex);
+
+    const mat = new MeshBasicMaterial({
+      map:         lavaTex,
+      transparent: true,
+      depthWrite:  false,
+      blending:    AdditiveBlending,
+      opacity:     0.22,
+    });
+
+    const geo = new SphereGeometry(this.radius * 1.002, 36, 26);
+    this._lavaAnimMesh = new Mesh(geo, mat);
+    this.bodyGroup.add(this._lavaAnimMesh);
   }
 
   /**
@@ -751,8 +803,7 @@ export class Planet {
     if (v >= 0.99) {
       // Fully visible — restore opaque material and full glow
       this.mesh.material = this._matOpaque;
-      if (this.glowMesh)       this.glowMesh.material.opacity       = this._baseGlowOpacity;
-      if (this._innerGlowMesh) this._innerGlowMesh.material.opacity = this._baseInnerGlowOpacity;
+      if (this._glowMult) this._glowMult.value = this._baseGlowOpacity;
     } else {
       // Ball behind planet — desaturate + kill emissive so trajectory shows through clearly
       const mat = this._matTransparent;
@@ -763,9 +814,8 @@ export class Planet {
       // Crush emissive — bloom from a bright emissive drowns the cyan trajectory dots
       mat.emissiveIntensity = this._baseEmissiveIntensity * v * 0.25;
       this.mesh.material = mat;
-      // Fade atmosphere glow so it doesn't bleed through and obscure the trajectory
-      if (this.glowMesh)       this.glowMesh.material.opacity       = this._baseGlowOpacity * v * 0.4;
-      if (this._innerGlowMesh) this._innerGlowMesh.material.opacity = this._baseInnerGlowOpacity * v * 0.4;
+      // Fade fresnel atmosphere so it doesn't bleed through and obscure the trajectory
+      if (this._glowMult) this._glowMult.value = this._baseGlowOpacity * v * 0.4;
     }
   }
 
@@ -778,18 +828,23 @@ export class Planet {
     if (this._cloudMesh)     this._cloudMesh.rotation.y     += this._cloudSpinRate  * dt;
     if (this._cityLightsMesh) this._cityLightsMesh.rotation.y += this._cityLightsRate * dt;
 
-    // Lava planet: emissive flicker — cracked glowing crust effect
+    // Lava planet: emissive flicker + animated crack overlay
     if (this.type === 'LAVA') {
       const flicker = 0.28 + Math.sin(t * 3.9) * 0.09 + Math.sin(t * 7.3) * 0.05
                            + Math.sin(t * 13.1) * 0.02;
-      this._matOpaque.emissiveIntensity    = flicker;
+      this._matOpaque.emissiveIntensity      = flicker;
       this._matTransparent.emissiveIntensity = flicker * 0.25;
+      // Scroll the lava overlay UV to make cracks appear to flow
+      if (this._lavaAnimMesh) {
+        const map = this._lavaAnimMesh.material.map;
+        map.offset.set(t * 0.007, t * 0.003);
+      }
     }
 
     // Atmosphere breathe — gentle sine pulse on glow (skip while celebration is active)
-    if (this.glowMesh && this._celebrationAuroraT <= 0) {
+    if (this._glowMult && this._celebrationAuroraT <= 0) {
       const pulse = 0.88 + Math.sin(t * 0.7 + this._axialTilt * 3) * 0.12;
-      this.glowMesh.material.opacity = this._baseGlowOpacity * pulse;
+      this._glowMult.value = this._baseGlowOpacity * pulse;
     }
 
     // Moon orbits
@@ -822,9 +877,9 @@ export class Planet {
     if (this._celebrationAuroraT > 0) {
       this._celebrationAuroraT -= dt;
       const auroraFrac = Math.min(1, this._celebrationAuroraT / 1.0);
-      if (this.glowMesh) {
-        const baseOpacity = this.type === 'LAVA' ? 0.1 : this.type === 'ICE' ? 0.07 : 0.04;
-        this.glowMesh.material.opacity = baseOpacity + auroraFrac * 0.45;
+      if (this._glowMult) {
+        const baseStr = this.type === 'LAVA' ? 0.35 : this.type === 'ICE' ? 0.25 : 0.20;
+        this._glowMult.value = baseStr + auroraFrac * 0.65;
       }
     }
 
@@ -862,7 +917,7 @@ export class Planet {
     for (const t of this._textures) t.dispose();
     this.glowMesh.geometry.dispose();
     this.glowMesh.material.dispose();
-    if (this._innerGlowMesh) { this._innerGlowMesh.geometry.dispose(); this._innerGlowMesh.material.dispose(); }
+    if (this._lavaAnimMesh) { this._lavaAnimMesh.geometry.dispose(); this._lavaAnimMesh.material.dispose(); }
     if (this._ringGroup) {
       this._ringGroup.traverse(c => { if (c.isMesh) { c.geometry.dispose(); c.material.dispose(); } });
     }

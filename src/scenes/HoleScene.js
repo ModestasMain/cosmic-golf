@@ -73,6 +73,7 @@ export class HoleScene {
     this._stuckFrames = 0;
     this._launchGraceFrames = 0;  // counts down after shot — gravity ramps up
     this._bounceGraceFrames = 0;  // counts down after bounce — suppresses drift-OOB
+    this._voidFrames = 0;         // zero-gravity void timer — frames away from any planet
 
     // Camera facing direction — rotated by aim drag, trails velocity in flight
     this._facingDir  = new Vector3(0, 0, -1);
@@ -654,6 +655,7 @@ export class HoleScene {
     this._stuckFrames = 0;
     this._lastBounceTime = 0;
     this._launchGraceFrames = PHYSICS.LAUNCH_GRACE_FRAMES;
+    this._voidFrames = 0;
   }
 
   /**
@@ -1023,6 +1025,22 @@ export class HoleScene {
         return;
       }
 
+      // Zero-gravity void: gravity is off so the ball never decelerates or curves back.
+      // If it's been floating far from every planet surface for too long → OOB.
+      if (this.serverEvents.gravityScale === 0.0) {
+        if (nearestSafeDist > HOLE.VOID_ZERO_G_SURFACE_DIST) {
+          this._voidFrames++;
+          if (this._voidFrames > HOLE.VOID_ZERO_G_GRACE_FRAMES) {
+            this._onOutOfBounds();
+            return;
+          }
+        } else {
+          this._voidFrames = 0; // near a planet — reset the timer
+        }
+      } else {
+        this._voidFrames = 0; // not in zero-g — keep counter clear
+      }
+
       // Settle: ball at rest ON a planet, OR stuck near a planet surface too long
       const atRest = ballSpeed < PHYSICS.REST_VELOCITY && nearSurface;
       const stuck = this._stuckFrames > PHYSICS.STUCK_FRAMES;
@@ -1300,6 +1318,7 @@ export class HoleScene {
     this.ball.setPosition(resetPos);
     this.ball.setVelocity(new Vector3());
     this._restoreLastValidAttachment();
+    this._voidFrames = 0;
 
     this._state = 'IDLE';
     gameState.ballInFlight = false;

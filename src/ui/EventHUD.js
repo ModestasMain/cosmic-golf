@@ -45,7 +45,7 @@ export class EventHUD {
     root.id = 'event-hud';
     Object.assign(root.style, {
       position:      'fixed',
-      top:           '14px',
+      top:           'max(10px, env(safe-area-inset-top, 0px))',
       left:          '50%',
       transform:     'translateX(-50%)',
       zIndex:        '450',
@@ -58,10 +58,10 @@ export class EventHUD {
     // "CURRENT EVENT" micro-label
     this._labelEl = document.createElement('div');
     Object.assign(this._labelEl.style, {
-      fontSize:      '9px',
-      letterSpacing: '3px',
+      fontSize:      'clamp(7px, 1.8vw, 9px)',
+      letterSpacing: '2px',
       color:         'rgba(140,170,255,0.55)',
-      marginBottom:  '3px',
+      marginBottom:  '2px',
     });
     this._labelEl.textContent = 'CURRENT EVENT';
 
@@ -76,9 +76,9 @@ export class EventHUD {
     this._reelEl = document.createElement('div');
     Object.assign(this._reelEl.style, {
       lineHeight:    '2em',
-      fontSize:      'clamp(13px, 1.6vw, 22px)',
+      fontSize:      'clamp(10px, 2.8vw, 22px)',
       fontWeight:    '900',
-      letterSpacing: '0.14em',
+      letterSpacing: '0.1em',
       color:         'rgba(140,180,255,0.4)',
       textShadow:    'none',
       willChange:    'transform',
@@ -91,10 +91,10 @@ export class EventHUD {
     // "NEXT IN  Xs" timer line
     this._timerEl = document.createElement('div');
     Object.assign(this._timerEl.style, {
-      fontSize:      '9px',
-      letterSpacing: '2px',
+      fontSize:      'clamp(7px, 1.8vw, 9px)',
+      letterSpacing: '1.5px',
       color:         'rgba(140,170,255,0.45)',
-      marginTop:     '3px',
+      marginTop:     '2px',
     });
     this._timerEl.textContent = 'NEXT IN  —';
 

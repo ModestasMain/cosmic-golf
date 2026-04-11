@@ -531,6 +531,11 @@ export class Planet {
       case 'RINGED': texture = makeTextureGas(this.color, s);    break;
       default:       texture = makeTextureTerran(this.color, s); break;
     }
+    // Enable tiling on types that animate UV offset so scrolling wraps cleanly
+    if (this.type === 'GAS' || this.type === 'RINGED' || this.type === 'SAND' || this.type === 'LAVA') {
+      texture.wrapS = texture.wrapT = RepeatWrapping;
+      texture.needsUpdate = true;
+    }
     this._textures.push(texture);
 
     const isLava = this.type === 'LAVA';
@@ -679,10 +684,66 @@ export class Planet {
       this._buildLensingGlow();
     }
 
-    // Lava: animated TSL overlay makes glowing cracks appear to flow
+    // Lava: animated overlay makes glowing cracks appear to flow
     if (this.type === 'LAVA') {
       this._buildLavaAnimation();
     }
+
+    // Ice: specular shimmer overlay — starlight glinting off the frozen surface
+    if (this.type === 'ICE') {
+      this._buildIceShimmer();
+    }
+  }
+
+  _buildIceShimmer() {
+    // ShaderMaterial that produces animated specular glints on the ice surface.
+    // A virtual light source rotates slowly, creating the impression of starlight
+    // catching facets and ice crystals as the planet turns.
+    const col = new Color(this.color);
+    col.lerp(new Color(0xffffff), 0.75);
+
+    const mat = new ShaderMaterial({
+      uniforms: {
+        shimmerColor: { value: col },
+        shimmerTime:  { value: 0 },
+      },
+      vertexShader: /* glsl */`
+        varying vec3 vWorldNormal;
+        varying vec3 vWorldPosition;
+        void main() {
+          vWorldNormal   = normalize(mat3(modelMatrix) * normal);
+          vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;
+          gl_Position    = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */`
+        uniform vec3  shimmerColor;
+        uniform float shimmerTime;
+        varying vec3  vWorldNormal;
+        varying vec3  vWorldPosition;
+        void main() {
+          vec3 viewDir  = normalize(cameraPosition - vWorldPosition);
+          // Slowly rotating virtual light — three overlapping sources for richness
+          vec3 l1 = normalize(vec3(sin(shimmerTime * 0.27),  cos(shimmerTime * 0.19),  sin(shimmerTime * 0.13)));
+          vec3 l2 = normalize(vec3(cos(shimmerTime * 0.21), -sin(shimmerTime * 0.31),  cos(shimmerTime * 0.17)));
+          vec3 l3 = normalize(vec3(sin(shimmerTime * 0.15),  sin(shimmerTime * 0.23), -cos(shimmerTime * 0.29)));
+          vec3 n  = normalize(vWorldNormal);
+          float s1 = pow(max(0.0, dot(n, normalize(viewDir + l1))), 12.0);
+          float s2 = pow(max(0.0, dot(n, normalize(viewDir + l2))), 18.0);
+          float s3 = pow(max(0.0, dot(n, normalize(viewDir + l3))), 24.0);
+          float shimmer = s1 * 0.22 + s2 * 0.16 + s3 * 0.10;
+          gl_FragColor  = vec4(shimmerColor * shimmer, 1.0);
+        }
+      `,
+      transparent: true,
+      depthWrite:  false,
+      blending:    AdditiveBlending,
+    });
+
+    this._iceShimmerMat = mat;
+    const geo = new SphereGeometry(this.radius * 1.001, 36, 26);
+    this._iceShimmerMesh = new Mesh(geo, mat);
+    this.bodyGroup.add(this._iceShimmerMesh);
   }
 
   _buildLensingGlow() {
@@ -841,6 +902,24 @@ export class Planet {
       }
     }
 
+    // Gas/Ringed: scroll the main band texture directly — two atmospheric layers
+    // (planet spin handles one axis; UV offset adds a perpendicular drift)
+    if (this.type === 'GAS' || this.type === 'RINGED') {
+      const map = this._matOpaque.map;
+      if (map) map.offset.y = t * 0.006;
+    }
+
+    // Sand: diagonal UV drift so dunes appear to shift across the surface
+    if (this.type === 'SAND') {
+      const map = this._matOpaque.map;
+      if (map) map.offset.set(t * 0.004, t * 0.002);
+    }
+
+    // Ice specular shimmer — update time uniform
+    if (this._iceShimmerMat) {
+      this._iceShimmerMat.uniforms.shimmerTime.value = t;
+    }
+
     // Atmosphere breathe — gentle sine pulse on glow (skip while celebration is active)
     if (this._glowMult && this._celebrationAuroraT <= 0) {
       const pulse = 0.88 + Math.sin(t * 0.7 + this._axialTilt * 3) * 0.12;
@@ -917,7 +996,8 @@ export class Planet {
     for (const t of this._textures) t.dispose();
     this.glowMesh.geometry.dispose();
     this.glowMesh.material.dispose();
-    if (this._lavaAnimMesh) { this._lavaAnimMesh.geometry.dispose(); this._lavaAnimMesh.material.dispose(); }
+    if (this._lavaAnimMesh)   { this._lavaAnimMesh.geometry.dispose();   this._lavaAnimMesh.material.dispose(); }
+    if (this._iceShimmerMesh) { this._iceShimmerMesh.geometry.dispose(); this._iceShimmerMesh.material.dispose(); }
     if (this._ringGroup) {
       this._ringGroup.traverse(c => { if (c.isMesh) { c.geometry.dispose(); c.material.dispose(); } });
     }

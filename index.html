@@ -148,6 +148,24 @@
       padding-top: max(20px, 8vh, var(--ogp-safe-top-inset, 0px));
       padding-bottom: var(--ogp-safe-bottom-inset, 0px);
     }
+
+    /* ── Mobile: compact everything so the game view isn't buried ── */
+    @media (max-width: 520px) {
+      .overlay {
+        padding-top: max(10px, 3vh, var(--ogp-safe-top-inset, 0px));
+      }
+      #hud-hole    { font-size: 13px; letter-spacing: 1px; }
+      #hud-archetype { font-size: 8px; letter-spacing: 2px; margin-top: 1px; }
+      #hud-strokes { font-size: 10px; margin-top: 2px; }
+      #hud-player  { font-size: 10px; margin-top: 2px; }
+      #room-code-ui { font-size: 9px; }
+      #room-code-ui span { font-size: 12px; letter-spacing: 2px; margin-top: 1px; }
+      #aim-hint    { font-size: 9px; letter-spacing: 1px; }
+      #power-label { font-size: 10px; letter-spacing: 1px; }
+      #power-bar-bg { width: 140px; height: 10px; }
+      #mode-badge  { font-size: 9px; }
+      #penalty-msg { font-size: 16px; }
+    }
   </style>
 </head>
 <body>

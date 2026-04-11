@@ -17,6 +17,7 @@ import { NameEntryOverlay } from './ui/NameEntryOverlay.js';
 import { PlayerLabels } from './ui/PlayerLabels.js';
 import { AnnouncerUI } from './ui/AnnouncerUI.js';
 import { EventHUD } from './ui/EventHUD.js';
+import { LobbyPanel } from './ui/LobbyPanel.js';
 import { audioManager } from './audio/AudioManager.js';
 
 class Game {
@@ -107,8 +108,9 @@ class Game {
     this.mpUI      = new MultiplayerUI();
     this.nameEntry = new NameEntryOverlay();
     this.playerLabels = new PlayerLabels();
-    this.announcer  = new AnnouncerUI();
-    this.eventHUD   = new EventHUD();
+    this.announcer   = new AnnouncerUI();
+    this.eventHUD    = new EventHUD();
+    this.lobbyPanel  = new LobbyPanel();
   }
 
   _setupMultiplayer() {
@@ -158,6 +160,10 @@ class Game {
       } else if (name && name !== existing.name) {
         existing.name = name;
         this.playerLabels.updateName(playerId, name);
+      }
+      // Tell lobby panel which entry is the local player (first time we see our own ID)
+      if (playerId === this.mp.playerId && !this.lobbyPanel._localId) {
+        this.lobbyPanel.setLocalId(playerId);
       }
     });
 

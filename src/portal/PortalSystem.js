@@ -16,9 +16,10 @@ import { gameState } from '../core/GameState.js';
 const EXIT_URL_BASE = 'https://jam.pieter.com/portal/2026';
 const DOMAIN = window.location.hostname || 'cosmic-golf.pages.dev';
 
-// Distance from tee to each portal, perpendicular to facing direction
-const SIDE_DIST = 150;
-const FWD_DIST  = 5;   // slight push forward so they're in view
+// Distance from tee to each portal, perpendicular to facing direction.
+// Keep this small enough that portals are always on-screen at hole start.
+const SIDE_DIST = 55;
+const FWD_DIST  = -20;  // push slightly behind tee — portals stay visible when camera pulls back
 
 export class PortalSystem {
   constructor(scene) {
@@ -176,17 +177,21 @@ export class PortalSystem {
    * Animate portal rotation each frame.
    * @param {number} dt
    */
-  update(dt) {
+  update(dt, camera) {
     this._phase += dt;
 
+    // Face portals toward the camera so they're always easy to spot
+    if (camera) {
+      if (this._exitPortal)   this._exitPortal.lookAt(camera.position);
+      if (this._returnPortal) this._returnPortal.lookAt(camera.position);
+    }
+
     if (this._exitPortal) {
-      this._exitPortal.rotation.y += dt * 0.8;
       const pulse = 0.7 + Math.sin(this._phase * 2) * 0.3;
       this._exitPortal._torusMat.opacity = pulse * 0.9;
       this._exitPortal._glowMat.opacity  = pulse * 0.25;
     }
     if (this._returnPortal) {
-      this._returnPortal.rotation.y += dt * 0.6;
       const pulse = 0.65 + Math.sin(this._phase * 1.7 + 1.2) * 0.3;
       this._returnPortal._torusMat.opacity = pulse * 0.9;
       this._returnPortal._glowMat.opacity  = pulse * 0.25;

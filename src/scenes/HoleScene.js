@@ -740,7 +740,7 @@ export class HoleScene {
     for (const w of this.wormholes) w.update(dt);
 
     // Update portal
-    this.portalSystem.update(dt);
+    this.portalSystem.update(dt, this.camera);
 
     // Update effects (always, even during freeze)
     this.launchBurst.update(dt);

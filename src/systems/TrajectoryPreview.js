@@ -29,7 +29,7 @@ export class TrajectoryPreview {
     this.geometry.setDrawRange(0, 0);
 
     this.material = new PointsMaterial({
-      size: 1.4,
+      size: 2.0,
       transparent: true,
       opacity: 1.0,
       depthWrite: false,
@@ -64,22 +64,21 @@ export class TrajectoryPreview {
     const colors    = this.geometry.attributes.color.array;
     const total     = trajectory.length;
 
-    // Sample every 3rd simulation point so dots are spaced out (not a solid blob)
     const STEP = 3;
     let count = 0;
     for (let i = 0; i < total; i += STEP) {
       if (count >= AIM.TRAJECTORY_STEPS) break;
       const p = trajectory[i];
+
       positions[count * 3]     = p.x;
       positions[count * 3 + 1] = p.y;
       positions[count * 3 + 2] = p.z;
 
-      // Cyan → blue, fading to transparent toward the end
       const t     = count / Math.max(1, Math.floor(total / STEP) - 1);
-      const alpha = Math.pow(1.0 - t, 0.6); // slow fade, stays bright longer
-      colors[count * 3]     = alpha * 0.5;  // R — low (cyan-blue)
-      colors[count * 3 + 1] = alpha * 0.9;  // G — high (cyan)
-      colors[count * 3 + 2] = alpha * 1.0;  // B — full
+      const alpha = Math.pow(1.0 - t, 0.6);
+      colors[count * 3]     = alpha * 0.5;
+      colors[count * 3 + 1] = alpha * 0.9;
+      colors[count * 3 + 2] = alpha * 1.0;
       count++;
     }
 

@@ -715,9 +715,9 @@ export class HoleScene {
     // Remote balls — always simulate regardless of local state
     if (this._state !== 'HOLE_COMPLETE') this._updateRemoteBalls(dt);
 
-    // Trajectory: update every frame while player is choosing power
-    if (this._state === 'AIMING' && this.inputSystem.isInPowerPhase() && this.ball && this._holeData) {
-      const power = Math.max(0.15, this.inputSystem._power);
+    // Trajectory: update every frame while aiming (direction or power phase)
+    if (this._state === 'AIMING' && this.ball && this._holeData) {
+      const power = Math.max(0.15, this.inputSystem._power ?? 0.15);
       const vel   = this._facingDir.clone().multiplyScalar(power * AIM.MAX_POWER);
       this.trajectoryPreview.update(this.ball.position.clone(), vel, this._holeData.planets);
     }

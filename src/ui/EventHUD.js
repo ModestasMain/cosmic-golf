@@ -141,7 +141,7 @@ export class EventHUD {
       const color = EVENT_COLOR[targetType]   ?? '#aaddff';
       this._reelEl.textContent      = name;
       this._reelEl.style.color      = color;
-      this._reelEl.style.textShadow = `0 0 14px ${color}, 0 0 36px ${color}`;
+      this._reelEl.style.textShadow = 'none';
       return;
     }
 
@@ -195,9 +195,7 @@ export class EventHUD {
       reel.style.transform  = 'translateY(100%)';
       reel.textContent      = name;
       reel.style.color      = isFinal ? color : 'rgba(140,180,255,0.75)';
-      reel.style.textShadow = isFinal
-        ? `0 0 14px ${color}, 0 0 36px ${color}`
-        : 'none';
+      reel.style.textShadow = 'none';
 
       // Slide into view
       requestAnimationFrame(() => requestAnimationFrame(() => {

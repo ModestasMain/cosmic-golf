@@ -39,7 +39,9 @@ export const HOLE = {
   VOID_DRIFT_SPEED: 28,
   // Zero-gravity void: ball floating farther than this from any planet surface for too long → OOB
   VOID_ZERO_G_SURFACE_DIST: 250,
-  VOID_ZERO_G_GRACE_FRAMES: 240, // ~4 s at 60 fps — enough time to cross to another planet
+  VOID_ZERO_G_GRACE_FRAMES: 120, // ~2 s at 60 fps
+  VOID_ZERO_G_SLOW_DIST: 150,    // if ball is this far from surface AND slow → instant OOB
+  VOID_ZERO_G_SLOW_SPEED: 15,    // speed threshold for slow drift in zero-g
   BLACK_HOLE_PULL_RADIUS: 90,
   BLACK_HOLE_GRAVITY: 60,
 };

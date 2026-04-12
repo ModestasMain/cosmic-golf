@@ -1059,8 +1059,13 @@ export class HoleScene {
       }
 
       // Zero-gravity void: gravity is off so the ball never decelerates or curves back.
-      // If it's been floating far from every planet surface for too long → OOB.
       if (this.serverEvents.gravityScale === 0.0) {
+        // Slow drift far from any planet → OOB immediately
+        if (nearestSafeDist > HOLE.VOID_ZERO_G_SLOW_DIST && ballSpeed < HOLE.VOID_ZERO_G_SLOW_SPEED) {
+          this._onOutOfBounds();
+          return;
+        }
+        // Far from any planet for too long → OOB
         if (nearestSafeDist > HOLE.VOID_ZERO_G_SURFACE_DIST) {
           this._voidFrames++;
           if (this._voidFrames > HOLE.VOID_ZERO_G_GRACE_FRAMES) {
@@ -1068,10 +1073,10 @@ export class HoleScene {
             return;
           }
         } else {
-          this._voidFrames = 0; // near a planet — reset the timer
+          this._voidFrames = 0;
         }
       } else {
-        this._voidFrames = 0; // not in zero-g — keep counter clear
+        this._voidFrames = 0;
       }
 
       // Settle: ball at rest ON a planet, OR stuck near a planet surface too long

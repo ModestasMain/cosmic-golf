@@ -570,6 +570,28 @@ export class NameEntryOverlay {
       this._confirm();
     });
 
+    // ── Achievements button ─────────────────────────────────────
+    const achBtn = document.createElement('button');
+    achBtn.style.cssText = [
+      'width:100%',
+      'background:rgba(30,40,80,0.5)',
+      'border:1px solid rgba(100,160,255,0.2)', 'border-radius:10px',
+      'padding:12px 16px', 'color:rgba(180,210,255,0.7)', 'font-family:monospace',
+      'font-size:11px', 'letter-spacing:3px', 'cursor:pointer',
+      'transition:all 0.2s', 'text-align:center',
+    ].join(';');
+    achBtn.textContent = '🏆  ACHIEVEMENTS';
+    achBtn.addEventListener('pointerenter', () => {
+      achBtn.style.borderColor = 'rgba(120,180,255,0.5)';
+      achBtn.style.background = 'rgba(40,50,100,0.6)';
+    });
+    achBtn.addEventListener('pointerleave', () => {
+      achBtn.style.borderColor = 'rgba(100,160,255,0.2)';
+      achBtn.style.background = 'rgba(30,40,80,0.5)';
+    });
+    achBtn.addEventListener('click', () => this._showAchievements());
+    this._achBtn = achBtn;
+
     // ── Rules ─────────────────────────────────────────────────
     const rules = document.createElement('div');
     rules.style.cssText = [
@@ -610,6 +632,7 @@ export class NameEntryOverlay {
     card.appendChild(titleWrap);
     card.appendChild(inputsWrap);
     card.appendChild(btn);
+    card.appendChild(this._achBtn);
     card.appendChild(rules);
     overlay.appendChild(card);
 
@@ -639,6 +662,99 @@ export class NameEntryOverlay {
 
     document.body.appendChild(overlay);
     this._overlay = overlay;
+  }
+
+  setAchievementManager(mgr) {
+    this._achievementMgr = mgr;
+  }
+
+  _showAchievements() {
+    if (!this._achievementMgr) return;
+    const all = this._achievementMgr.getAll();
+    const unlocked = all.filter(a => a.unlocked).length;
+
+    if (this._achPanel) this._achPanel.remove();
+
+    const panel = document.createElement('div');
+    panel.style.cssText = [
+      'position:fixed', 'inset:0', 'z-index:2000',
+      'display:flex', 'flex-direction:column', 'align-items:center', 'justify-content:flex-start',
+      'background:rgba(4,6,20,0.92)',
+      'backdrop-filter:blur(12px)', '-webkit-backdrop-filter:blur(12px)',
+      'font-family:monospace', 'overflow-y:auto',
+      'padding:40px 16px',
+      'animation:fadeIn 0.2s ease',
+    ].join(';');
+
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;width:min(480px,90vw);margin-bottom:20px;';
+
+    const title = document.createElement('div');
+    title.style.cssText = 'font-size:18px;font-weight:bold;letter-spacing:4px;color:#fff;';
+    title.textContent = 'ACHIEVEMENTS';
+
+    const count = document.createElement('div');
+    count.style.cssText = 'font-size:12px;letter-spacing:2px;color:rgba(100,200,255,0.7);';
+    count.textContent = `${unlocked}/${all.length} UNLOCKED`;
+
+    const closeBtn = document.createElement('button');
+    closeBtn.style.cssText = [
+      'background:none', 'border:1px solid rgba(255,255,255,0.3)', 'border-radius:6px',
+      'padding:6px 14px', 'color:rgba(255,255,255,0.7)', 'font-family:monospace',
+      'font-size:11px', 'letter-spacing:2px', 'cursor:pointer', 'transition:all 0.15s',
+    ].join(';');
+    closeBtn.textContent = 'CLOSE';
+    closeBtn.addEventListener('click', () => panel.remove());
+    closeBtn.addEventListener('pointerenter', () => { closeBtn.style.borderColor = '#fff'; closeBtn.style.color = '#fff'; });
+    closeBtn.addEventListener('pointerleave', () => { closeBtn.style.borderColor = 'rgba(255,255,255,0.3)'; closeBtn.style.color = 'rgba(255,255,255,0.7)'; });
+
+    header.appendChild(title);
+    header.appendChild(count);
+    header.appendChild(closeBtn);
+
+    const grid = document.createElement('div');
+    grid.style.cssText = [
+      'display:grid',
+      'grid-template-columns:repeat(auto-fill,minmax(200px,1fr))',
+      'gap:10px',
+      'width:min(480px,90vw)',
+    ].join(';');
+
+    for (const a of all) {
+      const card = document.createElement('div');
+      card.style.cssText = [
+        'display:flex', 'align-items:center', 'gap:10px',
+        'padding:10px 12px', 'border-radius:8px',
+        a.unlocked
+          ? 'background:rgba(20,50,80,0.6);border:1px solid rgba(100,200,255,0.3);'
+          : 'background:rgba(15,15,25,0.4);border:1px solid rgba(255,255,255,0.06);',
+        'transition:transform 0.15s',
+      ].join(';');
+      card.addEventListener('pointerenter', () => { card.style.transform = 'scale(1.03)'; });
+      card.addEventListener('pointerleave', () => { card.style.transform = 'scale(1)'; });
+
+      const icon = document.createElement('span');
+      icon.style.cssText = [
+        'font-size:22px', 'flex-shrink:0', 'width:32px', 'text-align:center',
+        a.unlocked ? 'filter:drop-shadow(0 0 6px rgba(100,200,255,0.5))' : 'opacity:0.25;filter:grayscale(1)',
+      ].join(';');
+      icon.textContent = a.icon;
+
+      const text = document.createElement('div');
+      text.innerHTML = [
+        `<div style="font-size:12px;font-weight:bold;letter-spacing:1px;color:${a.unlocked ? '#fff' : 'rgba(255,255,255,0.2)'}">${a.name}</div>`,
+        `<div style="font-size:10px;margin-top:2px;color:${a.unlocked ? 'rgba(180,210,255,0.55)' : 'rgba(255,255,255,0.1)'};letter-spacing:0.5px">${a.desc}</div>`,
+      ].join('');
+
+      card.appendChild(icon);
+      card.appendChild(text);
+      grid.appendChild(card);
+    }
+
+    panel.appendChild(header);
+    panel.appendChild(grid);
+    document.body.appendChild(panel);
+    this._achPanel = panel;
   }
 
   _makeLabel(text) {

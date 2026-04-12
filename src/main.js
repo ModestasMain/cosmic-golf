@@ -12,6 +12,8 @@ import { ScoreboardScene } from './scenes/ScoreboardScene.js';
 import { AimUI } from './ui/AimUI.js';
 import { TutorialOverlay } from './ui/TutorialOverlay.js';
 import { MultiplayerManager } from './multiplayer/MultiplayerManager.js';
+import { AchievementManager } from './core/AchievementManager.js';
+import { AchievementToast } from './ui/AchievementToast.js';
 import { MultiplayerUI } from './ui/MultiplayerUI.js';
 import { NameEntryOverlay } from './ui/NameEntryOverlay.js';
 import { PlayerLabels } from './ui/PlayerLabels.js';
@@ -105,8 +107,13 @@ class Game {
   _setupUI() {
     this.aimUI     = new AimUI();
     this.tutorial  = new TutorialOverlay();
+    this.achievements = new AchievementManager();
+    this.achievementToast = new AchievementToast();
+    this.achievements.onToast((a) => this.achievementToast.show(a));
+    this.achievements.init();
     this.mpUI      = new MultiplayerUI();
     this.nameEntry = new NameEntryOverlay();
+    this.nameEntry.setAchievementManager(this.achievements);
     this.playerLabels = new PlayerLabels();
     this.announcer   = new AnnouncerUI();
     this.eventHUD    = new EventHUD();

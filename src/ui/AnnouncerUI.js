@@ -99,18 +99,11 @@ export class AnnouncerUI {
   }
 
   _setupListeners() {
-    // Score announcements
     eventBus.on(Events.BALL_HOLED, ({ strokes }) => {
       const msg = this._scoreMessage(strokes);
       if (msg) this.show(msg);
     });
 
-    // Billiard hits
-    eventBus.on(Events.BILLIARD_HIT, ({ ownGoal }) => {
-      this.show(ownGoal ? 'OWN GOAL?!' : (Math.random() < 0.5 ? 'NICE SHOT!' : 'RICOCHET!'));
-    });
-
-    // Collectible pickup
     eventBus.on(Events.COLLECTIBLE_COLLECTED, ({ label, color, remote }) => {
       if (!remote && label) this.show(label, color ?? '#ffffff', 1500);
     });

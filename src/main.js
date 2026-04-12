@@ -118,6 +118,7 @@ class Game {
 
     // Give HoleScene a reference to MP so it can broadcast billiard hits
     this.holeScene.mp = this.mp;
+    this.scoreboardScene._mp = this.mp;
 
     this.mp.onShotReceived((data) => {
       eventBus.emit(Events.SHOT_RECEIVED, data);
@@ -178,6 +179,7 @@ class Game {
 
   _setupEventListeners() {
     eventBus.on('game:restart', () => {
+      this.mp.broadcastGameRestart();
       const savedColor = this.mp.localColor ?? gameState.players[0]?.color ?? 0xff6600;
       const savedName  = gameState.players[0]?.name ?? 'PLAYER';
       gameState.reset();
@@ -186,6 +188,7 @@ class Game {
     });
 
     eventBus.on(Events.BALL_RESET_TO_TEE, () => {
+      this.mp.broadcastBallReset(gameState.currentHole);
       this.holeScene.resetBallToTee();
     });
 

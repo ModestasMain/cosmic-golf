@@ -15,7 +15,7 @@ export const PHYSICS = {
 };
 
 export const BALL = {
-  RADIUS: 0.8,
+  RADIUS: 3.2,
 };
 
 export const AIM = {
@@ -51,7 +51,7 @@ export const PLANET = {
 };
 
 export const CAMERA = {
-  FOV: 70,
+  FOV: 60,
   NEAR: 0.1,
   FAR: 9500,
   FOLLOW_LERP: 0.07,

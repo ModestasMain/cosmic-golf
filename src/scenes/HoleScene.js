@@ -82,8 +82,9 @@ export class HoleScene {
     // Multiplayer: ghost balls for remote players
     // playerId -> { ball: GhostBall, inFlight, holed, stuckFrames, launchGrace }
     this._remoteBalls = new Map();
-    this._syncFrameCounter = 0; // broadcast local ball state every N frames
-    this._lastValidPos = new Vector3(); // last in-bounds position for OOB reset
+    this._syncFrameCounter = 0;
+    this._lastValidPos = new Vector3();
+    this._billiardCooldowns = new Map();
 
     this._holeCompleteEmitted = false; // idempotency guard for _advanceHole
     this._playersHoled       = new Set();
@@ -272,11 +273,30 @@ export class HoleScene {
     });
 
     eventBus.on(Events.MP_HOLE_COMPLETE, ({ playerId, strokes, timeMs }) => {
-      // Record remote player's strokes + time
       gameState.recordStroke(playerId, gameState.currentHole, strokes);
       if (timeMs) gameState.recordHoleTime(playerId, gameState.currentHole, timeMs);
       this._playersHoled.add(playerId);
-      // Remove their ghost — they've moved on to the next hole
+      const remote = this._remoteBalls.get(playerId);
+      if (remote) {
+        remote.ball.removeFromScene(this.scene);
+        this._remoteBalls.delete(playerId);
+      }
+    });
+
+    eventBus.on(Events.MP_BALL_RESET, ({ playerId, holeIndex }) => {
+      if (holeIndex !== gameState.currentHole) return;
+      const remote = this._remoteBalls.get(playerId);
+      if (remote && this._holeData) {
+        remote._stateBuffer = [];
+        remote.holed = false;
+        remote.inFlight = false;
+        if (remote.ball.trail) remote.ball.trail.setActive(false);
+        remote.ball.setPosition(this._holeData.tee.clone().add(new Vector3(0, BALL.RADIUS + 0.2, 0)));
+        remote.ball.setVelocity(new Vector3());
+      }
+    });
+
+    eventBus.on(Events.MP_GAME_RESTART, ({ playerId }) => {
       const remote = this._remoteBalls.get(playerId);
       if (remote) {
         remote.ball.removeFromScene(this.scene);
@@ -290,7 +310,7 @@ export class HoleScene {
     });
 
     // Remote ball state — buffer for interpolation (100 ms render delay)
-    eventBus.on(Events.MP_BALL_STATE, ({ playerId, pos, vel, holeIndex, ts, bounce, planetIdx, normal }) => {
+    eventBus.on(Events.MP_BALL_STATE, ({ playerId, pos, vel, holeIndex, ts, bounce, planetIdx, normal, reset }) => {
       if (holeIndex !== undefined && holeIndex !== gameState.currentHole) return;
       let remote = this._remoteBalls.get(playerId);
       if (!remote && this._holeData) {
@@ -305,9 +325,18 @@ export class HoleScene {
       const authPos = new Vector3(pos.x, pos.y, pos.z);
       const authVel = new Vector3(vel.x, vel.y, vel.z);
 
-      // Push state into the interpolation buffer (keep last 30 states ≈ 1 s at 30 Hz)
-      remote._stateBuffer.push({ ts: recvTs, pos: authPos, vel: authVel });
-      if (remote._stateBuffer.length > 30) remote._stateBuffer.shift();
+      // Reset flag: teleport — clear stale buffer, snap immediately
+      if (reset) {
+        remote._stateBuffer = [];
+        remote.inFlight = false;
+        if (remote.ball.trail) remote.ball.trail.setActive(false);
+        remote.ball.setPosition(authPos);
+        remote.ball.setVelocity(authVel);
+        remote._stateBuffer.push({ ts: recvTs, pos: authPos.clone(), vel: authVel.clone() });
+      } else {
+        remote._stateBuffer.push({ ts: recvTs, pos: authPos, vel: authVel });
+        if (remote._stateBuffer.length > 30) remote._stateBuffer.shift();
+      }
 
       // Activate trail when ball starts moving
       if (!remote.inFlight && authVel.length() > PHYSICS.REST_VELOCITY) {
@@ -361,10 +390,14 @@ export class HoleScene {
     });
 
     // Remote ball hit our ball
-    eventBus.on(Events.BILLIARD_HIT, ({ remote, normal, impulse }) => {
-      if (remote && this.ball && this._state === 'BALL_IN_FLIGHT') {
-        const n = new Vector3(normal.x, normal.y, normal.z);
-        this.ball.velocity.addScaledVector(n, impulse ?? 80);
+    eventBus.on(Events.BILLIARD_HIT, ({ remote, velocity }) => {
+      if (remote && this.ball) {
+        const v = new Vector3(velocity.x, velocity.y, velocity.z);
+        this.ball.setVelocity(v);
+        this.ball.syncMesh();
+        if (!this.ball.trail?.active) this.ball.trail?.setActive(true);
+        this._state = 'BALL_IN_FLIGHT';
+        gameState.ballInFlight = true;
         this.screenShake.trigger(0.5, 0.4);
       }
     });
@@ -1324,6 +1357,8 @@ export class HoleScene {
     gameState.ballInFlight = false;
     gameState.aimState = 'IDLE';
     this.inputSystem.setAiming(false);
+
+    this._broadcastBallReset(resetPos);
   }
 
   // Compute the OOB spawn position — on the planet's current location if possible
@@ -1385,44 +1420,113 @@ export class HoleScene {
 
   _checkBallCollisions() {
     if (!this.ball || this._remoteBalls.size === 0) return;
+    const now = Date.now();
 
     for (const [playerId, remote] of this._remoteBalls) {
       if (remote.holed) continue;
 
-      const diff = new Vector3().subVectors(this.ball.position, remote.ball.position);
+      const cooldown = this._billiardCooldowns.get(playerId) ?? 0;
+      if (now < cooldown) continue;
+
+      // Use latest authoritative position for collision, not interpolated visual position
+      const remotePos = this._getLatestRemotePos(remote);
+      const diff = new Vector3().subVectors(this.ball.position, remotePos);
       const dist = diff.length();
-      const minDist = BALL.RADIUS * 2.2; // slightly larger for satisfying hit feel
+      const minDist = BALL.RADIUS * 2;
 
       if (dist < minDist && dist > 0.001) {
         const normal = diff.normalize();
         const v1n = this.ball.velocity.dot(normal);
         const v2n = remote.ball.velocity.dot(normal);
 
-        // Only resolve if balls are approaching each other
         if (v1n - v2n < 0) {
-          // Equal-mass elastic collision: exchange velocity components along normal
           this.ball.velocity.addScaledVector(normal, v2n - v1n);
           remote.ball.velocity.addScaledVector(normal, v1n - v2n);
           remote.ball.syncMesh();
 
-          // Positional correction — push balls apart
           const overlap = minDist - dist;
           this.ball.position.addScaledVector(normal, overlap * 0.5);
           remote.ball.position.addScaledVector(normal, -overlap * 0.5);
           this.ball.syncMesh();
           remote.ball.syncMesh();
 
-          // Broadcast hit to the target player
           if (this.mp) {
-            const impulse = Math.abs(v1n - v2n);
-            this.mp.broadcastBallHit(playerId, normal, impulse);
+            this.mp.broadcastBallHit(playerId, remote.ball.velocity);
           }
 
+          this._billiardCooldowns.set(playerId, now + 500);
           this.screenShake.trigger(0.45, 0.35);
           eventBus.emit(Events.BILLIARD_HIT, { targetId: playerId, ownGoal: false });
+          continue;
+        }
+      }
+
+      // Swept collision: check if local ball path this frame passes through remote ball
+      const localSpeed = this.ball.velocity.length();
+      if (localSpeed > 60) {
+        const sweptHit = this._sweptBallCheck(this.ball.position, this.ball.velocity, remotePos, minDist);
+        if (sweptHit) {
+          const normal = sweptHit.normal;
+          const v1n = this.ball.velocity.dot(normal);
+          const v2n = remote.ball.velocity.dot(normal);
+
+          if (v1n - v2n < 0) {
+            this.ball.velocity.addScaledVector(normal, v2n - v1n);
+            remote.ball.velocity.addScaledVector(normal, v1n - v2n);
+            remote.ball.syncMesh();
+
+            // Push balls apart along collision normal
+            this.ball.position.copy(sweptHit.point).addScaledVector(normal, minDist * 0.5);
+            remote.ball.position.copy(sweptHit.point).addScaledVector(normal, -minDist * 0.5);
+            this.ball.syncMesh();
+            remote.ball.syncMesh();
+
+            if (this.mp) {
+              this.mp.broadcastBallHit(playerId, remote.ball.velocity);
+            }
+
+            this._billiardCooldowns.set(playerId, now + 500);
+            this.screenShake.trigger(0.45, 0.35);
+            eventBus.emit(Events.BILLIARD_HIT, { targetId: playerId, ownGoal: false });
+          }
         }
       }
     }
+  }
+
+  _getLatestRemotePos(remote) {
+    const buf = remote._stateBuffer;
+    if (buf.length > 0) return buf[buf.length - 1].pos;
+    return remote.ball.position;
+  }
+
+  _sweptBallCheck(localPos, localVel, remotePos, combinedRadius) {
+    const relX = localPos.x - remotePos.x;
+    const relY = localPos.y - remotePos.y;
+    const relZ = localPos.z - remotePos.z;
+    const r2 = combinedRadius * combinedRadius;
+
+    const a = localVel.lengthSq();
+    if (a < 0.0001) return null;
+
+    const b = 2 * (relX * localVel.x + relY * localVel.y + relZ * localVel.z);
+    const c = relX * relX + relY * relY + relZ * relZ - r2;
+
+    const disc = b * b - 4 * a * c;
+    if (disc < 0) return null;
+
+    const sqrtDisc = Math.sqrt(disc);
+    let t = (-b - sqrtDisc) / (2 * a);
+    if (t < 0) t = (-b + sqrtDisc) / (2 * a);
+    if (t < 0 || t > 1) return null;
+
+    const hitPoint = localPos.clone().addScaledVector(localVel, t);
+    const normal = new Vector3().subVectors(localPos, remotePos);
+    const len = normal.length();
+    if (len < 0.001) return null;
+    normal.divideScalar(len);
+
+    return { point: hitPoint, normal, t };
   }
 
   resetBallToTee() {
@@ -1430,13 +1534,21 @@ export class HoleScene {
     if (this.ball.trail) this.ball.trail.setActive(false);
     this._attachedPlanetIdx  = -1;
     this._lastValidPlanetIdx = -1;
-    this.ball.setPosition(this._holeData.tee.clone().add(new Vector3(0, BALL.RADIUS + 0.2, 0)));
+    const teePos = this._holeData.tee.clone().add(new Vector3(0, BALL.RADIUS + 0.2, 0));
+    this.ball.setPosition(teePos);
     this.ball.setVelocity(new Vector3());
     this._state = 'IDLE';
     gameState.ballInFlight = false;
     gameState.aimState = 'IDLE';
     this.inputSystem.enabled = true;
     this.inputSystem._reset();
+    this._broadcastBallReset(teePos);
+  }
+
+  _broadcastBallReset(pos) {
+    if (!this.mp) return;
+    this.mp.broadcastBallState(pos, new Vector3(), gameState.currentHole, true, this._attachedPlanetIdx, this._lastValidNormal, true);
+    this.mp.broadcastBallStopped(pos, gameState.currentHole, this._attachedPlanetIdx, this._lastValidNormal);
   }
 
   // ── Multiplayer: remote ball management ──────────────────────

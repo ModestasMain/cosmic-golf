@@ -32,6 +32,8 @@ class GameState {
     // Per-hole state
     this.currentStrokes = 0;       // strokes for current player this hole
     this.aimState = 'IDLE';        // IDLE | AIMING | BALL_IN_FLIGHT | HOLE_COMPLETE
+
+    this.leaderboardSessionId = null;
   }
 
   get currentPlayer() {

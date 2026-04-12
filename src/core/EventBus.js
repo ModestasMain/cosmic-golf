@@ -104,4 +104,11 @@ export const Events = {
   // Collectibles
   COLLECTIBLE_COLLECTED: 'collectible:collected', // { type, id, playerId, holeIndex }
   COLLECTIBLE_SPAWNED:   'collectible:spawned',   // { id, holeIndex }
+
+  // Leaderboard
+  LEADERBOARD_UPDATE: 'leaderboard:update', // { entries: [] }
+
+  // Remote reset
+  MP_BALL_RESET:    'mp:ball_reset',     // { playerId, holeIndex }
+  MP_GAME_RESTART:  'mp:game_restart',   // { playerId }
 };

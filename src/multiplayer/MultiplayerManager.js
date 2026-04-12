@@ -183,14 +183,28 @@ export class MultiplayerManager {
 
       case 'ball_hit':
         if (msg.targetId === this.playerId) {
-          // Someone hit our ball — apply the impulse
           eventBus.emit(Events.BILLIARD_HIT, {
             targetId: msg.targetId,
-            normal:   msg.normal,
-            impulse:  msg.impulse,
+            velocity: msg.velocity,
             remote:   true,
           });
         }
+        break;
+
+      case 'ball_reset':
+        if (msg.playerId !== this.playerId) {
+          eventBus.emit(Events.MP_BALL_RESET, { playerId: msg.playerId, holeIndex: msg.holeIndex });
+        }
+        break;
+
+      case 'game_restart':
+        if (msg.playerId !== this.playerId) {
+          eventBus.emit(Events.MP_GAME_RESTART, { playerId: msg.playerId });
+        }
+        break;
+
+      case 'leaderboard':
+        eventBus.emit(Events.LEADERBOARD_UPDATE, { entries: msg.entries });
         break;
 
     }
@@ -226,7 +240,7 @@ export class MultiplayerManager {
     this._send({ type: 'join', playerId: this.playerId, name, color });
   }
 
-  broadcastBallState(pos, vel, holeIndex, bounce = false, planetIdx = null, normal = null) {
+  broadcastBallState(pos, vel, holeIndex, bounce = false, planetIdx = null, normal = null, reset = false) {
     if (!this._isConnected || this._isSolo) return;
     const msg = {
       type: 'ball_state',
@@ -234,6 +248,7 @@ export class MultiplayerManager {
       holeIndex,
       ts: Date.now(),
       bounce,
+      reset,
       pos: { x: pos.x, y: pos.y, z: pos.z },
       vel: { x: vel.x, y: vel.y, z: vel.z },
     };
@@ -264,15 +279,34 @@ export class MultiplayerManager {
     this._send({ type: 'collected', playerId: this.playerId, collectibleId, collectibleType, holeIndex });
   }
 
-  broadcastBallHit(targetId, normal, impulse) {
+  broadcastBallHit(targetId, velocity) {
     if (!this._isConnected || this._isSolo) return;
     this._send({
       type:     'ball_hit',
       playerId: this.playerId,
       targetId,
-      normal:   { x: normal.x, y: normal.y, z: normal.z },
-      impulse,
+      velocity: { x: velocity.x, y: velocity.y, z: velocity.z },
     });
+  }
+
+  broadcastBallReset(holeIndex) {
+    if (!this._isConnected || this._isSolo) return;
+    this._send({ type: 'ball_reset', playerId: this.playerId, holeIndex });
+  }
+
+  broadcastGameRestart() {
+    if (!this._isConnected || this._isSolo) return;
+    this._send({ type: 'game_restart', playerId: this.playerId });
+  }
+
+  submitLeaderboardEntry(entry) {
+    if (!this._isConnected || this._isSolo) return;
+    this._send({ type: 'leaderboard_submit', entry });
+  }
+
+  requestLeaderboard() {
+    if (!this._isConnected || this._isSolo) return;
+    this._send({ type: 'leaderboard_get' });
   }
 
   _send(data) {

@@ -131,19 +131,18 @@ export class HoleScene {
 
     // Hole-intro cinematic
     this.cinematic = new CinematicController(this.camera, () => {
-      // Sync lerp origin so camera doesn't snap when normal follow takes over
       this._cameraPos.copy(this.camera.position);
       if (this.ball) {
         this._cameraTarget.copy(
           this.ball.position.clone().addScaledVector(this._facingDir, 8),
         );
       }
-      // Re-enable input and unlock gameplay
       this.inputSystem.enabled = true;
       if (this._state === 'CINEMATIC') {
         this._state = 'IDLE';
         gameState.aimState = 'IDLE';
       }
+      eventBus.emit(Events.CINEMATIC_COMPLETE);
     });
 
     // Systems
@@ -703,7 +702,7 @@ export class HoleScene {
 
     // Cinematic intro — world animates but gameplay is fully locked
     if (this._state === 'CINEMATIC') {
-      for (const p of this.planetObjects) p.update(dt);
+      for (const p of this.planetObjects) p.update(dt, this.serverEvents.isStatic);
       if (this.cup) this.cup.update(dt);
       if (this.starField)   this.starField.update(dt);
       if (this.cometSystem) this.cometSystem.update(dt);
@@ -764,7 +763,7 @@ export class HoleScene {
     if (this.cometSystem) this.cometSystem.update(dt);
 
     // Update planet gravity fields
-    for (const p of this.planetObjects) p.update(dt);
+    for (const p of this.planetObjects) p.update(dt, this.serverEvents.isStatic);
 
     // Update cup pulsing
     if (this.cup) this.cup.update(dt);

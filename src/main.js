@@ -110,7 +110,6 @@ class Game {
     this.achievements = new AchievementManager();
     this.achievementToast = new AchievementToast();
     this.achievements.onToast((a) => this.achievementToast.show(a));
-    this.achievements.init();
     this.mpUI      = new MultiplayerUI();
     this.nameEntry = new NameEntryOverlay();
     this.nameEntry.setAchievementManager(this.achievements);

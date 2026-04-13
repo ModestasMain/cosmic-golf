@@ -74,14 +74,21 @@ export class AchievementManager {
     this._bounceCountThisShot = 0;
 
     this._setupListeners();
-    this._pendingFirstPlay = !this._unlocked.has('FIRST_PLAY');
+  }
+
+  onToast(callback) {
+    this._toastCallback = callback;
   }
 
   init() {
     if (this._pendingFirstPlay) {
-      this.tryUnlock('FIRST_PLAY');
       this._pendingFirstPlay = false;
     }
+  }
+
+  reset() {
+    this._unlocked = new Set();
+    this._save();
   }
 
   onToast(callback) {
@@ -110,6 +117,10 @@ export class AchievementManager {
   }
 
   _setupListeners() {
+    eventBus.on(Events.CINEMATIC_COMPLETE, () => {
+      this.tryUnlock('FIRST_PLAY');
+    });
+
     eventBus.on(Events.BALL_HOLED, ({ strokes }) => {
       if (strokes === 1) {
         this.tryUnlock('HOLE_IN_ONE');

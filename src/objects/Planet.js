@@ -638,7 +638,8 @@ export class Planet {
       || seq() < 0.2; // any planet can randomly have rings
 
     if (hasRings) {
-      this._ringGroup = buildRings(this.group, this.radius, this.color, seed);
+      this._ringGroup = buildRings(this.bodyGroup, this.radius, this.color, seed);
+      this._ringSpinRate = (seq() - 0.5) * 0.06;
     }
 
     // Cloud layer for TERRAN and GAS
@@ -880,14 +881,20 @@ export class Planet {
     }
   }
 
-  update(dt) {
+  update(dt, frozen = false) {
     this._t += dt;
     const t = this._t;
 
-    // Self-rotation
-    this.mesh.rotation.y += this._spinSpeed * dt;
-    if (this._cloudMesh)     this._cloudMesh.rotation.y     += this._cloudSpinRate  * dt;
-    if (this._cityLightsMesh) this._cityLightsMesh.rotation.y += this._cityLightsRate * dt;
+    // Self-rotation (frozen during STATIC event)
+    if (!frozen) {
+      this.mesh.rotation.y += this._spinSpeed * dt;
+      if (this._cloudMesh)     this._cloudMesh.rotation.y     += this._cloudSpinRate  * dt;
+      if (this._cityLightsMesh) this._cityLightsMesh.rotation.y += this._cityLightsRate * dt;
+      if (this._ringGroup)     this._ringGroup.rotation.y     += this._ringSpinRate   * dt;
+      for (const m of this._moons) {
+        m.orbit.rotation.y += m.speed * dt;
+      }
+    }
 
     // Lava planet: emissive flicker + animated crack overlay
     if (this.type === 'LAVA') {
@@ -924,11 +931,6 @@ export class Planet {
     if (this._glowMult && this._celebrationAuroraT <= 0) {
       const pulse = 0.88 + Math.sin(t * 0.7 + this._axialTilt * 3) * 0.12;
       this._glowMult.value = this._baseGlowOpacity * pulse;
-    }
-
-    // Moon orbits
-    for (const m of this._moons) {
-      m.orbit.rotation.y += m.speed * dt;
     }
 
     // Celebration ring pulses

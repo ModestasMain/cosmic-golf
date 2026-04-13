@@ -753,6 +753,34 @@ export class NameEntryOverlay {
 
     panel.appendChild(header);
     panel.appendChild(grid);
+
+    // Reset button
+    const resetBtn = document.createElement('button');
+    resetBtn.style.cssText = [
+      'margin-top:20px',
+      'background:rgba(60,20,20,0.5)',
+      'border:1px solid rgba(255,80,80,0.3)', 'border-radius:8px',
+      'padding:10px 20px', 'color:rgba(255,120,120,0.8)', 'font-family:monospace',
+      'font-size:11px', 'letter-spacing:2px', 'cursor:pointer', 'transition:all 0.2s',
+    ].join(';');
+    resetBtn.textContent = 'RESET ACHIEVEMENTS';
+    resetBtn.addEventListener('pointerenter', () => {
+      resetBtn.style.borderColor = 'rgba(255,80,80,0.7)';
+      resetBtn.style.background = 'rgba(80,20,20,0.6)';
+    });
+    resetBtn.addEventListener('pointerleave', () => {
+      resetBtn.style.borderColor = 'rgba(255,80,80,0.3)';
+      resetBtn.style.background = 'rgba(60,20,20,0.5)';
+    });
+    resetBtn.addEventListener('click', () => {
+      if (this._achievementMgr) {
+        this._achievementMgr.reset();
+        panel.remove();
+        this._showAchievements();
+      }
+    });
+
+    panel.appendChild(resetBtn);
     document.body.appendChild(panel);
     this._achPanel = panel;
   }

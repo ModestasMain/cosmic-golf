@@ -51,6 +51,8 @@ export class ServerEventSystem {
     this._nextEventType   = null;
   }
 
+  get isStatic() { return this.staticActive; }
+
   // ── Update ────────────────────────────────────────────────
 
   update(dt) {

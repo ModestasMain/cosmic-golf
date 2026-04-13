@@ -111,4 +111,7 @@ export const Events = {
   // Remote reset
   MP_BALL_RESET:    'mp:ball_reset',     // { playerId, holeIndex }
   MP_GAME_RESTART:  'mp:game_restart',   // { playerId }
+
+  // Cinematic
+  CINEMATIC_COMPLETE: 'cinematic:complete',
 };

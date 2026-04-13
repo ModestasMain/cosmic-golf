@@ -33,6 +33,7 @@ import { CometSystem } from '../effects/CometSystem.js';
 import { CinematicController } from './CinematicController.js';
 import { ServerEventSystem } from '../systems/ServerEventSystem.js';
 import { CollectibleSystem } from '../systems/CollectibleSystem.js';
+import { OrbitalCapture } from '../systems/OrbitalCapture.js';
 
 export class HoleScene {
   constructor(renderer, inputSystem) {
@@ -121,6 +122,10 @@ export class HoleScene {
     this._bouncePlanetIdx  = -1;
     this._bounceStreak     = 0;
 
+    // Orbital Capture system
+    this._orbitalCapture = new OrbitalCapture();
+    this._orbitHoldActive = false;  // true while player is holding for orbit entry/exit
+
     // Last-valid-position save — stores planet attachment so OOB reset
     // respawns on the planet's *current* position, not old world coords
     this._lastValidPlanetIdx = -1;
@@ -141,6 +146,8 @@ export class HoleScene {
       if (this._state === 'CINEMATIC') {
         this._state = 'IDLE';
         gameState.aimState = 'IDLE';
+        this.inputSystem.showBar();
+        this.trajectoryPreview.show();
       }
       eventBus.emit(Events.CINEMATIC_COMPLETE);
     });
@@ -192,21 +199,24 @@ export class HoleScene {
 
   _setupEventListeners() {
     eventBus.on(Events.AIM_START, () => {
-      if (this._state !== 'IDLE') return;
+      if (this._state !== 'IDLE' && this._state !== 'AIMING') return;
       this._state = 'AIMING';
       this._aimDrag = null;
       this._aimStartDir.copy(this._facingDir);
-      this.trajectoryPreview.show(); // show immediately — direction re-aimable anytime
+      this.trajectoryPreview.show();
+      this.inputSystem.showBar();
     });
 
     // Fired at the start of each new direction drag — reset base so re-drags feel natural
     eventBus.on(Events.AIM_DIR_LOCKED, () => {
-      if (this._state !== 'AIMING') return;
+      if (this._state !== 'IDLE' && this._state !== 'AIMING') return;
+      if (this._state === 'IDLE') this._state = 'AIMING';
       this._aimStartDir.copy(this._facingDir);
     });
 
     eventBus.on(Events.AIM_UPDATE, (data) => {
-      if (this._state !== 'AIMING') return;
+      if (this._state !== 'IDLE' && this._state !== 'AIMING') return;
+      if (this._state === 'IDLE') this._state = 'AIMING';
       this._aimDrag = data;
       if (!this.ball || !this._holeData) return;
 
@@ -242,14 +252,13 @@ export class HoleScene {
       if (this.ball) this.ball.setPower(0);
       if (this._state === 'AIMING') {
         this._state = 'IDLE';
-        this.trajectoryPreview.hide();
         this._aimDrag = null;
       }
     });
 
     eventBus.on(Events.SHOT_TAKEN, (data) => {
       if (this.ball) this.ball.setPower(0);
-      if (this._state !== 'AIMING' && this._state !== 'IDLE') return;
+      if (this._state === 'BALL_IN_FLIGHT' || this._state === 'HOLE_COMPLETE') return;
       this._fireShot(data);
     });
 
@@ -400,6 +409,56 @@ export class HoleScene {
         this.screenShake.trigger(0.5, 0.4);
       }
     });
+
+    // Orbital Capture: slingshot exit — transition from orbit to flight
+    eventBus.on(Events.ORBIT_EXIT_DONE, ({ velocity }) => {
+      if (!this.ball) return;
+      this._orbitalCapture.reset();
+      this._orbitHoldActive = false;
+      this.ball.setVelocity(velocity);
+      this._state = 'BALL_IN_FLIGHT';
+      gameState.ballInFlight = true;
+      gameState.aimState = 'BALL_IN_FLIGHT';
+      gameState.currentStrokes++;
+      if (!this._holeStartTime) this._holeStartTime = Date.now();
+      this._attachedPlanetIdx = -1;
+      this._bouncePlanetIdx = -1;
+      this._bounceStreak = 0;
+      this._launchGraceFrames = PHYSICS.LAUNCH_GRACE_FRAMES;
+      this._stuckFrames = 0;
+      this._voidFrames = 0;
+      if (this._holeData) {
+        this.launchBurst.trigger(this.ball.position.clone(), this._holeData.palette);
+      }
+      this.launchWarp.trigger(0.6);
+      this.screenShake.trigger(0.8, 0.5);
+    });
+
+    // Orbital Capture: hold input start
+    eventBus.on(Events.ORBIT_HOLD_START, () => {
+      const oc = this._orbitalCapture;
+      if (oc.isOrbiting) {
+        // Already orbiting → start exit hold
+        oc.startExitHold();
+      } else if (this._state === 'IDLE' && this._attachedPlanetIdx >= 0
+                 && this._bouncePlanetIdx === this._attachedPlanetIdx) {
+        // Glued after 3 bounces → start capture hold
+        oc.startCaptureHold(
+          this._attachedPlanetIdx,
+          this.planets,
+          this.planetObjects,
+          this.scene,
+        );
+      }
+    });
+
+    // Orbital Capture: hold input end (released before completion)
+    eventBus.on(Events.ORBIT_HOLD_END, () => {
+      const oc = this._orbitalCapture;
+      if (oc.isActive && (oc.state === 'HOLDING_ENTER' || oc.state === 'HOLDING_EXIT')) {
+        oc.cancelHold();
+      }
+    });
   }
 
   /**
@@ -465,7 +524,7 @@ export class HoleScene {
     // }
 
     // Place ball at tee
-    this.ball = new GolfBall(palette.ball);
+    this.ball = new GolfBall(palette.ball, null, gameState.ballStyle);
     this.ball.setPosition(tee.clone().add(new Vector3(0, BALL.RADIUS + 0.2, 0)));
     this.ball.addToScene(this.scene);
 
@@ -548,6 +607,8 @@ export class HoleScene {
     this._lastValidPlanetIdx = -1;
     this._bouncePlanetIdx    = -1;
     this._bounceStreak       = 0;
+    this._orbitalCapture.reset();
+    this.inputSystem.setOrbitHoldAllowed(false);
 
     // Remove planets
     for (const p of this.planetObjects) {
@@ -653,6 +714,8 @@ export class HoleScene {
     this._attachedPlanetIdx = -1; // detach from planet on shot
     this._bouncePlanetIdx   = -1; // reset bounce streak on new shot
     this._bounceStreak      = 0;
+    this._orbitalCapture.reset();
+    this.inputSystem.setOrbitHoldAllowed(false);
     this.ball.setVelocity(velocity);
     this._state = 'BALL_IN_FLIGHT';
     gameState.ballInFlight = true;
@@ -664,6 +727,7 @@ export class HoleScene {
 
     this.trajectoryPreview.hide();
     this.inputSystem.setAiming(false);
+    this.inputSystem.hideBar();
 
     // Activate ball trail
     if (this.ball?.trail) {
@@ -714,11 +778,13 @@ export class HoleScene {
     // Remote balls — always simulate regardless of local state
     if (this._state !== 'HOLE_COMPLETE') this._updateRemoteBalls(dt);
 
-    // Trajectory: update every frame while aiming (direction or power phase)
-    if (this._state === 'AIMING' && this.ball && this._holeData) {
+    // Trajectory: always visible when ball is at rest (IDLE + AIMING)
+    if ((this._state === 'IDLE' || this._state === 'AIMING') && this.ball && this._holeData) {
       const power = Math.max(0.15, this.inputSystem._power ?? 0.15);
       const vel   = this._facingDir.clone().multiplyScalar(power * AIM.MAX_POWER);
       this.trajectoryPreview.update(this.ball.position.clone(), vel, this._holeData.planets);
+    } else if (this._state !== 'IDLE' && this._state !== 'AIMING') {
+      this.trajectoryPreview.hide();
     }
 
     // Planet occlusion: fade planets between camera and ball
@@ -741,7 +807,8 @@ export class HoleScene {
     this._applyPlanetEventEffects();
 
     // Ball follows its attached planet while resting (IDLE / AIMING)
-    if (this._attachedPlanetIdx >= 0 && this._state !== 'BALL_IN_FLIGHT') {
+    // Skip if orbital capture is active (it manages the ball position)
+    if (this._attachedPlanetIdx >= 0 && this._state !== 'BALL_IN_FLIGHT' && !this._orbitalCapture.isActive) {
       const planet = this.planets[this._attachedPlanetIdx];
       if (planet) {
         this.ball.position
@@ -749,6 +816,33 @@ export class HoleScene {
           .addScaledVector(this._attachedNormal, planet.radius + BALL.RADIUS);
         this.ball.syncMesh();
       }
+    }
+
+    // ── Orbital Capture update ─────────────────────────────────
+    if (this._orbitalCapture.isActive && this.ball) {
+      const orbitPos = this._orbitalCapture.update(dt, this.ball);
+      // If slingshot just fired, the event handler already transitioned to BALL_IN_FLIGHT
+      if (this._orbitalCapture.isActive && orbitPos) {
+        // Ball position was updated inside _orbitalCapture.update
+        this._updateCamera(dt);
+        return;
+      }
+      // If orbital capture is no longer active (slingshot happened this frame),
+      // fall through to normal update
+      if (!this._orbitalCapture.isActive) {
+        // Already handled by ORBIT_EXIT_DONE event
+        this._updateCamera(dt);
+        return;
+      }
+    }
+
+    // Show "Hold to Orbit" prompt when glued after 3 bounces on same planet
+    if (this._state === 'IDLE' && this._attachedPlanetIdx >= 0
+        && this._bouncePlanetIdx === this._attachedPlanetIdx
+        && !this._orbitalCapture.isActive) {
+      this._orbitalCapture._showPrompt('HOLD TO ORBIT');
+    } else if (!this._orbitalCapture.isActive) {
+      this._orbitalCapture._hidePrompt();
     }
 
     // Collectibles
@@ -884,10 +978,10 @@ export class HoleScene {
               this._bounceStreak    = 1;
             }
 
-            // 3rd bounce on the same planet → pin the ball
+            // 3rd bounce on the same planet → pin the ball + enable Orbital Capture
             if (this._bounceStreak >= 3) {
               this._bounceStreak    = 0;
-              this._bouncePlanetIdx = -1;
+              this._bouncePlanetIdx = planetIdx;
               this.ball.velocity.set(0, 0, 0);
               // Snap cleanly to surface
               const planet = this.planets[planetIdx];
@@ -899,7 +993,7 @@ export class HoleScene {
               this._attachedNormal.copy(normal);
               this._lastValidPlanetIdx = planetIdx;
               this._lastValidNormal.copy(normal);
-              // Transition to IDLE
+              // Transition to IDLE — orbital capture is now available
               if (this.ball?.trail) this.ball.trail.setActive(false);
               gameState.ballInFlight = false;
               gameState.aimState = 'IDLE';
@@ -908,6 +1002,9 @@ export class HoleScene {
                 const toCup = new Vector3().subVectors(this.cup.position, this.ball.position);
                 if (toCup.lengthSq() > 0.01) this._facingDir.copy(toCup.normalize());
               }
+              // Always show power bar and trajectory when ball is at rest
+              this.inputSystem.showBar();
+              this.trajectoryPreview.show();
               eventBus.emit(Events.BALL_STOPPED, {
                 pos: this.ball.position.clone(),
                 holeIndex: gameState.currentHole,
@@ -1104,6 +1201,15 @@ export class HoleScene {
             .normalize();
         }
 
+        // Enable orbital capture if ball settled on the same planet as bounce streak
+        const orbitAllowed = this._attachedPlanetIdx >= 0
+          && this._bouncePlanetIdx === this._attachedPlanetIdx;
+        this.inputSystem.setOrbitHoldAllowed(orbitAllowed);
+        if (!orbitAllowed) {
+          this._bouncePlanetIdx = -1;
+          this._bounceStreak = 0;
+        }
+
         // Broadcast stop with planet attachment so peers can follow sway
         eventBus.emit(Events.BALL_STOPPED, {
           pos: this.ball.position.clone(),
@@ -1122,11 +1228,13 @@ export class HoleScene {
         // If player already entered power phase while ball was settling, jump to AIMING
         if (this.inputSystem.isInPowerPhase()) {
           this._state = 'AIMING';
-          this.trajectoryPreview.show(); // frame loop drives updates from here
         } else {
           this._state = 'IDLE';
           this.inputSystem.setAiming(false);
         }
+        // Always show power bar and trajectory when ball is at rest
+        this.inputSystem.showBar();
+        this.trajectoryPreview.show();
       }
     }
 
@@ -1224,6 +1332,8 @@ export class HoleScene {
     gameState.ballInFlight = false;
     gameState.holeComplete = true;
     gameState.aimState = 'HOLE_COMPLETE';
+    this.inputSystem.hideBar();
+    this.trajectoryPreview.hide();
 
     // Nearest planet celebrates
     if (this.cup && this.planetObjects.length > 0) {
@@ -1345,7 +1455,9 @@ export class HoleScene {
       this._state = 'IDLE';
       gameState.ballInFlight = false;
       gameState.aimState = 'IDLE';
-      eventBus.emit(Events.BALL_RESET_TO_TEE); // reuse event for UI flash
+      this.inputSystem.showBar();
+      this.trajectoryPreview.show();
+      eventBus.emit(Events.BALL_RESET_TO_TEE);
       return;
     }
 
@@ -1357,12 +1469,13 @@ export class HoleScene {
     this._restoreLastValidAttachment();
     this._voidFrames = 0;
 
-    this._state = 'IDLE';
-    gameState.ballInFlight = false;
-    gameState.aimState = 'IDLE';
-    this.inputSystem.setAiming(false);
-
-    this._broadcastBallReset(resetPos);
+      this._state = 'IDLE';
+      gameState.ballInFlight = false;
+      gameState.aimState = 'IDLE';
+      this.inputSystem.setAiming(false);
+      this.inputSystem.showBar();
+      this.trajectoryPreview.show();
+      this._broadcastBallReset(resetPos);
   }
 
   // Compute the OOB spawn position — on the planet's current location if possible
@@ -1538,6 +1651,8 @@ export class HoleScene {
     if (this.ball.trail) this.ball.trail.setActive(false);
     this._attachedPlanetIdx  = -1;
     this._lastValidPlanetIdx = -1;
+    this._orbitalCapture.reset();
+    this.inputSystem.setOrbitHoldAllowed(false);
     const teePos = this._holeData.tee.clone().add(new Vector3(0, BALL.RADIUS + 0.2, 0));
     this.ball.setPosition(teePos);
     this.ball.setVelocity(new Vector3());
@@ -1546,6 +1661,8 @@ export class HoleScene {
     gameState.aimState = 'IDLE';
     this.inputSystem.enabled = true;
     this.inputSystem._reset();
+    this.inputSystem.showBar();
+    this.trajectoryPreview.show();
     this._broadcastBallReset(teePos);
   }
 
@@ -1679,6 +1796,7 @@ export class HoleScene {
 
   dispose() {
     this._clearCurrentHole();
+    this._orbitalCapture.dispose();
     this.trajectoryPreview.dispose();
     if (this._aimArrow) { this.scene.remove(this._aimArrow); this._aimArrow = null; }
     if (this.starField)   this.starField.dispose();

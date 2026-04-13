@@ -16,7 +16,7 @@
 
 import { Vector2 } from 'three';
 import { eventBus, Events } from '../core/EventBus.js';
-import { AIM } from '../core/Constants.js';
+import { AIM, ORBIT } from '../core/Constants.js';
 import { gameState } from '../core/GameState.js';
 
 export class InputSystem {
@@ -45,6 +45,13 @@ export class InputSystem {
     this._lastDragVec  = new Vector2();
     this._lastDragDist = 0;
 
+    // Orbital capture hold state
+    this._orbitHoldActive  = false;
+    this._orbitHoldAllowed = false;
+    this._orbitHoldPtr     = null;    // pointer ID used for orbit hold
+    this._orbitHoldTime    = 0;
+    this._spaceHeld        = false;   // keyboard Space hold for orbit
+
     this._buildUI();
 
     this._onDown   = this._onDown.bind(this);
@@ -58,6 +65,7 @@ export class InputSystem {
     c.addEventListener('pointerup',     this._onUp,   { passive: false });
     c.addEventListener('pointercancel', this._onUp,   { passive: false });
     window.addEventListener('keydown',  this._onKey);
+    window.addEventListener('keyup',    this._onKeyUp);
 
     this.ballPosition = null;
     this.planets      = [];
@@ -406,21 +414,20 @@ export class InputSystem {
     if (gameState.ballInFlight) return;
     e.preventDefault();
 
-    // Enter AIMING on first press anywhere
-    if (this._phase === 'IDLE') {
-      this._phase = 'AIMING';
-      this._setBarPower(0);
-      this._showLabel('DRAG PYRAMID FOR POWER');
-      eventBus.emit(Events.AIM_START);
+    // Orbital capture: if orbit hold is active, this starts the hold
+    if (this._orbitHoldAllowed) {
+      this._orbitHoldActive = true;
+      this._orbitHoldPtr = e.pointerId;
+      this._orbitHoldTime = 0;
+      eventBus.emit(Events.ORBIT_HOLD_START);
+      return;
     }
-
-    if (this._phase !== 'AIMING') return;
 
     // Pyramid touch → power drag (or tap-to-shoot if released with minimal movement)
     if (this._isOverBar(e.clientX, e.clientY)) {
       this._pwrPtr     = e.pointerId;
-      this._pwrDownY   = e.clientY;  // raw Y — for tap detection
-      this._pwrStartY  = e.clientY + this._power * AIM.MAX_DRAG_DISTANCE; // offset for continuity
+      this._pwrDownY   = e.clientY;
+      this._pwrStartY  = e.clientY + this._power * AIM.MAX_DRAG_DISTANCE;
       this._pwrMaxMove = 0;
       return;
     }
@@ -435,7 +442,7 @@ export class InputSystem {
   }
 
   _onMove(e) {
-    if (this._phase !== 'AIMING') return;
+    if (gameState.ballInFlight) return;
     e.preventDefault();
 
     // Power drag
@@ -473,6 +480,15 @@ export class InputSystem {
 
   _onUp(e) {
     e.preventDefault();
+
+    // Release orbit hold
+    if (this._orbitHoldActive && e.pointerId === this._orbitHoldPtr) {
+      this._orbitHoldActive = false;
+      this._orbitHoldPtr = null;
+      this._orbitHoldTime = 0;
+      eventBus.emit(Events.ORBIT_HOLD_END);
+      return;
+    }
 
     // Pyramid pointer released
     if (e.pointerId === this._pwrPtr) {
@@ -512,11 +528,38 @@ export class InputSystem {
     if (e.key === 'Escape') { this._reset(); eventBus.emit(Events.AIM_CANCEL); }
     if (e.key === 'r' || e.key === 'R') { this._reset(); eventBus.emit(Events.BALL_RESET_TO_TEE); }
     if (e.key === 'm' || e.key === 'M') eventBus.emit(Events.AUDIO_MUTE_TOGGLE);
+
+    if (e.key === ' ' || e.code === 'Space') {
+      e.preventDefault();
+      if (e.type === 'keydown' && !this._spaceHeld) {
+        this._spaceHeld = true;
+        if (this._orbitHoldAllowed) {
+          this._orbitHoldActive = true;
+          this._orbitHoldTime = 0;
+          eventBus.emit(Events.ORBIT_HOLD_START);
+        }
+      }
+    }
+  }
+
+  _onKeyUp(e) {
+    if (e.key === ' ' || e.code === 'Space') {
+      this._spaceHeld = false;
+      if (this._orbitHoldActive) {
+        this._orbitHoldActive = false;
+        this._orbitHoldTime = 0;
+        eventBus.emit(Events.ORBIT_HOLD_END);
+      }
+    }
   }
 
   // ── Per-frame ─────────────────────────────────────────────
 
-  update(_dt) {}
+  update(dt) {
+    if (this._orbitHoldActive) {
+      this._orbitHoldTime += dt;
+    }
+  }
 
   // ── Helpers ───────────────────────────────────────────────
 
@@ -524,8 +567,24 @@ export class InputSystem {
     const drag  = this._lastDragVec.clone();
     const dist  = this._lastDragDist;
     const power = this._power * AIM.MAX_POWER;
-    this._reset();
+    this._resetForShot();
     eventBus.emit(Events.SHOT_TAKEN, { dragScreenVec: drag, dragDist: dist, power });
+  }
+
+  _resetForShot() {
+    this._phase      = 'IDLE';
+    this._power      = 0;
+    this._dirPtr     = null;
+    this._pwrPtr     = null;
+    this._dirMoved   = false;
+    this._pwrMaxMove = 0;
+    this._lastDragVec.set(0, 0);
+    this._lastDragDist = 0;
+    this._setBarPower(0);
+    this._orbitHoldAllowed = false;
+    this._orbitHoldActive  = false;
+    this._orbitHoldPtr     = null;
+    this._orbitHoldTime    = 0;
   }
 
   _projectBall() {
@@ -545,9 +604,12 @@ export class InputSystem {
     this._dirMoved   = false;
     this._pwrMaxMove = 0;
     this._lastDragVec.set(0, 0);
-    this._lastDragDist       = 0;
-    this._wrap.style.display = 'none';
+    this._lastDragDist = 0;
     this._setBarPower(0);
+    this._orbitHoldAllowed = false;
+    this._orbitHoldActive  = false;
+    this._orbitHoldPtr     = null;
+    this._orbitHoldTime    = 0;
   }
 
   // ── Public API ────────────────────────────────────────────
@@ -555,7 +617,19 @@ export class InputSystem {
   setBallPosition(pos) { this.ballPosition = pos; }
   setPlanets(planets)  { this.planets = planets; }
   setAiming(v)         {}
-  isInPowerPhase()     { return this._phase === 'AIMING'; }
+  isInPowerPhase()     { return this._power > 0.02; }
+  setOrbitHoldAllowed(v) { this._orbitHoldAllowed = v; if (!v) { this._orbitHoldActive = false; } }
+  get orbitHoldActive()  { return this._orbitHoldActive; }
+  get orbitHoldTime()    { return this._orbitHoldTime; }
+
+  showBar() {
+    this._showLabel('DRAG PYRAMID FOR POWER');
+    this._setBarPower(this._power);
+  }
+
+  hideBar() {
+    this._wrap.style.display = 'none';
+  }
 
   dispose() {
     const c = this.renderer.domElement;
@@ -564,6 +638,7 @@ export class InputSystem {
     c.removeEventListener('pointerup',     this._onUp);
     c.removeEventListener('pointercancel', this._onUp);
     window.removeEventListener('keydown',  this._onKey);
+    window.removeEventListener('keyup',    this._onKeyUp);
     if (this._wrap.parentNode) this._wrap.parentNode.removeChild(this._wrap);
   }
 }

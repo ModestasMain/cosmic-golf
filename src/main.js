@@ -20,6 +20,7 @@ import { PlayerLabels } from './ui/PlayerLabels.js';
 import { AnnouncerUI } from './ui/AnnouncerUI.js';
 import { EventHUD } from './ui/EventHUD.js';
 import { LobbyPanel } from './ui/LobbyPanel.js';
+import { BallStylePicker } from './ui/BallStylePicker.js';
 import { audioManager } from './audio/AudioManager.js';
 
 class Game {
@@ -117,6 +118,7 @@ class Game {
     this.announcer   = new AnnouncerUI();
     this.eventHUD    = new EventHUD();
     this.lobbyPanel  = new LobbyPanel();
+    this.ballStylePicker = new BallStylePicker();
   }
 
   _setupMultiplayer() {
@@ -249,6 +251,7 @@ class Game {
       this.playerLabels.addPlayer(gameState.players[0].id, name, color);
       this.mp.joinPublic(name, color);
       this.holeScene.loadHole(0);
+      this.ballStylePicker.show();
       setTimeout(() => this.mp.updateIdentity(name, color), 2000);
       return;
     }
@@ -261,6 +264,7 @@ class Game {
 
       this.playerLabels.addPlayer(gameState.players[0].id, name, color);
       this.holeScene.loadHole(0);
+      this.ballStylePicker.show();
       setTimeout(() => this.tutorial.show(), 600);
       setTimeout(() => this.mp.updateIdentity(name, color), 2000);
     });

@@ -39,9 +39,10 @@ const ACHIEVEMENTS = {
   HOLE_IN_ONE:       { id: 'HOLE_IN_ONE',       name: 'Hole In One!',        desc: 'Sink it in a single stroke',           icon: '🏌️' },
   FULL_POWER:        { id: 'FULL_POWER',         name: 'Full Power Shot',     desc: 'Shoot with maximum power',             icon: '💪' },
   WORMHOLE:          { id: 'WORMHOLE',           name: 'Wormhole Rider',      desc: 'Travel through a wormhole',            icon: '🌀' },
-  UNDER_5_STROKES:   { id: 'UNDER_5_STROKES',    name: 'Precision Golfer',    desc: 'Finish a game under 5 total strokes',  icon: '🎯' },
-  UNDER_10_STROKES:  { id: 'UNDER_10_STROKES',   name: 'Cosmic Pro',          desc: 'Finish a game under 10 total strokes', icon: '⭐' },
-  OVER_15_STROKES:   { id: 'OVER_15_STROKES',    name: 'Cosmic Struggler',    desc: 'Finish a game with 15+ total strokes', icon: '😅' },
+  HOLE_IN_ONE_MASTER: { id: 'HOLE_IN_ONE_MASTER', name: 'Hole In One Master',   desc: 'Finish a game with 10 strokes (all hole-in-ones)', icon: '👑' },
+  UNDER_20_STROKES:   { id: 'UNDER_20_STROKES',  name: 'Cosmic Pro',              desc: 'Finish a game under 20 total strokes',  icon: '⭐' },
+  UNDER_30_STROKES:   { id: 'UNDER_30_STROKES',  name: 'Stellar Golfer',          desc: 'Finish a game under 30 total strokes',  icon: '🌟' },
+  OVER_15_STROKES:   { id: 'OVER_15_STROKES',    name: 'Cosmic Struggler',        desc: 'Finish a game with 15+ total strokes',  icon: '😅' },
   HOLE_1:            { id: 'HOLE_1',             name: 'First Orbit',         desc: 'Complete Hole 1',                      icon: '🪐' },
   HOLE_2:            { id: 'HOLE_2',             name: 'Binary Star',         desc: 'Complete Hole 2',                      icon: '✨' },
   HOLE_3:            { id: 'HOLE_3',             name: 'Asteroid Belt',       desc: 'Complete Hole 3',                      icon: '☄️' },
@@ -155,8 +156,9 @@ export class AchievementManager {
       const player = gameState.players[0];
       if (!player) return;
       const total = player.strokes.reduce((s, v) => s + (v || 0), 0);
-      if (total < 5) this.tryUnlock('UNDER_5_STROKES');
-      if (total < 10) this.tryUnlock('UNDER_10_STROKES');
+      if (total <= 10) this.tryUnlock('HOLE_IN_ONE_MASTER');
+      if (total < 20) this.tryUnlock('UNDER_20_STROKES');
+      if (total < 30) this.tryUnlock('UNDER_30_STROKES');
       if (total >= 15) this.tryUnlock('OVER_15_STROKES');
 
       const completed = player.strokes.filter(v => v != null).length;

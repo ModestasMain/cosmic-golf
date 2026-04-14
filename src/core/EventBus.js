@@ -119,14 +119,6 @@ export const Events = {
   BALL_STYLE_CHANGED: 'ball:style_changed', // { styleId: string }
 
   // Orbital Capture
-  ORBIT_CAPTURE_START:  'orbit:capture_start',   // hold began while glued
-  ORBIT_CAPTURE_CANCEL:'orbit:capture_cancel',   // released before loading complete
-  ORBIT_CAPTURE_DONE:  'orbit:capture_done',     // loading complete, entering orbit
-  ORBIT_ENTER:         'orbit:enter',            // ball enters circular orbit
-  ORBIT_UPDATE:        'orbit:update',            // { angle, progress, orbits }
-  ORBIT_EXIT_START:    'orbit:exit_start',        // hold began while orbiting
-  ORBIT_EXIT_CANCEL:   'orbit:exit_cancel',       // released before exit loading complete
-  ORBIT_EXIT_DONE:     'orbit:exit_done',         // slingshot launch
-  ORBIT_HOLD_START:    'orbit:hold_start',         // player started holding (input)
-  ORBIT_HOLD_END:      'orbit:hold_end',           // player released hold (input)
+  ORBIT_ENTER:         'orbit:enter',
+  ORBIT_TOGGLE:        'orbit:toggle',
 };

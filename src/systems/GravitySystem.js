@@ -4,11 +4,13 @@
 // ============================================================
 
 import { Vector3 } from 'three';
-import { PHYSICS, BALL, AIM } from '../core/Constants.js';
+import { PHYSICS, BALL, AIM, ORBIT } from '../core/Constants.js';
 
 // Reusable vectors to avoid per-frame allocation
 const _diff = new Vector3();
 const _normal = new Vector3();
+const _radial = new Vector3();
+const _tangent = new Vector3();
 
 /**
  * Compute total gravitational force on a position from all planets.
@@ -20,7 +22,6 @@ export function computeGravityForce(position, planets) {
   const force = new Vector3();
   for (const planet of planets) {
     _diff.subVectors(planet.position, position);
-    // Minimum distance squared to prevent infinite force at collision boundary
     const distSq = Math.max(_diff.lengthSq(), planet.radius * planet.radius * 4);
     const strength = PHYSICS.GRAVITY_STRENGTH * planet.mass / distSq;
     force.addScaledVector(_diff.normalize(), strength);
@@ -36,9 +37,11 @@ export function computeGravityForce(position, planets) {
  * @param {{ position: Vector3, velocity: Vector3 }} ball
  * @param {Array<{position: Vector3, radius: number, mass: number}>} planets
  * @param {number} dt timestep in seconds
+ * @param {number} gravityScale
+ * @param {{ position: Vector3, radius: number }|null} orbitPlanet  if set, apply orbit boundary
  * @returns {{ bounced: boolean, bouncePlanet: object|null }}
  */
-export function stepBall(ball, planets, dt, gravityScale = 1.0) {
+export function stepBall(ball, planets, dt, gravityScale = 1.0, orbitPlanet = null) {
   const force = computeGravityForce(ball.position, planets);
   force.multiplyScalar(gravityScale);
 
@@ -66,25 +69,42 @@ export function stepBall(ball, planets, dt, gravityScale = 1.0) {
     const minDist = planet.radius + BALL.RADIUS;
 
     if (dist < minDist) {
-      // Push ball to surface
       _normal.subVectors(ball.position, planet.position).normalize();
       ball.position.copy(planet.position).addScaledVector(_normal, minDist);
 
-      // Reflect velocity off surface normal with speed-dependent restitution.
-      // Slow impacts barely bounce (restitution → 0), fast impacts get full damping.
-      // This avoids both micro-bouncing at rest AND the floating problem.
       const dot = ball.velocity.dot(_normal);
       if (dot < 0) {
         const impactSpeed = -dot;
         const restitution = PHYSICS.BOUNCE_DAMPING * Math.min(impactSpeed / 25.0, 1.0);
         ball.velocity.addScaledVector(_normal, -(1 + restitution) * dot);
-        // Tangential friction always applies
         const vTangential = ball.velocity.clone().addScaledVector(_normal, -ball.velocity.dot(_normal));
         ball.velocity.addScaledVector(vTangential, -0.2);
         if (impactSpeed > 2.0) {
           bounced = true;
           bouncePlanet = planet;
         }
+      }
+    }
+  }
+
+  // Orbit boundary: keep ball within boundary sphere around orbit planet
+  if (orbitPlanet) {
+    const boundaryR = orbitPlanet.radius * ORBIT.BOUNDARY_FACTOR;
+    _radial.subVectors(ball.position, orbitPlanet.position);
+    const distFromCenter = _radial.length();
+    if (distFromCenter > boundaryR) {
+      // Clamp position to boundary surface
+      _radial.normalize();
+      ball.position.copy(orbitPlanet.position).addScaledVector(_radial, boundaryR);
+
+      // Reflect radial velocity component, keep tangential
+      const radialSpeed = ball.velocity.dot(_radial);
+      if (radialSpeed > 0) {
+        // Remove outward radial component and add it back inward (elastic reflection)
+        ball.velocity.addScaledVector(_radial, -radialSpeed * 1.5);
+        // Tangential friction at boundary
+        _tangent.copy(ball.velocity).addScaledVector(_radial, -ball.velocity.dot(_radial));
+        ball.velocity.addScaledVector(_tangent, -0.15);
       }
     }
   }
@@ -99,29 +119,36 @@ export function stepBall(ball, planets, dt, gravityScale = 1.0) {
  * @param {Array} planets
  * @param {number} steps
  * @param {number} dt
+ * @param {number} gravityScale
+ * @param {{ position: Vector3, radius: number }|null} orbitPlanet
  * @returns {Vector3[]} array of positions
  */
-export function simulateTrajectory(startPos, startVel, planets, steps, dt) {
+export function simulateTrajectory(startPos, startVel, planets, steps, dt, gravityScale = 1.0, orbitPlanet = null) {
   const points = [];
   const pos = startPos.clone();
   const vel = startVel.clone();
   const ball = { position: pos, velocity: vel };
 
-  // Mirror the launch grace period so preview matches real flight
   let graceFrames = PHYSICS.LAUNCH_GRACE_FRAMES;
 
   for (let i = 0; i < steps; i++) {
     points.push(ball.position.clone());
 
-    let gravityScale = 1.0;
+    let gs = gravityScale;
     if (graceFrames > 0) {
       graceFrames--;
-      gravityScale = 1.0 - (graceFrames / PHYSICS.LAUNCH_GRACE_FRAMES);
+      gs *= 1.0 - (graceFrames / PHYSICS.LAUNCH_GRACE_FRAMES);
     }
 
-    stepBall(ball, planets, dt, gravityScale);
+    stepBall(ball, planets, dt, gs, orbitPlanet);
 
-    if (ball.position.length() > 1300) break;
+    if (orbitPlanet) {
+      const boundaryR = orbitPlanet.radius * ORBIT.BOUNDARY_FACTOR;
+      const d = ball.position.distanceTo(orbitPlanet.position);
+      if (d > boundaryR) break;
+    } else if (ball.position.length() > 1300) {
+      break;
+    }
   }
 
   return points;

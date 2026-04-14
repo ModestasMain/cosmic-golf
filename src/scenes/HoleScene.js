@@ -10,7 +10,7 @@ import {
 import { Tween, Easing, update as tweenUpdate } from '@tweenjs/tween.js';
 import { eventBus, Events } from '../core/EventBus.js';
 import { gameState } from '../core/GameState.js';
-import { CAMERA, HOLE, AIM, PHYSICS, BALL, COLOR_PALETTES } from '../core/Constants.js';
+import { CAMERA, HOLE, AIM, PHYSICS, BALL, ORBIT, COLOR_PALETTES } from '../core/Constants.js';
 import { generateHole } from '../systems/HoleGenerator.js';
 import { stepBall } from '../systems/GravitySystem.js';
 import { TrajectoryPreview } from '../systems/TrajectoryPreview.js';
@@ -124,7 +124,6 @@ export class HoleScene {
 
     // Orbital Capture system
     this._orbitalCapture = new OrbitalCapture();
-    this._orbitHoldActive = false;  // true while player is holding for orbit entry/exit
 
     // Last-valid-position save — stores planet attachment so OOB reset
     // respawns on the planet's *current* position, not old world coords
@@ -410,53 +409,21 @@ export class HoleScene {
       }
     });
 
-    // Orbital Capture: slingshot exit — transition from orbit to flight
-    eventBus.on(Events.ORBIT_EXIT_DONE, ({ velocity }) => {
-      if (!this.ball) return;
-      this._orbitalCapture.reset();
-      this._orbitHoldActive = false;
-      this.ball.setVelocity(velocity);
-      this._state = 'BALL_IN_FLIGHT';
-      gameState.ballInFlight = true;
-      gameState.aimState = 'BALL_IN_FLIGHT';
-      gameState.currentStrokes++;
-      if (!this._holeStartTime) this._holeStartTime = Date.now();
-      this._attachedPlanetIdx = -1;
-      this._bouncePlanetIdx = -1;
-      this._bounceStreak = 0;
-      this._launchGraceFrames = PHYSICS.LAUNCH_GRACE_FRAMES;
-      this._stuckFrames = 0;
-      this._voidFrames = 0;
-      if (this._holeData) {
-        this.launchBurst.trigger(this.ball.position.clone(), this._holeData.palette);
-      }
-      this.launchWarp.trigger(0.6);
-      this.screenShake.trigger(0.8, 0.5);
-    });
-
-    // Orbital Capture: hold input start
-    eventBus.on(Events.ORBIT_HOLD_START, () => {
+    // Orbital Capture: toggle orbit on/off
+    eventBus.on(Events.ORBIT_TOGGLE, () => {
       const oc = this._orbitalCapture;
       if (oc.isOrbiting) {
-        // Already orbiting → start exit hold
-        oc.startExitHold();
-      } else if (this._state === 'IDLE' && this._attachedPlanetIdx >= 0
-                 && this._bouncePlanetIdx === this._attachedPlanetIdx) {
-        // Glued after 3 bounces → start capture hold
-        oc.startCaptureHold(
+        oc.exitOrbit();
+        this.inputSystem.setOrbitActive(false);
+        this.inputSystem.setOrbitToggleAllowed(this._attachedPlanetIdx >= 0);
+      } else if (this._state === 'IDLE' && this._attachedPlanetIdx >= 0) {
+        oc.enterOrbit(
           this._attachedPlanetIdx,
           this.planets,
           this.planetObjects,
           this.scene,
         );
-      }
-    });
-
-    // Orbital Capture: hold input end (released before completion)
-    eventBus.on(Events.ORBIT_HOLD_END, () => {
-      const oc = this._orbitalCapture;
-      if (oc.isActive && (oc.state === 'HOLDING_ENTER' || oc.state === 'HOLDING_EXIT')) {
-        oc.cancelHold();
+        this.inputSystem.setOrbitActive(true);
       }
     });
   }
@@ -608,7 +575,7 @@ export class HoleScene {
     this._bouncePlanetIdx    = -1;
     this._bounceStreak       = 0;
     this._orbitalCapture.reset();
-    this.inputSystem.setOrbitHoldAllowed(false);
+    this.inputSystem.setOrbitToggleAllowed(false);
 
     // Remove planets
     for (const p of this.planetObjects) {
@@ -711,11 +678,18 @@ export class HoleScene {
     this._lastValidPos.copy(this.ball.position);
     this._lastValidPlanetIdx = this._attachedPlanetIdx;
     this._lastValidNormal.copy(this._attachedNormal);
-    this._attachedPlanetIdx = -1; // detach from planet on shot
-    this._bouncePlanetIdx   = -1; // reset bounce streak on new shot
-    this._bounceStreak      = 0;
-    this._orbitalCapture.reset();
-    this.inputSystem.setOrbitHoldAllowed(false);
+
+    // In orbit mode: keep orbit active, just detach from surface
+    // Normal mode: reset orbit state entirely
+    if (this._orbitalCapture.isOrbiting) {
+      this._attachedPlanetIdx = -1;
+    } else {
+      this._attachedPlanetIdx = -1;
+      this._bouncePlanetIdx   = -1;
+      this._bounceStreak      = 0;
+      this._orbitalCapture.reset();
+      this.inputSystem.setOrbitToggleAllowed(false);
+    }
     this.ball.setVelocity(velocity);
     this._state = 'BALL_IN_FLIGHT';
     gameState.ballInFlight = true;
@@ -782,7 +756,12 @@ export class HoleScene {
     if ((this._state === 'IDLE' || this._state === 'AIMING') && this.ball && this._holeData) {
       const power = Math.max(0.15, this.inputSystem._power ?? 0.15);
       const vel   = this._facingDir.clone().multiplyScalar(power * AIM.MAX_POWER);
-      this.trajectoryPreview.update(this.ball.position.clone(), vel, this._holeData.planets);
+      const trajPlanets = this._orbitalCapture.isOrbiting
+        ? [this.planets[this._orbitalCapture.planetIdx]]
+        : this._holeData.planets;
+      const trajGravity = this._orbitalCapture.isOrbiting ? ORBIT.GRAVITY_BOOST : 1;
+      const trajOrbitPlanet = this._orbitalCapture.isOrbiting ? trajPlanets[0] : null;
+      this.trajectoryPreview.update(this.ball.position.clone(), vel, trajPlanets, trajGravity, trajOrbitPlanet);
     } else if (this._state !== 'IDLE' && this._state !== 'AIMING') {
       this.trajectoryPreview.hide();
     }
@@ -807,8 +786,7 @@ export class HoleScene {
     this._applyPlanetEventEffects();
 
     // Ball follows its attached planet while resting (IDLE / AIMING)
-    // Skip if orbital capture is active (it manages the ball position)
-    if (this._attachedPlanetIdx >= 0 && this._state !== 'BALL_IN_FLIGHT' && !this._orbitalCapture.isActive) {
+    if (this._attachedPlanetIdx >= 0 && this._state !== 'BALL_IN_FLIGHT') {
       const planet = this.planets[this._attachedPlanetIdx];
       if (planet) {
         this.ball.position
@@ -818,31 +796,9 @@ export class HoleScene {
       }
     }
 
-    // ── Orbital Capture update ─────────────────────────────────
-    if (this._orbitalCapture.isActive && this.ball) {
-      const orbitPos = this._orbitalCapture.update(dt, this.ball);
-      // If slingshot just fired, the event handler already transitioned to BALL_IN_FLIGHT
-      if (this._orbitalCapture.isActive && orbitPos) {
-        // Ball position was updated inside _orbitalCapture.update
-        this._updateCamera(dt);
-        return;
-      }
-      // If orbital capture is no longer active (slingshot happened this frame),
-      // fall through to normal update
-      if (!this._orbitalCapture.isActive) {
-        // Already handled by ORBIT_EXIT_DONE event
-        this._updateCamera(dt);
-        return;
-      }
-    }
-
-    // Show "Hold to Orbit" prompt when glued after 3 bounces on same planet
-    if (this._state === 'IDLE' && this._attachedPlanetIdx >= 0
-        && this._bouncePlanetIdx === this._attachedPlanetIdx
-        && !this._orbitalCapture.isActive) {
-      this._orbitalCapture._showPrompt('HOLD TO ORBIT');
-    } else if (!this._orbitalCapture.isActive) {
-      this._orbitalCapture._hidePrompt();
+    // ── Orbital Capture update (visuals only, ball follows normal physics) ──
+    if (this._orbitalCapture.isActive) {
+      this._orbitalCapture.update(dt);
     }
 
     // Collectibles
@@ -907,13 +863,19 @@ export class HoleScene {
         gravityScale = 1.0 - (this._launchGraceFrames / PHYSICS.LAUNCH_GRACE_FRAMES);
       }
 
-      // Combine gravity scale from server events + collectibles
+      // Combine gravity scale from server events + collectibles + orbit boost
+      const orbitBoost = this._orbitalCapture.isOrbiting ? ORBIT.GRAVITY_BOOST : 1;
       const combinedGravityScale = gravityScale
         * this.serverEvents.gravityScale
-        * this.collectibles.gravityScale;
+        * this.collectibles.gravityScale
+        * orbitBoost;
 
-      // Integrate physics
-      const result = stepBall(this.ball, this._holeData.planets, dt, combinedGravityScale);
+      // In orbit mode, only the orbit planet's gravity applies, with boundary
+      const physicsPlanets = this._orbitalCapture.isOrbiting
+        ? [this.planets[this._orbitalCapture.planetIdx]]
+        : this._holeData.planets;
+      const orbitPlanet = this._orbitalCapture.isOrbiting ? physicsPlanets[0] : null;
+      const result = stepBall(this.ball, physicsPlanets, dt, combinedGravityScale, orbitPlanet);
 
       // ZERO_GRAVITY sticky: ball touches a planet → kill velocity, stay on surface
       if (this.serverEvents.gravityScale === 0.0) {
@@ -980,8 +942,8 @@ export class HoleScene {
 
             // 3rd bounce on the same planet → pin the ball + enable Orbital Capture
             if (this._bounceStreak >= 3) {
-              this._bounceStreak    = 0;
               this._bouncePlanetIdx = planetIdx;
+              this._bounceStreak    = 3;
               this.ball.velocity.set(0, 0, 0);
               // Snap cleanly to surface
               const planet = this.planets[planetIdx];
@@ -998,6 +960,7 @@ export class HoleScene {
               gameState.ballInFlight = false;
               gameState.aimState = 'IDLE';
               this._state = 'IDLE';
+              this.inputSystem.setOrbitToggleAllowed(true);
               if (this.cup) {
                 const toCup = new Vector3().subVectors(this.cup.position, this.ball.position);
                 if (toCup.lengthSq() > 0.01) this._facingDir.copy(toCup.normalize());
@@ -1201,11 +1164,12 @@ export class HoleScene {
             .normalize();
         }
 
-        // Enable orbital capture if ball settled on the same planet as bounce streak
-        const orbitAllowed = this._attachedPlanetIdx >= 0
-          && this._bouncePlanetIdx === this._attachedPlanetIdx;
-        this.inputSystem.setOrbitHoldAllowed(orbitAllowed);
-        if (!orbitAllowed) {
+        // Orbit toggle available whenever ball is on a planet surface
+        const orbitAllowed = this._orbitalCapture.isOrbiting
+          ? this._attachedPlanetIdx === this._orbitalCapture.planetIdx
+          : this._attachedPlanetIdx >= 0;
+        this.inputSystem.setOrbitToggleAllowed(orbitAllowed);
+        if (!orbitAllowed && !this._orbitalCapture.isOrbiting) {
           this._bouncePlanetIdx = -1;
           this._bounceStreak = 0;
         }
@@ -1652,7 +1616,7 @@ export class HoleScene {
     this._attachedPlanetIdx  = -1;
     this._lastValidPlanetIdx = -1;
     this._orbitalCapture.reset();
-    this.inputSystem.setOrbitHoldAllowed(false);
+    this.inputSystem.setOrbitToggleAllowed(false);
     const teePos = this._holeData.tee.clone().add(new Vector3(0, BALL.RADIUS + 0.2, 0));
     this.ball.setPosition(teePos);
     this.ball.setVelocity(new Vector3());

@@ -16,7 +16,7 @@
 
 import { Vector2 } from 'three';
 import { eventBus, Events } from '../core/EventBus.js';
-import { AIM, ORBIT } from '../core/Constants.js';
+import { AIM } from '../core/Constants.js';
 import { gameState } from '../core/GameState.js';
 
 export class InputSystem {
@@ -45,12 +45,9 @@ export class InputSystem {
     this._lastDragVec  = new Vector2();
     this._lastDragDist = 0;
 
-    // Orbital capture hold state
-    this._orbitHoldActive  = false;
-    this._orbitHoldAllowed = false;
-    this._orbitHoldPtr     = null;    // pointer ID used for orbit hold
-    this._orbitHoldTime    = 0;
-    this._spaceHeld        = false;   // keyboard Space hold for orbit
+    // Orbital capture toggle state
+    this._orbitToggleAllowed = false;
+    this._orbitActive = false;
 
     this._buildUI();
 
@@ -65,7 +62,6 @@ export class InputSystem {
     c.addEventListener('pointerup',     this._onUp,   { passive: false });
     c.addEventListener('pointercancel', this._onUp,   { passive: false });
     window.addEventListener('keydown',  this._onKey);
-    window.addEventListener('keyup',    this._onKeyUp);
 
     this.ballPosition = null;
     this.planets      = [];
@@ -283,6 +279,68 @@ export class InputSystem {
 
     wrap.appendChild(this._label);
     wrap.appendChild(pyramidWrap);
+
+    // ── Orbit toggle button (planet icon below pyramid) ─────
+    const orbitBtn = document.createElement('div');
+    orbitBtn.style.cssText = [
+      'width:44px', 'height:44px',
+      'border-radius:50%',
+      'display:none',
+      'align-items:center', 'justify-content:center',
+      'cursor:pointer',
+      'pointer-events:auto',
+      'background:rgba(10,12,30,0.75)',
+      'border:1px solid rgba(100,160,255,0.35)',
+      'backdrop-filter:blur(4px)',
+      '-webkit-backdrop-filter:blur(4px)',
+      'transition:border-color 0.2s,box-shadow 0.2s,background 0.2s',
+      'touch-action:manipulation',
+      'user-select:none',
+      '-webkit-user-select:none',
+    ].join(';');
+    this._orbitBtn = orbitBtn;
+
+    // SVG planet/Saturn icon
+    const orbNS = 'http://www.w3.org/2000/svg';
+    const orbSvg = document.createElementNS(orbNS, 'svg');
+    orbSvg.setAttribute('width', '28');
+    orbSvg.setAttribute('height', '28');
+    orbSvg.setAttribute('viewBox', '0 0 28 28');
+    orbSvg.style.overflow = 'visible';
+
+    // Planet body (circle)
+    const planetCircle = document.createElementNS(orbNS, 'circle');
+    planetCircle.setAttribute('cx', '14');
+    planetCircle.setAttribute('cy', '14');
+    planetCircle.setAttribute('r', '6');
+    planetCircle.setAttribute('fill', 'rgba(100,180,255,0.85)');
+    planetCircle.setAttribute('stroke', 'rgba(160,220,255,0.6)');
+    planetCircle.setAttribute('stroke-width', '1');
+    orbSvg.appendChild(planetCircle);
+
+    // Saturn ring (ellipse)
+    const ring = document.createElementNS(orbNS, 'ellipse');
+    ring.setAttribute('cx', '14');
+    ring.setAttribute('cy', '14');
+    ring.setAttribute('rx', '12');
+    ring.setAttribute('ry', '4');
+    ring.setAttribute('fill', 'none');
+    ring.setAttribute('stroke', 'rgba(160,220,255,0.7)');
+    ring.setAttribute('stroke-width', '1.5');
+    ring.setAttribute('transform', 'rotate(-20 14 14)');
+    orbSvg.appendChild(ring);
+
+    orbitBtn.appendChild(orbSvg);
+    wrap.appendChild(orbitBtn);
+
+    orbitBtn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (this._orbitToggleAllowed) {
+        eventBus.emit(Events.ORBIT_TOGGLE);
+      }
+    });
+
     document.body.appendChild(wrap);
     this._wrap = wrap;
   }
@@ -414,15 +472,6 @@ export class InputSystem {
     if (gameState.ballInFlight) return;
     e.preventDefault();
 
-    // Orbital capture: if orbit hold is active, this starts the hold
-    if (this._orbitHoldAllowed) {
-      this._orbitHoldActive = true;
-      this._orbitHoldPtr = e.pointerId;
-      this._orbitHoldTime = 0;
-      eventBus.emit(Events.ORBIT_HOLD_START);
-      return;
-    }
-
     // Pyramid touch → power drag (or tap-to-shoot if released with minimal movement)
     if (this._isOverBar(e.clientX, e.clientY)) {
       this._pwrPtr     = e.pointerId;
@@ -481,15 +530,6 @@ export class InputSystem {
   _onUp(e) {
     e.preventDefault();
 
-    // Release orbit hold
-    if (this._orbitHoldActive && e.pointerId === this._orbitHoldPtr) {
-      this._orbitHoldActive = false;
-      this._orbitHoldPtr = null;
-      this._orbitHoldTime = 0;
-      eventBus.emit(Events.ORBIT_HOLD_END);
-      return;
-    }
-
     // Pyramid pointer released
     if (e.pointerId === this._pwrPtr) {
       this._pwrPtr = null;
@@ -528,37 +568,11 @@ export class InputSystem {
     if (e.key === 'Escape') { this._reset(); eventBus.emit(Events.AIM_CANCEL); }
     if (e.key === 'r' || e.key === 'R') { this._reset(); eventBus.emit(Events.BALL_RESET_TO_TEE); }
     if (e.key === 'm' || e.key === 'M') eventBus.emit(Events.AUDIO_MUTE_TOGGLE);
-
-    if (e.key === ' ' || e.code === 'Space') {
-      e.preventDefault();
-      if (e.type === 'keydown' && !this._spaceHeld) {
-        this._spaceHeld = true;
-        if (this._orbitHoldAllowed) {
-          this._orbitHoldActive = true;
-          this._orbitHoldTime = 0;
-          eventBus.emit(Events.ORBIT_HOLD_START);
-        }
-      }
-    }
-  }
-
-  _onKeyUp(e) {
-    if (e.key === ' ' || e.code === 'Space') {
-      this._spaceHeld = false;
-      if (this._orbitHoldActive) {
-        this._orbitHoldActive = false;
-        this._orbitHoldTime = 0;
-        eventBus.emit(Events.ORBIT_HOLD_END);
-      }
-    }
   }
 
   // ── Per-frame ─────────────────────────────────────────────
 
   update(dt) {
-    if (this._orbitHoldActive) {
-      this._orbitHoldTime += dt;
-    }
   }
 
   // ── Helpers ───────────────────────────────────────────────
@@ -581,10 +595,9 @@ export class InputSystem {
     this._lastDragVec.set(0, 0);
     this._lastDragDist = 0;
     this._setBarPower(0);
-    this._orbitHoldAllowed = false;
-    this._orbitHoldActive  = false;
-    this._orbitHoldPtr     = null;
-    this._orbitHoldTime    = 0;
+    this._orbitToggleAllowed = false;
+    this._orbitActive = false;
+    this._updateOrbitBtn();
   }
 
   _projectBall() {
@@ -606,10 +619,9 @@ export class InputSystem {
     this._lastDragVec.set(0, 0);
     this._lastDragDist = 0;
     this._setBarPower(0);
-    this._orbitHoldAllowed = false;
-    this._orbitHoldActive  = false;
-    this._orbitHoldPtr     = null;
-    this._orbitHoldTime    = 0;
+    this._orbitToggleAllowed = false;
+    this._orbitActive = false;
+    this._updateOrbitBtn();
   }
 
   // ── Public API ────────────────────────────────────────────
@@ -618,9 +630,35 @@ export class InputSystem {
   setPlanets(planets)  { this.planets = planets; }
   setAiming(v)         {}
   isInPowerPhase()     { return this._power > 0.02; }
-  setOrbitHoldAllowed(v) { this._orbitHoldAllowed = v; if (!v) { this._orbitHoldActive = false; } }
-  get orbitHoldActive()  { return this._orbitHoldActive; }
-  get orbitHoldTime()    { return this._orbitHoldTime; }
+  setOrbitToggleAllowed(v) {
+    this._orbitToggleAllowed = v;
+    if (!v) this._orbitActive = false;
+    this._updateOrbitBtn();
+  }
+  setOrbitActive(v) {
+    this._orbitActive = v;
+    this._updateOrbitBtn();
+  }
+  get orbitActive() { return this._orbitActive; }
+
+  _updateOrbitBtn() {
+    const btn = this._orbitBtn;
+    if (!btn) return;
+    if (this._orbitToggleAllowed || this._orbitActive) {
+      btn.style.display = 'flex';
+    } else {
+      btn.style.display = 'none';
+    }
+    if (this._orbitActive) {
+      btn.style.borderColor = 'rgba(80,220,255,0.9)';
+      btn.style.boxShadow = '0 0 12px rgba(80,220,255,0.5), 0 0 24px rgba(80,220,255,0.25)';
+      btn.style.background = 'rgba(30,60,120,0.85)';
+    } else {
+      btn.style.borderColor = 'rgba(100,160,255,0.35)';
+      btn.style.boxShadow = 'none';
+      btn.style.background = 'rgba(10,12,30,0.75)';
+    }
+  }
 
   showBar() {
     this._showLabel('DRAG PYRAMID FOR POWER');
@@ -638,7 +676,6 @@ export class InputSystem {
     c.removeEventListener('pointerup',     this._onUp);
     c.removeEventListener('pointercancel', this._onUp);
     window.removeEventListener('keydown',  this._onKey);
-    window.removeEventListener('keyup',    this._onKeyUp);
     if (this._wrap.parentNode) this._wrap.parentNode.removeChild(this._wrap);
   }
 }

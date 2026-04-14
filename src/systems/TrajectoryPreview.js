@@ -50,14 +50,18 @@ export class TrajectoryPreview {
    * @param {Vector3} ballPos
    * @param {Vector3} shotVelocity  velocity to simulate (already scaled by power)
    * @param {Array}   planets
+   * @param {number}  gravityScale
+   * @param {{ position: Vector3, radius: number }|null} orbitPlanet
    */
-  update(ballPos, shotVelocity, planets) {
+  update(ballPos, shotVelocity, planets, gravityScale = 1.0, orbitPlanet = null) {
     const trajectory = simulateTrajectory(
       ballPos,
       shotVelocity,
       planets,
       AIM.TRAJECTORY_STEPS,
       AIM.TRAJECTORY_DT,
+      gravityScale,
+      orbitPlanet,
     );
 
     const positions = this.geometry.attributes.position.array;

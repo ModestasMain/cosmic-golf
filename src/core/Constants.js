@@ -152,15 +152,9 @@ export const SERVER_EVENTS = {
 };
 
 export const ORBIT = {
-  CAPTURE_HOLD_SECS:   1.5,    // seconds to hold before entering orbit
-  EXIT_HOLD_SECS:      1.5,    // seconds to hold before slingshot exit
-  MAX_ORBITS:          2,      // max full revolutions before forced exit
-  ORBIT_SPEED:         1.8,    // radians per second base orbit speed
-  ORBIT_RADIUS_OFFSET: 6,     // units above planet surface for orbit path
-  SLINGSHOT_SPEED:     420,    // launch velocity on slingshot exit
-  DRAG_SPEED_SENS:     0.4,    // how much left/right drag adjusts orbit speed
-  DRAG_RADIUS_SENS:    0.15,  // how much left/right drag adjusts orbit radius
-  BOUNCE_THRESHOLD:    3,      // bounces on same planet before glue activates
+  ORBIT_RADIUS_OFFSET: 6,
+  GRAVITY_BOOST:       200,
+  BOUNDARY_FACTOR:     2.5,
 };
 
 export const COLLECTIBLE = {

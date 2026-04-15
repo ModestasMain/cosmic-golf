@@ -581,6 +581,7 @@ export class HoleScene {
     for (const p of this.planetObjects) {
       p.removeFromScene(this.scene);
     }
+    this.trajectoryPreview.clearHighlights(this.planetObjects);
     this.planetObjects = [];
     this.planets = [];
 
@@ -699,7 +700,6 @@ export class HoleScene {
     // Start hole timer on first shot
     if (!this._holeStartTime) this._holeStartTime = Date.now();
 
-    this.trajectoryPreview.hide();
     this.inputSystem.setAiming(false);
     this.inputSystem.hideBar();
 
@@ -752,20 +752,6 @@ export class HoleScene {
     // Remote balls — always simulate regardless of local state
     if (this._state !== 'HOLE_COMPLETE') this._updateRemoteBalls(dt);
 
-    // Trajectory: always visible when ball is at rest (IDLE + AIMING)
-    if ((this._state === 'IDLE' || this._state === 'AIMING') && this.ball && this._holeData) {
-      const power = Math.max(0.15, this.inputSystem._power ?? 0.15);
-      const vel   = this._facingDir.clone().multiplyScalar(power * AIM.MAX_POWER);
-      const trajPlanets = this._orbitalCapture.isOrbiting
-        ? [this.planets[this._orbitalCapture.planetIdx]]
-        : this._holeData.planets;
-      const trajGravity = this._orbitalCapture.isOrbiting ? ORBIT.GRAVITY_BOOST : 1;
-      const trajOrbitPlanet = this._orbitalCapture.isOrbiting ? trajPlanets[0] : null;
-      this.trajectoryPreview.update(this.ball.position.clone(), vel, trajPlanets, trajGravity, trajOrbitPlanet);
-    } else if (this._state !== 'IDLE' && this._state !== 'AIMING') {
-      this.trajectoryPreview.hide();
-    }
-
     // Planet occlusion: fade planets between camera and ball
     this._updatePlanetOcclusion();
 
@@ -806,6 +792,68 @@ export class HoleScene {
       this.collectibles.update(dt, this.ball);
     } else {
       this.collectibles.update(dt, null); // still animate gems, skip collect check
+    }
+
+    // Trajectory: computed after planet positions + collectibles are updated
+    // so the simulation uses the same state as the actual flight physics
+    if (this.ball && this._holeData && this._state !== 'HOLE_COMPLETE') {
+      const serverZeroG = this.serverEvents.gravityScale === 0.0;
+      const collectibleGravity = this.collectibles.gravityScale ?? 1;
+      const orbitBoost = this._orbitalCapture.isOrbiting ? ORBIT.GRAVITY_BOOST : 1;
+      const combinedGravity = this.serverEvents.gravityScale * collectibleGravity * orbitBoost;
+
+      const trajPlanets = this._orbitalCapture.isOrbiting
+        ? [this.planets[this._orbitalCapture.planetIdx]]
+        : this.planets;
+      const trajOrbitPlanet = this._orbitalCapture.isOrbiting ? trajPlanets[0] : null;
+
+      const blackHole = this.cup ? {
+        position: this.cup.position,
+        pullRadius: HOLE.BLACK_HOLE_PULL_RADIUS,
+        gravity: HOLE.BLACK_HOLE_GRAVITY,
+        cupRadius: HOLE.CUP_RADIUS,
+      } : null;
+
+      const wormholePositions = this.wormholes.length > 0
+        ? this.wormholes.map(w => w.position)
+        : null;
+
+      const trajOptions = {
+        blackHole,
+        zeroGravity: serverZeroG,
+        tee: this._holeData.tee,
+        cup: this._holeData.cup,
+        wormholes: wormholePositions,
+      };
+
+      if (this._state === 'BALL_IN_FLIGHT') {
+        const flightVel = this.ball.velocity.clone();
+        if (flightVel.length() > 1.0) {
+          trajOptions.graceFrames = this._launchGraceFrames;
+          this.trajectoryPreview.update(
+            this.ball.position.clone(), flightVel, trajPlanets, this.planets,
+            combinedGravity, trajOrbitPlanet, trajOptions,
+            this.camera, this.planetObjects,
+          );
+          this.trajectoryPreview.show();
+        }
+      } else {
+        const power = this.inputSystem._power ?? 0;
+        if (power > 0.01) {
+          const vel = this._facingDir.clone().multiplyScalar(power * AIM.MAX_POWER);
+          trajOptions.graceFrames = PHYSICS.LAUNCH_GRACE_FRAMES;
+          trajOptions.hitFreezeFrames = 4; // Match actual shot's hit-freeze
+          this.trajectoryPreview.update(
+            this.ball.position.clone(), vel, trajPlanets, this.planets,
+            combinedGravity, trajOrbitPlanet, trajOptions,
+            this.camera, this.planetObjects,
+          );
+          this.trajectoryPreview.show();
+        } else {
+          this.trajectoryPreview.hide();
+          this.trajectoryPreview.clearHighlights(this.planetObjects);
+        }
+      }
     }
 
     // Update background ambiance
@@ -1469,7 +1517,7 @@ export class HoleScene {
     if (!this._planetBasePos || this._planetBasePos.length === 0) return;
 
     const flip   = this.serverEvents.mapFlipProgress;
-    const frozen = this.serverEvents.staticActive;
+    const frozen = this.serverEvents.isStatic;
     // Use wall-clock seconds so all clients have identical planet positions
     // regardless of frame rate or when they joined.
     const t = Date.now() / 1000;

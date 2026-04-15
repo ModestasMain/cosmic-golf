@@ -2,6 +2,10 @@
 // ServerEventSystem.js — deterministic wall-clock server events
 // All clients independently derive the same event from the same
 // room code + time slice. Zero server changes needed.
+//
+// NEW: 120 second cycles with 30s event + 90s default (static)
+// Default: planets are static (frozen)
+// Event phase: active event for 30 seconds
 // ============================================================
 
 import { eventBus, Events } from '../core/EventBus.js';
@@ -28,20 +32,21 @@ export class ServerEventSystem {
    */
   constructor(scene) {
     this._scene        = scene;
-    this._lastEventIdx = -1;
+    this._lastCycleIdx = -1;
     this._activeType   = null;
     this._activeT      = 0;
+    this._eventPhase   = false; // true during the 30s event, false during 90s default
 
     // ── State read by HoleScene ───────────────────────────────
-    // ZERO_GRAVITY
+    // ZERO_GRAVITY (only active during event phase)
     this.gravityScale     = 1.0;
 
     // MAP_FLIP — animated 0→1 on start, 1→0 on end (HoleScene lerps planet Y)
     this.mapFlipProgress  = 0;
     this._mapFlipTarget   = 0;
 
-    // STATIC (freezes the default planet sway)
-    this.staticActive     = false;
+    // planetsMoving — NEW: false by default (planets frozen), true during MOVING_PLANETS event
+    this.planetsMoving    = false;
 
     // Asteroid Storm
     this._asteroids       = [];
@@ -51,35 +56,55 @@ export class ServerEventSystem {
     this._nextEventType   = null;
   }
 
-  get isStatic() { return this.staticActive; }
+  get isStatic() { return !this.planetsMoving; }
 
-  // ── Update ────────────────────────────────────────────────
+  // ── Update ────────────────────────────────
 
   update(dt) {
     const now       = Date.now();
-    const interval  = SERVER_EVENTS.INTERVAL_MS;
-    const eventIdx  = Math.floor(now / interval);
-    const remaining = interval - (now % interval);
+    const cycleMs   = SERVER_EVENTS.CYCLE_MS;
+    const eventMs   = SERVER_EVENTS.EVENT_DURATION_MS;
+    const cycleIdx  = Math.floor(now / cycleMs);
+    const posInCycle = now % cycleMs;
+    const remaining = cycleMs - posInCycle;
 
-    // Warn 15 s before next event
+    // In event phase for first 30 seconds of each cycle
+    const inEventPhase = posInCycle < eventMs;
+
+    // Warn 15 s before next event phase starts (end of 90s default)
     const WARN_MS = 15_000;
-    if (remaining < WARN_MS && !this._warningShown) {
+    const timeToNextEvent = inEventPhase ? 0 : remaining;
+    if (!inEventPhase && timeToNextEvent < WARN_MS && !this._warningShown) {
       this._warningShown  = true;
-      this._nextEventType = this._pickType(eventIdx + 1);
+      this._nextEventType = this._pickType(cycleIdx + 1);
       eventBus.emit(Events.SERVER_EVENT, { type: this._nextEventType, phase: 'warning' });
     }
-    if (remaining >= WARN_MS) this._warningShown = false;
+    if (inEventPhase || timeToNextEvent >= WARN_MS) this._warningShown = false;
 
-    // Fire when slice advances (or on first update — sync to current event immediately)
-    if (eventIdx !== this._lastEventIdx) {
-      const isFirstRun = this._lastEventIdx === -1;
-      this._lastEventIdx = eventIdx;
-      if (!isFirstRun && this._activeType) this._endEvent();
-      this._startEvent(this._pickType(eventIdx));
+    // Cycle changed or phase transition
+    const cycleChanged = cycleIdx !== this._lastCycleIdx;
+    const phaseChanged = inEventPhase !== this._eventPhase;
+
+    if (cycleChanged) {
+      // New cycle started
+      this._lastCycleIdx = cycleIdx;
+      this._warningShown = false;
     }
 
-    // Tick active event
-    if (this._activeType) {
+    if (phaseChanged || (cycleChanged && inEventPhase)) {
+      this._eventPhase = inEventPhase;
+
+      if (inEventPhase) {
+        // Event phase started (first 30s of cycle)
+        this._startEvent(this._pickType(cycleIdx));
+      } else {
+        // Default phase started (remaining 90s)
+        this._endEvent();
+      }
+    }
+
+    // Tick active event during event phase
+    if (inEventPhase && this._activeType) {
       this._activeT += dt;
     }
 
@@ -96,7 +121,7 @@ export class ServerEventSystem {
     this._tickAsteroids(dt);
   }
 
-  // ── Event lifecycle ───────────────────────────────────────
+  // ── Event lifecycle ───────────────────────
 
   _pickType(idx) {
     const seed = hashStr((gameState.roomCode ?? 'SOLO') + String(idx));
@@ -113,8 +138,8 @@ export class ServerEventSystem {
       this.gravityScale = 0.0;
     } else if (type === 'MAP_FLIP') {
       this._mapFlipTarget = 1;
-    } else if (type === 'STATIC') {
-      this.staticActive = true;
+    } else if (type === 'MOVING_PLANETS') {
+      this.planetsMoving = true; // NEW: planets start swaying
     } else if (type === 'ASTEROID_STORM') {
       this._spawnAsteroids();
     }
@@ -127,12 +152,13 @@ export class ServerEventSystem {
 
     eventBus.emit(Events.SERVER_EVENT, { type, phase: 'end' });
 
+    // Reset all event effects back to default
     this.gravityScale   = 1.0;
     this._mapFlipTarget = 0;
-    this.staticActive   = false;
+    this.planetsMoving  = false; // NEW: back to static
   }
 
-  // ── Asteroid Storm ────────────────────────────────────────
+  // ── Asteroid Storm ────────────────────────
 
   _spawnAsteroids() {
     for (let i = 0; i < 6; i++) {
@@ -183,7 +209,7 @@ export class ServerEventSystem {
     }
   }
 
-  // ── Collision check — called from HoleScene ───────────────
+  // ── Collision check — called from HoleScene ─
 
   checkAsteroidCollision(ballPos, ballVel) {
     for (const a of this._asteroids) {

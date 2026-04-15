@@ -509,12 +509,16 @@ export class Planet {
 
     this._buildMesh(seq);
     this._buildAtmosphere();
+    this._buildTrajectoryHighlight();
     this._buildExtras(seq, seed);
 
     this.gravityField = new GravityField(position, radius, mass, color);
 
     this._celebrationRings = [];   // { mesh, life, rate, startR, maxR }
     this._celebrationAuroraT = 0; // > 0 while aurora is active
+
+    this._trajHighlight = null;   // 'target' | 'behind' | null
+    this._trajHighlightMesh = null;
   }
 
   _buildMesh(seq) {
@@ -630,6 +634,30 @@ export class Planet {
     const geo = new SphereGeometry(this.radius * scale, 24, 18);
     this.glowMesh = new Mesh(geo, mat);
     this.bodyGroup.add(this.glowMesh);
+  }
+
+  _buildTrajectoryHighlight() {
+    const geo = new SphereGeometry(this.radius * 1.08, 20, 14);
+    const mat = new MeshBasicMaterial({
+      color: 0xffd700,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      blending: AdditiveBlending,
+      side: BackSide,
+    });
+    this._trajHighlightMesh = new Mesh(geo, mat);
+    this.bodyGroup.add(this._trajHighlightMesh);
+  }
+
+  /**
+   * Set trajectory-related highlight on this planet.
+   * @param {'target'|'behind'|null} type - target = gold pulse, behind = red tint, null = clear
+   * @param {number} intensity - 0 to 1
+   */
+  setTrajectoryHighlight(type, intensity = 0) {
+    this._trajHighlight = type;
+    this._trajHighlightIntensity = intensity;
   }
 
   _buildExtras(seq, seed) {
@@ -861,6 +889,11 @@ export class Planet {
     this._celebrationAuroraT = 1.8;
   }
 
+  setTrajectoryHighlight(type, intensity = 0) {
+    this._trajHighlight = type;
+    this._trajHighlightIntensity = intensity;
+  }
+
   setOpacity(v) {
     if (v >= 0.99) {
       // Fully visible — restore opaque material and full glow
@@ -978,6 +1011,20 @@ export class Planet {
     }
 
     this.gravityField.update(dt);
+
+    // Trajectory highlight animation
+    if (this._trajHighlightMesh) {
+      if (this._trajHighlight === 'target') {
+        const pulse = this._trajHighlightIntensity * (0.7 + Math.sin(t * 5.0) * 0.3);
+        this._trajHighlightMesh.material.color.setHex(0xffd700);
+        this._trajHighlightMesh.material.opacity = pulse;
+      } else if (this._trajHighlight === 'behind') {
+        this._trajHighlightMesh.material.color.setHex(0xff2222);
+        this._trajHighlightMesh.material.opacity = this._trajHighlightIntensity;
+      } else {
+        this._trajHighlightMesh.material.opacity = 0;
+      }
+    }
   }
 
   addToScene(scene) {
@@ -1020,5 +1067,6 @@ export class Planet {
 
     if (this._lensingMesh)  { this._lensingMesh.geometry.dispose();  this._lensingMesh.material.dispose(); }
     if (this._lensingMesh2) { this._lensingMesh2.geometry.dispose(); this._lensingMesh2.material.dispose(); }
+    if (this._trajHighlightMesh) { this._trajHighlightMesh.geometry.dispose(); this._trajHighlightMesh.material.dispose(); }
   }
 }

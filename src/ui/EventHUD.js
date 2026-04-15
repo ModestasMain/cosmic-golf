@@ -11,14 +11,14 @@ import { SERVER_EVENTS } from '../core/Constants.js';
 const EVENT_DISPLAY = {
   ZERO_GRAVITY:   'ZERO GRAVITY',
   MAP_FLIP:       'MAP FLIP',
-  STATIC:         'STATIC',
+  MOVING_PLANETS: 'MOVING PLANETS',
   ASTEROID_STORM: 'ASTEROID STORM',
 };
 
 const EVENT_COLOR = {
   ZERO_GRAVITY:   '#44ccff',
   MAP_FLIP:       '#cc44ff',
-  STATIC:         '#aabbcc',
+  MOVING_PLANETS: '#88ff88',
   ASTEROID_STORM: '#ff8844',
 };
 
@@ -119,10 +119,22 @@ export class EventHUD {
   _startTick() {
     const tick = () => {
       if (!this._spinning) {
-        const interval  = SERVER_EVENTS.INTERVAL_MS;
-        const msInSlice = Date.now() % interval;
-        const secLeft   = Math.ceil((interval - msInSlice) / 1000);
-        this._timerEl.textContent = `NEXT IN  ${secLeft}s`;
+        const cycleMs = SERVER_EVENTS.CYCLE_MS;
+        const eventMs = SERVER_EVENTS.EVENT_DURATION_MS;
+        const posInCycle = Date.now() % cycleMs;
+        const inEvent = posInCycle < eventMs;
+
+        if (inEvent) {
+          // During event: show time until event ends
+          const msLeft = eventMs - posInCycle;
+          const secLeft = Math.ceil(msLeft / 1000);
+          this._timerEl.textContent = `ENDS IN  ${secLeft}s`;
+        } else {
+          // During default phase: show time until next event starts
+          const msToNext = cycleMs - posInCycle;
+          const secLeft = Math.ceil(msToNext / 1000);
+          this._timerEl.textContent = `NEXT IN  ${secLeft}s`;
+        }
       }
       this._rafId = requestAnimationFrame(tick);
     };

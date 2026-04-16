@@ -19,10 +19,11 @@ import {
 } from 'three';
 
 // ── Config ────────────────────────────────────────────────
-const HISTORY     = 45;   // frames of history — shorter = tighter tail
-const PER_POINT   = 5;    // ember particles per history step
+const HISTORY     = 60;   // frames of history — shorter = tighter tail
+const PER_POINT   = 8;    // ember particles per history step
 const TOTAL       = HISTORY * PER_POINT;
-const MAX_SCATTER = 1.6;  // max world-unit scatter at head
+const MAX_SCATTER = 0.7;  // max world-unit scatter at head — tight focused jet
+const GLOW_COUNT  = 28;   // large soft plumes at flame head
 
 // ── Layer builder ─────────────────────────────────────────
 function buildLayer(scene, count, size, renderOrder) {
@@ -91,10 +92,13 @@ export class BallTrail {
     this._color       = new Color(color);
 
     // Bright spine — tight core of the meteor
-    this._core  = buildLayer(scene, HISTORY, 2.2, 91);
+    this._core  = buildLayer(scene, HISTORY,    5.5,  92);
 
     // Ember scatter — turbulent fire halo
-    this._cloud = buildLayer(scene, TOTAL,   1.3, 90);
+    this._cloud = buildLayer(scene, TOTAL,      3.2,  91);
+
+    // Volumetric glow plumes — large soft particles at flame head
+    this._glow  = buildLayer(scene, GLOW_COUNT, 12.0, 89);
   }
 
   setColor(color) {
@@ -107,6 +111,7 @@ export class BallTrail {
       this._history = [];
       this._core.geo.setDrawRange(0, 0);
       this._cloud.geo.setDrawRange(0, 0);
+      this._glow.geo.setDrawRange(0, 0);
     }
   }
 
@@ -123,6 +128,7 @@ export class BallTrail {
       } else {
         this._core.geo.setDrawRange(0, 0);
         this._cloud.geo.setDrawRange(0, 0);
+        this._glow.geo.setDrawRange(0, 0);
       }
       return;
     }
@@ -130,7 +136,10 @@ export class BallTrail {
     this._history.unshift({ x: ballPos.x, y: ballPos.y, z: ballPos.z });
     if (this._history.length > HISTORY) this._history.pop();
     const n = this._history.length;
-    if (n < 2) return;
+    if (n < 2) {
+      this._glow.geo.setDrawRange(0, 0);
+      return;
+    }
 
     const t  = this._t;
     const pr = this._color.r;
@@ -182,6 +191,30 @@ export class BallTrail {
     this._cloud.geo.attributes.position.needsUpdate = true;
     this._cloud.geo.attributes.color.needsUpdate    = true;
     this._cloud.geo.setDrawRange(0, fi);
+
+    // ── VOLUMETRIC GLOW HEAD ────────────────────────────────────
+    // Large, slowly-drifting plumes concentrated at the flame head.
+    // They give the illusion of a thick volumetric fire blob at the tip.
+    const headSteps = Math.min(n, 14); // only cover the first 14 history positions
+    for (let i = 0; i < GLOW_COUNT; i++) {
+      const hi     = Math.floor((i / GLOW_COUNT) * headSteps); // spread across head
+      const p      = this._history[hi];
+      const frac   = 1 - hi / Math.max(n - 1, 1);
+      const spread = MAX_SCATTER * 2.2 * (1 - hi / headSteps);
+      this._glow.pos[i * 3]     = p.x + hash(i * 13, 0, t * 0.28) * spread;
+      this._glow.pos[i * 3 + 1] = p.y + hash(i * 13, 1, t * 0.31) * spread;
+      this._glow.pos[i * 3 + 2] = p.z + hash(i * 13, 2, t * 0.25) * spread;
+
+      const pulse = 0.55 + 0.45 * Math.abs(Math.sin(t * 6.5 + i * 1.7));
+      const gi    = frac * 0.28 * pulse;
+      const [gr, gg, gb] = fireColor(frac * 0.8, pr, pg, pb);
+      this._glow.col[i * 3]     = gr * gi;
+      this._glow.col[i * 3 + 1] = gg * gi;
+      this._glow.col[i * 3 + 2] = gb * gi;
+    }
+    this._glow.geo.attributes.position.needsUpdate = true;
+    this._glow.geo.attributes.color.needsUpdate    = true;
+    this._glow.geo.setDrawRange(0, GLOW_COUNT);
   }
 
   _drawChargeAura(ballPos, t, pr, pg, pb) {
@@ -235,7 +268,7 @@ export class BallTrail {
   }
 
   dispose() {
-    for (const layer of [this._core, this._cloud]) {
+    for (const layer of [this._core, this._cloud, this._glow]) {
       layer.geo.dispose();
       layer.pts.material.dispose();
       if (layer.pts.parent) layer.pts.parent.remove(layer.pts);

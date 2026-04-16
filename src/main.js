@@ -2,8 +2,8 @@
 // main.js — Cosmic Golf entry point
 // ============================================================
 
-import { WebGLRenderer } from 'three';
-import { EffectComposer, RenderPass, BloomEffect, EffectPass, VignetteEffect } from 'postprocessing';
+import { WebGLRenderer, Vector2 } from 'three';
+import { EffectComposer, RenderPass, BloomEffect, EffectPass, VignetteEffect, ChromaticAberrationEffect } from 'postprocessing';
 import { eventBus, Events } from './core/EventBus.js';
 import { gameState } from './core/GameState.js';
 import { InputSystem } from './systems/InputSystem.js';
@@ -22,6 +22,7 @@ import { EventHUD } from './ui/EventHUD.js';
 import { LobbyPanel } from './ui/LobbyPanel.js';
 import { BallStylePicker } from './ui/BallStylePicker.js';
 import { audioManager } from './audio/AudioManager.js';
+import { DevPanel } from './debug/DevPanel.js';
 
 class Game {
   constructor() {
@@ -67,19 +68,33 @@ class Game {
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(scene, camera));
 
-    const bloom = new BloomEffect({
-      intensity: 2.2,
-      luminanceThreshold: 0.22,
-      luminanceSmoothing: 0.08,
+    this.bloom = new BloomEffect({
+      intensity: 0,
+      luminanceThreshold: 0.28,
+      luminanceSmoothing: 0.45,
       mipmapBlur: true,
     });
 
-    const vignette = new VignetteEffect({
-      offset: 0.38,
-      darkness: 0.65,
+    this.chromAb = new ChromaticAberrationEffect({
+      offset: new Vector2(0, 0),
     });
 
-    this.composer.addPass(new EffectPass(camera, bloom, vignette));
+    this.vignette = new VignetteEffect({
+      offset: 0,
+      darkness: 0,
+    });
+
+    this.composer.addPass(new EffectPass(camera, this.bloom, this.chromAb, this.vignette));
+
+    // Dev panel — toggle with backtick key
+    this.devPanel = new DevPanel({
+      spaceBg:   this.holeScene.spaceBg,
+      starField: this.holeScene.starField,
+      holeScene: this.holeScene,
+      bloom:     this.bloom,
+      vignette:  this.vignette,
+      chromAb:   this.chromAb,
+    });
   }
 
   _setupState() {

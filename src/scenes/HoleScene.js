@@ -5,9 +5,9 @@
 
 import {
   Scene, PerspectiveCamera, AmbientLight, DirectionalLight, HemisphereLight,
-  Vector3, Color, Quaternion, ArrowHelper,
+  Vector3, Quaternion, ArrowHelper,
 } from 'three';
-import { Tween, Easing, update as tweenUpdate } from '@tweenjs/tween.js';
+import { update as tweenUpdate } from '@tweenjs/tween.js';
 import { eventBus, Events } from '../core/EventBus.js';
 import { gameState } from '../core/GameState.js';
 import { CAMERA, HOLE, AIM, PHYSICS, BALL, ORBIT, COLOR_PALETTES } from '../core/Constants.js';
@@ -21,6 +21,7 @@ import { HoleCup } from '../objects/HoleCup.js';
 import { TeeMarker } from '../objects/TeeMarker.js';
 import { StarField } from '../objects/StarField.js';
 import { NebulaField } from '../objects/NebulaField.js';
+import { ProceduralSpaceBg } from '../objects/ProceduralSpaceBg.js';
 import { PortalSystem } from '../portal/PortalSystem.js';
 // import { BallTrail } from '../effects/BalxTrail.js';
 import { ScreenShake } from '../effects/ScreenShake.js';
@@ -105,9 +106,6 @@ export class HoleScene {
     this.launchBurst = new LaunchBurst(this.scene);
     this.launchWarp = new LaunchWarp(this.camera);
 
-    // Current palette background color for tweening
-    this._bgColor = { r: 0, g: 0, b: 0 };
-
     // Idle camera drift
     this._idleDriftT = 0;
 
@@ -166,6 +164,10 @@ export class HoleScene {
     this.starField  = new StarField(this.scene);
     this.nebulaField = new NebulaField(this.scene);
 
+    // Shader-based space backdrop — infinite resolution, full 360° coverage, no seams
+    this.spaceBg = new ProceduralSpaceBg(this.scene);
+    this.spaceBg.load();
+
     // Direction arrow — always shows facing direction
     this._aimArrow = new ArrowHelper(
       new Vector3(0, 0, -1), // direction (updated each frame)
@@ -182,17 +184,14 @@ export class HoleScene {
   }
 
   _setupLighting() {
-    // Dark blue ambient for space feel
-    this.ambientLight = new AmbientLight(0x111122, 0.4);
+    this.ambientLight = new AmbientLight(0x000000, 0.4);
     this.scene.add(this.ambientLight);
 
-    // Main directional light
-    this.dirLight = new DirectionalLight(0xffffff, 1.2);
+    this.dirLight = new DirectionalLight(0xffd6d6, 2.3);
     this.dirLight.position.set(50, 80, 60);
     this.scene.add(this.dirLight);
 
-    // Subtle hemisphere light for sky/ground differentiation
-    this.hemiLight = new HemisphereLight(0x334466, 0x111111, 0.3);
+    this.hemiLight = new HemisphereLight(0xa3a3a3, 0x000000, 3.0);
     this.scene.add(this.hemiLight);
   }
 
@@ -446,27 +445,13 @@ export class HoleScene {
     this._holeData = generateHole(holeIndex, holeSeed);
     const { planets, tee, cup, palette } = this._holeData;
 
-    // Update scene background and lighting for palette — tween to new background color
-    const newBg = new Color(palette.bg);
-    const target = { r: newBg.r, g: newBg.g, b: newBg.b };
-    new Tween(this._bgColor)
-      .to(target, 1200)
-      .easing(Easing.Quadratic.Out)
-      .onUpdate(({ r, g, b }) => {
-        this.scene.background = new Color(r, g, b);
-      })
-      .onComplete(({ r, g, b }) => {
-        this.scene.background = new Color(r, g, b);
-      })
-      .start();
-    // Immediately set as well (handles first load)
-    this.scene.background = new Color(palette.bg);
-    this._bgColor.r = newBg.r;
-    this._bgColor.g = newBg.g;
-    this._bgColor.b = newBg.b;
+    // Background is the void.png equirectangular sphere — no color clear needed
+    this.scene.background = null;
 
-    this.ambientLight.color.set(palette.ambient);
-    this.dirLight.color.set(palette.dirLight);
+    if (!this._devLightLock) {
+      this.ambientLight.color.set(palette.ambient);
+      this.dirLight.color.set(palette.dirLight);
+    }
     if (this.starField)   this.starField.setColor(palette.stars);
     if (this.nebulaField) this.nebulaField.setColors(palette);
 
@@ -857,7 +842,8 @@ export class HoleScene {
     }
 
     // Update background ambiance
-    if (this.starField)   this.starField.update(dt);
+    if (this.spaceBg)    this.spaceBg.update(dt);
+    if (this.starField)  this.starField.update(dt);
     if (this.cometSystem) this.cometSystem.update(dt);
 
     // Update planet gravity fields
@@ -1538,10 +1524,9 @@ export class HoleScene {
         z += Math.sin(t * 0.42 + phase * 0.8) * 34;
       }
 
-      // Update physics data, visual mesh, and gravity field rings
+      // Update physics data and visual mesh
       this.planets[i].position.set(x, y, z);
       this.planetObjects[i].group.position.set(x, y, z);
-      this.planetObjects[i].gravityField.group.position.set(x, y, z);
     }
   }
 

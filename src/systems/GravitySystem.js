@@ -53,8 +53,8 @@ export function stepBall(ball, planets, dt, gravityScale = 1.0, orbitPlanet = nu
   // Euler integrate velocity
   ball.velocity.addScaledVector(force, dt);
 
-  // Air resistance / damping
-  ball.velocity.multiplyScalar(PHYSICS.VELOCITY_DAMPING);
+  // Air resistance / damping — normalised to dt so behaviour is framerate-independent
+  ball.velocity.multiplyScalar(Math.pow(PHYSICS.VELOCITY_DAMPING, dt / 0.016));
 
   // Cap max speed
   const speed = ball.velocity.length();
@@ -142,6 +142,7 @@ export function stepBall(ball, planets, dt, gravityScale = 1.0, orbitPlanet = nu
 export function simulateTrajectory(startPos, startVel, planets, allPlanets, steps, dt, gravityScale = 1.0, orbitPlanet = null, options = null) {
   const points = [];
   const danger = [];
+  let stopReason = 'limit'; // 'cup'|'wormhole'|'settled'|'pinned'|'zero_g_stuck'|'oob'|'limit'
   const pos = startPos.clone();
   const vel = startVel.clone();
   const ball = { position: pos, velocity: vel };
@@ -161,7 +162,7 @@ export function simulateTrajectory(startPos, startVel, planets, allPlanets, step
   let voidSteps = 0;
   let stuckSteps = 0;
   const bounceCooldownTotal = Math.round(PHYSICS.BOUNCE_COOLDOWN_MS / (dt * 1000));
-  const bounceGraceTotal = Math.round(90 * dt * 1000 / 1000); // 90 frames ≈ 1.5s
+  const bounceGraceTotal = 90; // 90 simulation steps post-bounce before slow-drift OOB kicks in
 
   for (let i = 0; i < steps; i++) {
     points.push(ball.position.clone());
@@ -197,7 +198,8 @@ export function simulateTrajectory(startPos, startVel, planets, allPlanets, step
       if (stuck) {
         points.push(ball.position.clone());
         danger.push(0);
-        return { points, danger };
+        stopReason = 'zero_g_stuck';
+        return { points, danger, stopReason };
       }
     }
 
@@ -205,6 +207,7 @@ export function simulateTrajectory(startPos, startVel, planets, allPlanets, step
     if (result.bounced) {
       if (bounceCooldownSteps <= 0) {
         bounceCooldownSteps = bounceCooldownTotal;
+        hitFreezeFrames += 4; // mirror HoleScene: each bounce freezes physics for 4 frames
         bounceGraceSteps = bounceGraceTotal;
         const pIdx = allPlanets.indexOf(result.bouncePlanet);
         if (pIdx < 0) {
@@ -232,7 +235,8 @@ export function simulateTrajectory(startPos, startVel, planets, allPlanets, step
             ball.velocity.set(0, 0, 0);
             points.push(ball.position.clone());
             danger.push(0);
-            return { points, danger };
+            stopReason = 'pinned';
+            return { points, danger, stopReason };
           }
         } else {
           bouncePlanetIdx = -1;
@@ -269,7 +273,8 @@ export function simulateTrajectory(startPos, startVel, planets, allPlanets, step
         if (dist < WORMHOLE_ENTER_RADIUS) {
           points.push(ball.position.clone());
           danger.push(0);
-          return { points, danger };
+          stopReason = 'wormhole';
+          return { points, danger, stopReason };
         }
       }
     }
@@ -280,7 +285,8 @@ export function simulateTrajectory(startPos, startVel, planets, allPlanets, step
       if (cupDist < blackHole.cupRadius) {
         points.push(ball.position.clone());
         danger.push(0);
-        return { points, danger };
+        stopReason = 'cup';
+        return { points, danger, stopReason };
       }
     }
 
@@ -296,10 +302,12 @@ export function simulateTrajectory(startPos, startVel, planets, allPlanets, step
     }
     if (ballSpeed < PHYSICS.REST_VELOCITY && nearSurface) {
       danger.push(0);
+      stopReason = 'settled';
       break;
     }
     if (stuckSteps > PHYSICS.STUCK_FRAMES) {
       danger.push(0);
+      stopReason = 'settled';
       break;
     }
 
@@ -327,18 +335,21 @@ export function simulateTrajectory(startPos, startVel, planets, allPlanets, step
     // Hard outer limit
     if (ball.position.length() > HOLE.OUT_OF_BOUNDS_DISTANCE) {
       danger.push(2);
+      stopReason = 'oob';
       break;
     }
 
     // Deep void
     if (nearestSafe > HOLE.VOID_OOB_SURFACE_DIST) {
       danger.push(2);
+      stopReason = 'oob';
       break;
     }
 
     // Slow drift (suppressed for bounceGraceSteps after a bounce)
     if (bounceGraceSteps <= 0 && nearestSafe > 160 && ballSpeed < HOLE.VOID_DRIFT_SPEED) {
       danger.push(2);
+      stopReason = 'oob';
       break;
     }
 
@@ -346,12 +357,14 @@ export function simulateTrajectory(startPos, startVel, planets, allPlanets, step
     if (zeroGravity) {
       if (nearestSafe > HOLE.VOID_ZERO_G_SLOW_DIST && ballSpeed < HOLE.VOID_ZERO_G_SLOW_SPEED) {
         danger.push(2);
+        stopReason = 'oob';
         break;
       }
       if (nearestSafe > HOLE.VOID_ZERO_G_SURFACE_DIST) {
         voidSteps++;
         if (voidSteps > HOLE.VOID_ZERO_G_GRACE_FRAMES) {
           danger.push(2);
+          stopReason = 'oob';
           break;
         }
       } else {
@@ -374,10 +387,11 @@ export function simulateTrajectory(startPos, startVel, planets, allPlanets, step
       const d = ball.position.distanceTo(orbitPlanet.position);
       if (d > boundaryR) {
         danger.push(2);
+        stopReason = 'oob';
         break;
       }
     }
   }
 
-  return { points, danger };
+  return { points, danger, stopReason };
 }

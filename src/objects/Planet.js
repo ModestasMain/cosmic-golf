@@ -699,9 +699,15 @@ export class Planet {
   }
 
   _buildTrajectoryHighlight() {
-    const geo = new SphereGeometry(this.radius * 1.08, 20, 14);
+    // Slightly larger than the atmosphere (1.12x) so it glows outward as a halo
+    const geo = new SphereGeometry(this.radius * 1.22, 20, 14);
+    // Use the atmosphere color (already stored in glowMesh uniform) brightened
+    const atmoColor = this.glowMesh
+      ? this.glowMesh.material.uniforms.glowColor.value.clone()
+      : new Color(this.color);
+    atmoColor.multiplyScalar(2.5); // boost brightness
     const mat = new MeshBasicMaterial({
-      color: 0xffd700,
+      color: atmoColor,
       transparent: true,
       opacity: 0,
       depthWrite: false,
@@ -1045,11 +1051,10 @@ export class Planet {
     // Trajectory highlight animation
     if (this._trajHighlightMesh) {
       if (this._trajHighlight === 'target') {
-        const pulse = this._trajHighlightIntensity * (0.7 + Math.sin(t * 5.0) * 0.3);
-        this._trajHighlightMesh.material.color.setHex(0xffd700);
+        // Breathe the planet's own atmosphere color outward
+        const pulse = this._trajHighlightIntensity * (0.5 + Math.sin(t * 5.0) * 0.5);
         this._trajHighlightMesh.material.opacity = pulse;
       } else if (this._trajHighlight === 'behind') {
-        this._trajHighlightMesh.material.color.setHex(0xff2222);
         this._trajHighlightMesh.material.opacity = this._trajHighlightIntensity;
       } else {
         this._trajHighlightMesh.material.opacity = 0;

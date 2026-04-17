@@ -49,6 +49,8 @@ export class InputSystem {
     this._orbitToggleAllowed = false;
     this._orbitActive = false;
 
+    this._trajectoryStatus = null;
+
     this._buildUI();
 
     this._onDown   = this._onDown.bind(this);
@@ -350,6 +352,28 @@ export class InputSystem {
     this._wrap.style.display = 'flex';
   }
 
+  setTrajectoryStatus(outcome) {
+    this._trajectoryStatus = outcome;
+    if (!this._label) return;
+    const labels = {
+      cup:          'WILL HOLE',
+      wormhole:     'WORMHOLE',
+      settled:      'LANDS ON PLANET',
+      pinned:       'LANDS ON PLANET',
+      zero_g_stuck: 'LANDS ON PLANET',
+      oob:          'OUT OF BOUNDS',
+      limit:        'TAP PYRAMID TO SHOOT',
+    };
+    if (outcome && outcome !== 'limit') {
+      this._label.textContent = labels[outcome] ?? 'TAP PYRAMID TO SHOOT';
+      const isOob = outcome === 'oob';
+      this._label.style.color = isOob ? 'rgba(255,80,60,.95)' : outcome === 'cup' ? 'rgba(80,255,220,.95)' : 'rgba(160,210,255,.85)';
+    } else {
+      this._label.style.color = 'rgba(160,210,255,.85)';
+      // text will be set by _setBarPower
+    }
+  }
+
   _setBarPower(p) {
     // Geometry: triangle from y=4 (top, full width) to y=206 (tip, width=0)
     const innerH   = this._pyTipY - this._pyTopY; // 202
@@ -410,8 +434,8 @@ export class InputSystem {
       this._pyPctLabel.setAttribute('fill', 'rgba(200,230,255,0)');
     }
 
-    // Update pyramid sub-label to reflect current state
-    if (this._label) {
+    // Update pyramid sub-label to reflect current state (trajectory status overrides when set)
+    if (this._label && !this._trajectoryStatus) {
       this._label.textContent = p > 0.02 ? 'TAP PYRAMID TO SHOOT' : 'DRAG PYRAMID FOR POWER';
     }
 

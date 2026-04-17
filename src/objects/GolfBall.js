@@ -13,6 +13,13 @@ import { eventBus, Events } from '../core/EventBus.js';
 
 const SHARED_GEO = new SphereGeometry(BALL.RADIUS, 32, 24);
 
+export const SHAKE_CONFIG = {
+  amplitude:  0.06,  // multiplier on BALL.RADIUS
+  freqX:     38.0,
+  freqY:     41.5,
+  freqZ:     35.8,
+};
+
 export class GolfBall {
   constructor(color = 0xffffff, trailColor = null, styleId = 'basketball') {
     this.color       = color;
@@ -32,8 +39,11 @@ export class GolfBall {
 
   async _buildMesh() {
     this.mesh = new Mesh(SHARED_GEO, new MeshBasicMaterial({
-      transparent: false,
-      toneMapped:  false,
+      transparent:         false,
+      toneMapped:          false,
+      polygonOffset:       true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits:  -4,
     }));
     this.mesh.renderOrder = 100;
     this.group.add(this.mesh);
@@ -59,11 +69,11 @@ export class GolfBall {
 
     const t     = this._t;
 
-    const shakeAmp = this._chargePower * BALL.RADIUS * 0.45;
+    const shakeAmp = this._chargePower * BALL.RADIUS * SHAKE_CONFIG.amplitude;
     if (shakeAmp > 0.001) {
-      const sx = Math.sin(t * 47.0) * Math.sin(t * 31.3) * shakeAmp;
-      const sy = Math.sin(t * 53.7) * Math.cos(t * 28.9) * shakeAmp;
-      const sz = Math.cos(t * 41.2) * Math.sin(t * 37.1) * shakeAmp;
+      const sx = Math.sin(t * SHAKE_CONFIG.freqX) * shakeAmp;
+      const sy = Math.sin(t * SHAKE_CONFIG.freqY + 1.2) * shakeAmp * 0.7;
+      const sz = Math.cos(t * SHAKE_CONFIG.freqZ + 2.4) * shakeAmp;
       this.group.position.set(this.position.x + sx, this.position.y + sy, this.position.z + sz);
     } else {
       this.group.position.copy(this.position);

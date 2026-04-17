@@ -5,10 +5,19 @@
 
 import {
   BufferGeometry, BufferAttribute, Points, PointsMaterial,
-  AdditiveBlending, Vector3,
+  AdditiveBlending, Vector3, Mesh, SphereGeometry, MeshBasicMaterial, Color,
 } from 'three';
 import { simulateTrajectory } from './GravitySystem.js';
 import { AIM, BALL } from '../core/Constants.js';
+
+export const TRAJ_CONFIG = {
+  steps:       AIM.TRAJECTORY_STEPS,
+  dt:          AIM.TRAJECTORY_DT,
+  pointStep:   AIM.TRAJECTORY_POINT_STEP,
+  dotSize:     AIM.TRAJECTORY_DOT_SIZE,
+  voidAlpha:   0.6,   // alpha multiplier for dots in the void
+  nearAlpha:   2.8,   // alpha multiplier close to planet surface
+};
 
 const _camToPt = new Vector3();
 const _camToPlanet = new Vector3();
@@ -30,13 +39,26 @@ function lerpColor(t) {
   }
 }
 
+// Endpoint marker colors per outcome
+const ENDPOINT_COLORS = {
+  cup:          new Color(0x00ffff),
+  wormhole:     new Color(0xaa44ff),
+  settled:      new Color(0x44ff88),
+  pinned:       new Color(0x44ff88),
+  zero_g_stuck: new Color(0x44ff88),
+  oob:          new Color(0xff2200),
+  limit:        new Color(0x2266ff),
+};
+
 export class TrajectoryPreview {
   constructor(scene) {
     this.scene = scene;
     this.visible = false;
     this._targetPlanetIdx = -1;
     this._behindPlanetIdxs = [];
+    this._lastOutcome = 'limit';
     this._buildMesh();
+    this._buildEndpointMarker();
   }
 
   _buildMesh() {
@@ -51,7 +73,7 @@ export class TrajectoryPreview {
     this.geometry.setDrawRange(0, 0);
 
     this.material = new PointsMaterial({
-      size: AIM.TRAJECTORY_DOT_SIZE,
+      size: TRAJ_CONFIG.dotSize,
       transparent: true,
       opacity: 1.0,
       depthWrite: false,
@@ -66,6 +88,22 @@ export class TrajectoryPreview {
     this.points.renderOrder = 999;
     this.points.frustumCulled = false;
     this.scene.add(this.points);
+  }
+
+  _buildEndpointMarker() {
+    const geo = new SphereGeometry(4.5, 10, 8);
+    this._endpointMat = new MeshBasicMaterial({
+      color: new Color(0x44ff88),
+      transparent: true,
+      opacity: 0.85,
+      depthWrite: false,
+      blending: AdditiveBlending,
+    });
+    this._endpointMarker = new Mesh(geo, this._endpointMat);
+    this._endpointMarker.visible = false;
+    this._endpointMarker.renderOrder = 998;
+    this._endpointMarker.frustumCulled = false;
+    this.scene.add(this._endpointMarker);
   }
 
   /**
@@ -85,12 +123,14 @@ export class TrajectoryPreview {
       shotVelocity,
       planets,
       allPlanets,
-      AIM.TRAJECTORY_STEPS,
-      AIM.TRAJECTORY_DT,
+      TRAJ_CONFIG.steps,
+      TRAJ_CONFIG.dt,
       gravityScale,
       orbitPlanet,
       options,
     );
+
+    this._lastOutcome = result.stopReason ?? 'limit';
 
     const positions = this.geometry.attributes.position.array;
     const colors    = this.geometry.attributes.color.array;
@@ -101,14 +141,11 @@ export class TrajectoryPreview {
 
     const camPos = camera ? camera.position : null;
 
-    let targetPlanetFound = false;
-
-    const STEP = AIM.TRAJECTORY_POINT_STEP;
+    const STEP = TRAJ_CONFIG.pointStep;
     let count = 0;
     for (let i = 0; i < total; i += STEP) {
-      if (count >= AIM.TRAJECTORY_STEPS) break;
+      if (count >= TRAJ_CONFIG.steps) break;
       const p = result.points[i];
-      const d = result.danger[i] ?? 0;
 
       const t = count / Math.max(1, Math.floor(total / STEP) - 1);
 
@@ -144,18 +181,7 @@ export class TrajectoryPreview {
       positions[count * 3 + 1] = p.y;
       positions[count * 3 + 2] = p.z;
 
-      if (!targetPlanetFound && allPlanets && d === 0) {
-        for (let pi = 0; pi < allPlanets.length; pi++) {
-          const planet = allPlanets[pi];
-          const dist = p.distanceTo(planet.position);
-          if (dist < planet.radius + BALL.RADIUS * 4) {
-            this._targetPlanetIdx = pi;
-            targetPlanetFound = true;
-            break;
-          }
-        }
-      }
-
+      const d = result.danger[i] ?? 0;
       let col = d === 2
         ? { r: 1.0, g: 0.15, b: 0.1 }
         : d === 1
@@ -175,14 +201,14 @@ export class TrajectoryPreview {
       // In front/near planets = more opaque, in void = more transparent
       if (nearestSurfaceDist < 50) {
         // Very close to planet surface - solid
-        alpha *= 2.8;
+        alpha *= TRAJ_CONFIG.nearAlpha;
       } else if (nearestSurfaceDist < 120) {
         // Near planet - partially solid
         const falloff = 1.0 - (nearestSurfaceDist - 50) / 70;
         alpha *= 1.0 + falloff * 1.5;
       } else {
         // In the void - keep it transparent
-        alpha *= 0.6;
+        alpha *= TRAJ_CONFIG.voidAlpha;
       }
 
       // When behind a planet: make it very faint and desaturated/grey
@@ -202,15 +228,44 @@ export class TrajectoryPreview {
       count++;
     }
 
+    // Find target planet from the LAST trajectory point (after all bounces resolve)
+    const isLanding = this._lastOutcome === 'settled' || this._lastOutcome === 'pinned' || this._lastOutcome === 'zero_g_stuck';
+    if (isLanding && allPlanets && total > 0) {
+      const lastPt = result.points[total - 1];
+      let closestIdx = -1, closestDist = Infinity;
+      for (let pi = 0; pi < allPlanets.length; pi++) {
+        const d = lastPt.distanceTo(allPlanets[pi].position) - allPlanets[pi].radius;
+        if (d < closestDist) { closestDist = d; closestIdx = pi; }
+      }
+      if (closestDist < BALL.RADIUS * 6) this._targetPlanetIdx = closestIdx;
+    }
+
     this.geometry.attributes.position.needsUpdate = true;
     this.geometry.attributes.color.needsUpdate    = true;
     this.geometry.setDrawRange(0, count);
+
+    // Endpoint marker — place at last trajectory point, pulse, color by outcome
+    if (total > 0 && this.visible) {
+      const last = result.points[total - 1];
+      this._endpointMarker.position.copy(last);
+      const col = ENDPOINT_COLORS[this._lastOutcome] ?? ENDPOINT_COLORS.limit;
+      this._endpointMat.color.copy(col);
+      // Pulse: OOB pulses fast, safe pulses slowly
+      const pulseSpeed = this._lastOutcome === 'oob' ? 8 : 2.5;
+      const pulse = 0.55 + Math.sin(Date.now() * 0.001 * pulseSpeed) * 0.3;
+      this._endpointMat.opacity = pulse;
+      this._endpointMarker.visible = true;
+    } else {
+      this._endpointMarker.visible = false;
+    }
 
     this.points.visible = this.visible;
 
     if (planetObjects) {
       this._applyPlanetHighlights(planetObjects);
     }
+
+    return this._lastOutcome;
   }
 
   _applyPlanetHighlights(planetObjects) {
@@ -228,6 +283,12 @@ export class TrajectoryPreview {
     }
   }
 
+  _rebuildGeometry() {
+    this.scene.remove(this.points);
+    this.geometry.dispose();
+    this._buildMesh();
+  }
+
   show() {
     this.visible = true;
     this.points.visible = true;
@@ -236,6 +297,7 @@ export class TrajectoryPreview {
   hide() {
     this.visible = false;
     this.points.visible = false;
+    this._endpointMarker.visible = false;
   }
 
   clearHighlights(planetObjects) {
@@ -249,5 +311,7 @@ export class TrajectoryPreview {
     this.scene.remove(this.points);
     this.geometry.dispose();
     this.material.dispose();
+    this.scene.remove(this._endpointMarker);
+    this._endpointMat.dispose();
   }
 }

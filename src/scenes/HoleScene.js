@@ -828,15 +828,17 @@ export class HoleScene {
           const vel = this._facingDir.clone().multiplyScalar(power * AIM.MAX_POWER);
           trajOptions.graceFrames = PHYSICS.LAUNCH_GRACE_FRAMES;
           trajOptions.hitFreezeFrames = 4; // Match actual shot's hit-freeze
-          this.trajectoryPreview.update(
+          const outcome = this.trajectoryPreview.update(
             this.ball.position.clone(), vel, trajPlanets, this.planets,
             combinedGravity, trajOrbitPlanet, trajOptions,
             this.camera, this.planetObjects,
           );
           this.trajectoryPreview.show();
+          this.inputSystem.setTrajectoryStatus(outcome);
         } else {
           this.trajectoryPreview.hide();
           this.trajectoryPreview.clearHighlights(this.planetObjects);
+          this.inputSystem.setTrajectoryStatus(null);
         }
       }
     }

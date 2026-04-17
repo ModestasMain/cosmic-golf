@@ -11,6 +11,8 @@ import { MeshBasicMaterial } from 'three';
 import { textureManager } from '../core/TextureManager.js';
 import { eventBus, Events } from '../core/EventBus.js';
 import { Planet } from '../objects/Planet.js';
+import { SHAKE_CONFIG } from '../objects/GolfBall.js';
+import { TRAJ_CONFIG } from '../systems/TrajectoryPreview.js';
 
 export class DevPanel {
   /**
@@ -43,6 +45,8 @@ export class DevPanel {
     this._buildLighting(gui);
     this._buildPostFX(gui);
     this._buildPlanets(gui);
+    this._buildBallFeel(gui);
+    this._buildTrajectory(gui);
   }
 
   // ── VOID ────────────────────────────────────────────────────
@@ -193,7 +197,7 @@ export class DevPanel {
       ringScale:          0.65,
       ringBandsMin:       2,
       ringBandsMax:       4,
-      planetScale:        1.0,
+      planetScale:        1.25,
       textureBrightness:  1.0,
       activeTexture:      'procedural',
       texturePath:        '/textures/planets/',
@@ -225,7 +229,19 @@ export class DevPanel {
     };
 
     const applyScale = () => {
-      for (const planet of planets()) planet.group.scale.setScalar(p.planetScale);
+      // Scale visual groups; update raw physics objects (holeScene.planets) so collision
+      // radius matches the scaled visual surface. Planet instance .radius must stay at the
+      // original geometry radius so addCrater local-space math remains correct.
+      const rawPlanets = holeScene.planets ?? [];
+      for (let i = 0; i < planets().length; i++) {
+        const planet = planets()[i];
+        planet.group.scale.setScalar(p.planetScale);
+        const raw = rawPlanets[i];
+        if (raw) {
+          if (raw._baseRadius === undefined) raw._baseRadius = raw.radius;
+          raw.radius = raw._baseRadius * p.planetScale;
+        }
+      }
     };
 
     const applyRingStyle = () => {
@@ -376,6 +392,37 @@ export class DevPanel {
     texF.add({ clear: clearTex }, 'clear').name('✕ Clear  (procedural on next hole)');
 
     f.add({ copy: () => this._copy('Planets', p) }, 'copy').name('📋 Copy JSON');
+  }
+
+  // ── BALL FEEL ────────────────────────────────────────────────
+  _buildBallFeel(gui) {
+    const f = gui.addFolder('⚽ Ball Feel');
+    f.close();
+    f.add(SHAKE_CONFIG, 'amplitude', 0, 0.5, 0.005).name('Shake amplitude');
+    f.add(SHAKE_CONFIG, 'freqX',     5, 80,  0.5  ).name('Shake freq X');
+    f.add(SHAKE_CONFIG, 'freqY',     5, 80,  0.5  ).name('Shake freq Y');
+    f.add(SHAKE_CONFIG, 'freqZ',     5, 80,  0.5  ).name('Shake freq Z');
+    f.add({ copy: () => this._copy('BallFeel', SHAKE_CONFIG) }, 'copy').name('📋 Copy JSON');
+  }
+
+  // ── TRAJECTORY ───────────────────────────────────────────────
+  _buildTrajectory(gui) {
+    const { holeScene } = this._refs;
+    const f = gui.addFolder('🎯 Trajectory');
+    f.close();
+
+    f.add(TRAJ_CONFIG, 'steps',     500, 15000, 500).name('Sim steps').onChange(() => {
+      // Rebuild geometry to match new max size
+      if (holeScene?.trajectoryPreview) holeScene.trajectoryPreview._rebuildGeometry();
+    });
+    f.add(TRAJ_CONFIG, 'dt',        0.008, 0.05, 0.001).name('Sim dt');
+    f.add(TRAJ_CONFIG, 'pointStep', 1, 10, 1).name('Point step (spacing)');
+    f.add(TRAJ_CONFIG, 'dotSize',   1, 10, 0.5).name('Dot size (px)').onChange(() => {
+      if (holeScene?.trajectoryPreview) holeScene.trajectoryPreview.material.size = TRAJ_CONFIG.dotSize;
+    });
+    f.add(TRAJ_CONFIG, 'nearAlpha', 0.5, 5, 0.1).name('Near-planet alpha');
+    f.add(TRAJ_CONFIG, 'voidAlpha', 0.1, 2, 0.05).name('Void alpha');
+    f.add({ copy: () => this._copy('Trajectory', TRAJ_CONFIG) }, 'copy').name('📋 Copy JSON');
   }
 
   // ── Helpers ─────────────────────────────────────────────────

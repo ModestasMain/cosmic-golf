@@ -38,10 +38,10 @@ function nebulaSprite() {
 }
 
 // ── Config ────────────────────────────────────────────────────
-const EMISSION_COUNT  = 8;   // glowing cloud nebulae
-const PILLAR_COUNT    = 5;   // elongated gas filaments
+const EMISSION_COUNT  = 10;   // glowing cloud nebulae
+const PILLAR_COUNT    = 6;   // elongated gas filaments
 const GALAXY_COUNT    = 7;   // distant elliptical smudges
-const ARM_STARS       = 900; // milky-way arm star dust
+const ARM_STARS       = 1200; // milky-way arm star dust
 
 export class NebulaField {
   constructor(scene) {
@@ -91,7 +91,7 @@ export class NebulaField {
 
       // Faint blue-white with very slight palette blush
       const palC = palColors[i % palColors.length];
-      const b    = 0.025 + sr(seed + i) * 0.045;
+      const b    = 0.055 + sr(seed + i) * 0.085;
       clr[i * 3]     = (0.72 + palC.r * 0.28) * b;
       clr[i * 3 + 1] = (0.80 + palC.g * 0.20) * b;
       clr[i * 3 + 2] = (1.00)                  * b;
@@ -161,9 +161,9 @@ export class NebulaField {
       const cMid = c1.clone().lerp(c2, 0.45);
 
       // Three concentric layers building up the volumetric cloud look
-      this._nebLayer(seed,     cx, cy, cz, baseR * 0.26, c1,   0.92, 45, 20, spr);
-      this._nebLayer(seed + 1, cx, cy, cz, baseR * 0.68, cMid, 0.42, 85, 46, spr);
-      this._nebLayer(seed + 2, cx, cy, cz, baseR * 1.55, c2,   0.13, 55, 78, spr);
+      this._nebLayer(seed,     cx, cy, cz, baseR * 0.26, c1,   1.40, 55, 28,  spr);
+      this._nebLayer(seed + 1, cx, cy, cz, baseR * 0.68, cMid, 0.65, 95, 65,  spr);
+      this._nebLayer(seed + 2, cx, cy, cz, baseR * 1.55, c2,   0.22, 65, 110, spr);
     }
   }
 
@@ -221,7 +221,7 @@ export class NebulaField {
 
         // Bright center, fade toward tips
         const edgeFade = Math.pow(1 - Math.abs(t), 0.6);
-        const b = edgeFade * (0.16 + sr(seed + i) * 0.22);
+        const b = edgeFade * (0.30 + sr(seed + i) * 0.38);
         clr[i * 3]     = color.r * b;
         clr[i * 3 + 1] = color.g * b;
         clr[i * 3 + 2] = color.b * b;

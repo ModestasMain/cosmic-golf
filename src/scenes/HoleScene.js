@@ -5,12 +5,13 @@
 
 import {
   Scene, PerspectiveCamera, AmbientLight, DirectionalLight, HemisphereLight,
-  Vector3, Color, Quaternion, ArrowHelper,
+  Vector3, Quaternion, ArrowHelper, CanvasTexture,
+  Sprite, SpriteMaterial, AdditiveBlending,
 } from 'three';
-import { Tween, Easing, update as tweenUpdate } from '@tweenjs/tween.js';
+import { update as tweenUpdate } from '@tweenjs/tween.js';
 import { eventBus, Events } from '../core/EventBus.js';
 import { gameState } from '../core/GameState.js';
-import { CAMERA, HOLE, AIM, PHYSICS, BALL, COLOR_PALETTES } from '../core/Constants.js';
+import { CAMERA, HOLE, AIM, PHYSICS, BALL, ORBIT, COLOR_PALETTES } from '../core/Constants.js';
 import { generateHole } from '../systems/HoleGenerator.js';
 import { stepBall } from '../systems/GravitySystem.js';
 import { TrajectoryPreview } from '../systems/TrajectoryPreview.js';
@@ -21,6 +22,7 @@ import { HoleCup } from '../objects/HoleCup.js';
 import { TeeMarker } from '../objects/TeeMarker.js';
 import { StarField } from '../objects/StarField.js';
 import { NebulaField } from '../objects/NebulaField.js';
+import { ProceduralSpaceBg } from '../objects/ProceduralSpaceBg.js';
 import { PortalSystem } from '../portal/PortalSystem.js';
 // import { BallTrail } from '../effects/BalxTrail.js';
 import { ScreenShake } from '../effects/ScreenShake.js';
@@ -33,6 +35,7 @@ import { CometSystem } from '../effects/CometSystem.js';
 import { CinematicController } from './CinematicController.js';
 import { ServerEventSystem } from '../systems/ServerEventSystem.js';
 import { CollectibleSystem } from '../systems/CollectibleSystem.js';
+// import { OrbitalCapture } from '../systems/OrbitalCapture.js';
 
 export class HoleScene {
   constructor(renderer, inputSystem) {
@@ -104,9 +107,6 @@ export class HoleScene {
     this.launchBurst = new LaunchBurst(this.scene);
     this.launchWarp = new LaunchWarp(this.camera);
 
-    // Current palette background color for tweening
-    this._bgColor = { r: 0, g: 0, b: 0 };
-
     // Idle camera drift
     this._idleDriftT = 0;
 
@@ -120,6 +120,9 @@ export class HoleScene {
     // Consecutive bounce tracking — pin ball after 3 bounces on the same planet
     this._bouncePlanetIdx  = -1;
     this._bounceStreak     = 0;
+
+    // Orbital Capture system (disabled)
+    this._orbitalCapture = { isActive: false, isOrbiting: false, planetIdx: -1, update() {}, reset() {}, dispose() {}, enterOrbit() {}, exitOrbit() {} };
 
     // Last-valid-position save — stores planet attachment so OOB reset
     // respawns on the planet's *current* position, not old world coords
@@ -141,6 +144,8 @@ export class HoleScene {
       if (this._state === 'CINEMATIC') {
         this._state = 'IDLE';
         gameState.aimState = 'IDLE';
+        this.inputSystem.showBar();
+        this.trajectoryPreview.show();
       }
       eventBus.emit(Events.CINEMATIC_COMPLETE);
     });
@@ -160,6 +165,10 @@ export class HoleScene {
     this.starField  = new StarField(this.scene);
     this.nebulaField = new NebulaField(this.scene);
 
+    // Shader-based space backdrop — infinite resolution, full 360° coverage, no seams
+    this.spaceBg = new ProceduralSpaceBg(this.scene);
+    this.spaceBg.load();
+
     // Direction arrow — always shows facing direction
     this._aimArrow = new ArrowHelper(
       new Vector3(0, 0, -1), // direction (updated each frame)
@@ -176,37 +185,132 @@ export class HoleScene {
   }
 
   _setupLighting() {
-    // Dark blue ambient for space feel
-    this.ambientLight = new AmbientLight(0x111122, 0.4);
+    this.ambientLight = new AmbientLight(0xfff5f5, 2.25);
     this.scene.add(this.ambientLight);
 
-    // Main directional light
-    this.dirLight = new DirectionalLight(0xffffff, 1.2);
-    this.dirLight.position.set(50, 80, 60);
+    this.dirLight = new DirectionalLight(0xffad14, 10);
+    this.dirLight.position.set(-33, 64, 61);
     this.scene.add(this.dirLight);
 
-    // Subtle hemisphere light for sky/ground differentiation
-    this.hemiLight = new HemisphereLight(0x334466, 0x111111, 0.3);
+    this.hemiLight = new HemisphereLight(0xffffff, 0xffffff, 0.4);
     this.scene.add(this.hemiLight);
+
+    this._buildSunStar();
+  }
+
+  _makeSpriteTex(size, drawFn) {
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    drawFn(c.getContext('2d'), size);
+    const tex = new CanvasTexture(c);
+    tex.needsUpdate = true;
+    return tex;
+  }
+
+  _buildSunStar() {
+    // Sun is placed very far along the directional light's direction
+    const SUN_DIST = 8000;
+    const sunDir = this.dirLight.position.clone().normalize();
+    const sunPos = sunDir.clone().multiplyScalar(SUN_DIST);
+
+    // ── 1. Hard disc — the actual star surface ──────────────────
+    const texDisc = this._makeSpriteTex(256, (ctx, s) => {
+      const cx = s / 2;
+      const g = ctx.createRadialGradient(cx, cx, 0, cx, cx, cx);
+      g.addColorStop(0,    'rgba(255,255,230,1)');
+      g.addColorStop(0.18, 'rgba(255,240,180,1)');
+      g.addColorStop(0.38, 'rgba(255,200,80,0.95)');
+      g.addColorStop(0.52, 'rgba(248,176,42,0.5)');
+      g.addColorStop(1,    'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, s, s);
+    });
+
+    // ── 2. Wide soft corona ─────────────────────────────────────
+    const texCorona = this._makeSpriteTex(512, (ctx, s) => {
+      const cx = s / 2;
+      const g = ctx.createRadialGradient(cx, cx, 0, cx, cx, cx);
+      g.addColorStop(0,    'rgba(255,230,120,0.55)');
+      g.addColorStop(0.12, 'rgba(255,190,60,0.35)');
+      g.addColorStop(0.3,  'rgba(255,140,20,0.15)');
+      g.addColorStop(0.6,  'rgba(255,100,0,0.04)');
+      g.addColorStop(1,    'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, s, s);
+    });
+
+    // ── 3. Starburst — 6 diffraction spikes ────────────────────
+    const texSpikes = this._makeSpriteTex(512, (ctx, s) => {
+      ctx.clearRect(0, 0, s, s);
+      const cx = s / 2;
+      ctx.save();
+      ctx.translate(cx, cx);
+      const spikes = 6;
+      for (let i = 0; i < spikes; i++) {
+        ctx.rotate(Math.PI / spikes);
+        const g = ctx.createLinearGradient(-cx, 0, cx, 0);
+        g.addColorStop(0,    'rgba(255,230,150,0)');
+        g.addColorStop(0.42, 'rgba(255,240,180,0.6)');
+        g.addColorStop(0.5,  'rgba(255,255,255,1)');
+        g.addColorStop(0.58, 'rgba(255,240,180,0.6)');
+        g.addColorStop(1,    'rgba(255,230,150,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(-cx, -1.2, s, 2.4);
+      }
+      ctx.restore();
+    });
+
+    const makeSprite = (tex, worldSize, color = 0xffffff) => {
+      const mat = new SpriteMaterial({
+        map: tex,
+        color,
+        blending: AdditiveBlending,
+        depthWrite: false,
+        transparent: true,
+      });
+      const sp = new Sprite(mat);
+      sp.scale.setScalar(worldSize);
+      sp.position.copy(sunPos);
+      this.scene.add(sp);
+      return sp;
+    };
+
+    this._sunDisc   = makeSprite(texDisc,   180, 0xfff8e0);
+    this._sunCorona = makeSprite(texCorona, 900, 0xf8b02a);
+    this._sunSpikes = makeSprite(texSpikes, 700, 0xffe090);
+
+  }
+
+  // Move sun sprites when DevPanel changes sun position
+  _moveSunTo(x, y, z) {
+    const SUN_DIST = 8000;
+    const dir = new Vector3(x, y, z).normalize();
+    const pos = dir.multiplyScalar(SUN_DIST);
+    for (const s of [this._sunDisc, this._sunCorona, this._sunSpikes]) {
+      if (s) s.position.copy(pos);
+    }
   }
 
   _setupEventListeners() {
     eventBus.on(Events.AIM_START, () => {
-      if (this._state !== 'IDLE') return;
+      if (this._state !== 'IDLE' && this._state !== 'AIMING') return;
       this._state = 'AIMING';
       this._aimDrag = null;
       this._aimStartDir.copy(this._facingDir);
-      this.trajectoryPreview.show(); // show immediately — direction re-aimable anytime
+      this.trajectoryPreview.show();
+      this.inputSystem.showBar();
     });
 
     // Fired at the start of each new direction drag — reset base so re-drags feel natural
     eventBus.on(Events.AIM_DIR_LOCKED, () => {
-      if (this._state !== 'AIMING') return;
+      if (this._state !== 'IDLE' && this._state !== 'AIMING') return;
+      if (this._state === 'IDLE') this._state = 'AIMING';
       this._aimStartDir.copy(this._facingDir);
     });
 
     eventBus.on(Events.AIM_UPDATE, (data) => {
-      if (this._state !== 'AIMING') return;
+      if (this._state !== 'IDLE' && this._state !== 'AIMING') return;
+      if (this._state === 'IDLE') this._state = 'AIMING';
       this._aimDrag = data;
       if (!this.ball || !this._holeData) return;
 
@@ -242,14 +346,13 @@ export class HoleScene {
       if (this.ball) this.ball.setPower(0);
       if (this._state === 'AIMING') {
         this._state = 'IDLE';
-        this.trajectoryPreview.hide();
         this._aimDrag = null;
       }
     });
 
     eventBus.on(Events.SHOT_TAKEN, (data) => {
       if (this.ball) this.ball.setPower(0);
-      if (this._state !== 'AIMING' && this._state !== 'IDLE') return;
+      if (this._state === 'BALL_IN_FLIGHT' || this._state === 'HOLE_COMPLETE') return;
       this._fireShot(data);
     });
 
@@ -400,6 +503,9 @@ export class HoleScene {
         this.screenShake.trigger(0.5, 0.4);
       }
     });
+
+    // Orbital Capture: toggle orbit on/off (disabled)
+    // eventBus.on(Events.ORBIT_TOGGLE, () => { ... });
   }
 
   /**
@@ -420,27 +526,13 @@ export class HoleScene {
     this._holeData = generateHole(holeIndex, holeSeed);
     const { planets, tee, cup, palette } = this._holeData;
 
-    // Update scene background and lighting for palette — tween to new background color
-    const newBg = new Color(palette.bg);
-    const target = { r: newBg.r, g: newBg.g, b: newBg.b };
-    new Tween(this._bgColor)
-      .to(target, 1200)
-      .easing(Easing.Quadratic.Out)
-      .onUpdate(({ r, g, b }) => {
-        this.scene.background = new Color(r, g, b);
-      })
-      .onComplete(({ r, g, b }) => {
-        this.scene.background = new Color(r, g, b);
-      })
-      .start();
-    // Immediately set as well (handles first load)
-    this.scene.background = new Color(palette.bg);
-    this._bgColor.r = newBg.r;
-    this._bgColor.g = newBg.g;
-    this._bgColor.b = newBg.b;
+    // Background is the void.png equirectangular sphere — no color clear needed
+    this.scene.background = null;
 
-    this.ambientLight.color.set(palette.ambient);
-    this.dirLight.color.set(palette.dirLight);
+    if (!this._devLightLock) {
+      this.ambientLight.color.set(palette.ambient);
+      // dirLight color is fixed to the sun colour — palette no longer overrides it
+    }
     if (this.starField)   this.starField.setColor(palette.stars);
     if (this.nebulaField) this.nebulaField.setColors(palette);
 
@@ -465,7 +557,7 @@ export class HoleScene {
     // }
 
     // Place ball at tee
-    this.ball = new GolfBall(palette.ball);
+    this.ball = new GolfBall(palette.ball, null, gameState.ballStyle);
     this.ball.setPosition(tee.clone().add(new Vector3(0, BALL.RADIUS + 0.2, 0)));
     this.ball.addToScene(this.scene);
 
@@ -548,11 +640,14 @@ export class HoleScene {
     this._lastValidPlanetIdx = -1;
     this._bouncePlanetIdx    = -1;
     this._bounceStreak       = 0;
+    this._orbitalCapture.reset();
+    this.inputSystem.setOrbitToggleAllowed(false);
 
     // Remove planets
     for (const p of this.planetObjects) {
       p.removeFromScene(this.scene);
     }
+    this.trajectoryPreview.clearHighlights(this.planetObjects);
     this.planetObjects = [];
     this.planets = [];
 
@@ -650,9 +745,18 @@ export class HoleScene {
     this._lastValidPos.copy(this.ball.position);
     this._lastValidPlanetIdx = this._attachedPlanetIdx;
     this._lastValidNormal.copy(this._attachedNormal);
-    this._attachedPlanetIdx = -1; // detach from planet on shot
-    this._bouncePlanetIdx   = -1; // reset bounce streak on new shot
-    this._bounceStreak      = 0;
+
+    // In orbit mode: keep orbit active, just detach from surface
+    // Normal mode: reset orbit state entirely
+    if (this._orbitalCapture.isOrbiting) {
+      this._attachedPlanetIdx = -1;
+    } else {
+      this._attachedPlanetIdx = -1;
+      this._bouncePlanetIdx   = -1;
+      this._bounceStreak      = 0;
+      this._orbitalCapture.reset();
+      this.inputSystem.setOrbitToggleAllowed(false);
+    }
     this.ball.setVelocity(velocity);
     this._state = 'BALL_IN_FLIGHT';
     gameState.ballInFlight = true;
@@ -662,8 +766,8 @@ export class HoleScene {
     // Start hole timer on first shot
     if (!this._holeStartTime) this._holeStartTime = Date.now();
 
-    this.trajectoryPreview.hide();
     this.inputSystem.setAiming(false);
+    this.inputSystem.hideBar();
 
     // Activate ball trail
     if (this.ball?.trail) {
@@ -714,13 +818,6 @@ export class HoleScene {
     // Remote balls — always simulate regardless of local state
     if (this._state !== 'HOLE_COMPLETE') this._updateRemoteBalls(dt);
 
-    // Trajectory: update every frame while aiming (direction or power phase)
-    if (this._state === 'AIMING' && this.ball && this._holeData) {
-      const power = Math.max(0.15, this.inputSystem._power ?? 0.15);
-      const vel   = this._facingDir.clone().multiplyScalar(power * AIM.MAX_POWER);
-      this.trajectoryPreview.update(this.ball.position.clone(), vel, this._holeData.planets);
-    }
-
     // Planet occlusion: fade planets between camera and ball
     this._updatePlanetOcclusion();
 
@@ -751,6 +848,11 @@ export class HoleScene {
       }
     }
 
+    // ── Orbital Capture update (visuals only, ball follows normal physics) ──
+    if (this._orbitalCapture.isActive) {
+      this._orbitalCapture.update(dt);
+    }
+
     // Collectibles
     if (this._state === 'BALL_IN_FLIGHT') {
       this.collectibles.update(dt, this.ball);
@@ -758,8 +860,73 @@ export class HoleScene {
       this.collectibles.update(dt, null); // still animate gems, skip collect check
     }
 
+    // Trajectory: computed after planet positions + collectibles are updated
+    // so the simulation uses the same state as the actual flight physics
+    if (this.ball && this._holeData && this._state !== 'HOLE_COMPLETE') {
+      const serverZeroG = this.serverEvents.gravityScale === 0.0;
+      const collectibleGravity = this.collectibles.gravityScale ?? 1;
+      const orbitBoost = this._orbitalCapture.isOrbiting ? ORBIT.GRAVITY_BOOST : 1;
+      const combinedGravity = this.serverEvents.gravityScale * collectibleGravity * orbitBoost;
+
+      const trajPlanets = this._orbitalCapture.isOrbiting
+        ? [this.planets[this._orbitalCapture.planetIdx]]
+        : this.planets;
+      const trajOrbitPlanet = this._orbitalCapture.isOrbiting ? trajPlanets[0] : null;
+
+      const blackHole = this.cup ? {
+        position: this.cup.position,
+        pullRadius: HOLE.BLACK_HOLE_PULL_RADIUS,
+        gravity: HOLE.BLACK_HOLE_GRAVITY,
+        cupRadius: HOLE.CUP_RADIUS,
+      } : null;
+
+      const wormholePositions = this.wormholes.length > 0
+        ? this.wormholes.map(w => w.position)
+        : null;
+
+      const trajOptions = {
+        blackHole,
+        zeroGravity: serverZeroG,
+        tee: this._holeData.tee,
+        cup: this._holeData.cup,
+        wormholes: wormholePositions,
+      };
+
+      if (this._state === 'BALL_IN_FLIGHT') {
+        const flightVel = this.ball.velocity.clone();
+        if (flightVel.length() > 1.0) {
+          trajOptions.graceFrames = this._launchGraceFrames;
+          this.trajectoryPreview.update(
+            this.ball.position.clone(), flightVel, trajPlanets, this.planets,
+            combinedGravity, trajOrbitPlanet, trajOptions,
+            this.camera, this.planetObjects,
+          );
+          this.trajectoryPreview.show();
+        }
+      } else {
+        const power = this.inputSystem._power ?? 0;
+        if (power > 0.01) {
+          const vel = this._facingDir.clone().multiplyScalar(power * AIM.MAX_POWER);
+          trajOptions.graceFrames = PHYSICS.LAUNCH_GRACE_FRAMES;
+          trajOptions.hitFreezeFrames = 4; // Match actual shot's hit-freeze
+          const outcome = this.trajectoryPreview.update(
+            this.ball.position.clone(), vel, trajPlanets, this.planets,
+            combinedGravity, trajOrbitPlanet, trajOptions,
+            this.camera, this.planetObjects,
+          );
+          this.trajectoryPreview.show();
+          this.inputSystem.setTrajectoryStatus(outcome);
+        } else {
+          this.trajectoryPreview.hide();
+          this.trajectoryPreview.clearHighlights(this.planetObjects);
+          this.inputSystem.setTrajectoryStatus(null);
+        }
+      }
+    }
+
     // Update background ambiance
-    if (this.starField)   this.starField.update(dt);
+    if (this.spaceBg)    this.spaceBg.update(dt);
+    if (this.starField)  this.starField.update(dt);
     if (this.cometSystem) this.cometSystem.update(dt);
 
     // Update planet gravity fields
@@ -813,13 +980,19 @@ export class HoleScene {
         gravityScale = 1.0 - (this._launchGraceFrames / PHYSICS.LAUNCH_GRACE_FRAMES);
       }
 
-      // Combine gravity scale from server events + collectibles
+      // Combine gravity scale from server events + collectibles + orbit boost
+      const orbitBoost = this._orbitalCapture.isOrbiting ? ORBIT.GRAVITY_BOOST : 1;
       const combinedGravityScale = gravityScale
         * this.serverEvents.gravityScale
-        * this.collectibles.gravityScale;
+        * this.collectibles.gravityScale
+        * orbitBoost;
 
-      // Integrate physics
-      const result = stepBall(this.ball, this._holeData.planets, dt, combinedGravityScale);
+      // In orbit mode, only the orbit planet's gravity applies, with boundary
+      const physicsPlanets = this._orbitalCapture.isOrbiting
+        ? [this.planets[this._orbitalCapture.planetIdx]]
+        : this._holeData.planets;
+      const orbitPlanet = this._orbitalCapture.isOrbiting ? physicsPlanets[0] : null;
+      const result = stepBall(this.ball, physicsPlanets, dt, combinedGravityScale, orbitPlanet);
 
       // ZERO_GRAVITY sticky: ball touches a planet → kill velocity, stay on surface
       if (this.serverEvents.gravityScale === 0.0) {
@@ -876,47 +1049,53 @@ export class HoleScene {
           if (planetIdx >= 0) {
             this.planetObjects[planetIdx]?.addCrater(this.ball.position.clone(), this.ball.velocity.length());
 
-            // Track consecutive bounces on the same planet
-            if (planetIdx === this._bouncePlanetIdx) {
-              this._bounceStreak++;
-            } else {
-              this._bouncePlanetIdx = planetIdx;
-              this._bounceStreak    = 1;
-            }
-
-            // 3rd bounce on the same planet → pin the ball
-            if (this._bounceStreak >= 3) {
-              this._bounceStreak    = 0;
-              this._bouncePlanetIdx = -1;
-              this.ball.velocity.set(0, 0, 0);
-              // Snap cleanly to surface
-              const planet = this.planets[planetIdx];
-              const normal = this.ball.position.clone().sub(planet.position).normalize();
-              this.ball.position.copy(planet.position).addScaledVector(normal, planet.radius + BALL.RADIUS);
-              this.ball.syncMesh();
-              // Attach so ball travels with the planet
-              this._attachedPlanetIdx = planetIdx;
-              this._attachedNormal.copy(normal);
-              this._lastValidPlanetIdx = planetIdx;
-              this._lastValidNormal.copy(normal);
-              // Transition to IDLE
-              if (this.ball?.trail) this.ball.trail.setActive(false);
-              gameState.ballInFlight = false;
-              gameState.aimState = 'IDLE';
-              this._state = 'IDLE';
-              if (this.cup) {
-                const toCup = new Vector3().subVectors(this.cup.position, this.ball.position);
-                if (toCup.lengthSq() > 0.01) this._facingDir.copy(toCup.normalize());
+            if (!this._orbitalCapture.isOrbiting) {
+              // Track consecutive bounces on the same planet
+              if (planetIdx === this._bouncePlanetIdx) {
+                this._bounceStreak++;
+              } else {
+                this._bouncePlanetIdx = planetIdx;
+                this._bounceStreak    = 1;
               }
-              eventBus.emit(Events.BALL_STOPPED, {
-                pos: this.ball.position.clone(),
-                holeIndex: gameState.currentHole,
-                planetIdx: this._attachedPlanetIdx,
-                normal: this._attachedNormal.clone(),
-              });
-              return; // skip remaining flight logic this frame
+
+              // 3rd bounce on the same planet → pin the ball + enable Orbital Capture
+              if (this._bounceStreak >= 3) {
+                this._bouncePlanetIdx = planetIdx;
+                this._bounceStreak    = 3;
+                this.ball.velocity.set(0, 0, 0);
+                // Snap cleanly to surface
+                const planet = this.planets[planetIdx];
+                const normal = this.ball.position.clone().sub(planet.position).normalize();
+                this.ball.position.copy(planet.position).addScaledVector(normal, planet.radius + BALL.RADIUS);
+                this.ball.syncMesh();
+                // Attach so ball travels with the planet
+                this._attachedPlanetIdx = planetIdx;
+                this._attachedNormal.copy(normal);
+                this._lastValidPlanetIdx = planetIdx;
+                this._lastValidNormal.copy(normal);
+                // Transition to IDLE — orbital capture is now available
+                if (this.ball?.trail) this.ball.trail.setActive(false);
+                gameState.ballInFlight = false;
+                gameState.aimState = 'IDLE';
+                this._state = 'IDLE';
+                this.inputSystem.setOrbitToggleAllowed(true);
+                if (this.cup) {
+                  const toCup = new Vector3().subVectors(this.cup.position, this.ball.position);
+                  if (toCup.lengthSq() > 0.01) this._facingDir.copy(toCup.normalize());
+                }
+                // Always show power bar and trajectory when ball is at rest
+                this.inputSystem.showBar();
+                this.trajectoryPreview.show();
+                eventBus.emit(Events.BALL_STOPPED, {
+                  pos: this.ball.position.clone(),
+                  holeIndex: gameState.currentHole,
+                  planetIdx: this._attachedPlanetIdx,
+                  normal: this._attachedNormal.clone(),
+                });
+                return; // skip remaining flight logic this frame
+              }
             }
-          } else {
+          } else if (!this._orbitalCapture.isOrbiting) {
             // Bounced off something that isn't a tracked planet — reset streak
             this._bouncePlanetIdx = -1;
             this._bounceStreak    = 0;
@@ -1104,6 +1283,27 @@ export class HoleScene {
             .normalize();
         }
 
+        // In orbit mode the ball is always bounded to the orbit planet — don't
+        // let a nearby planet steal the attachment and break the orbit button.
+        if (this._orbitalCapture.isOrbiting && this._orbitalCapture.planetIdx >= 0) {
+          this._attachedPlanetIdx = this._orbitalCapture.planetIdx;
+          this._attachedNormal
+            .subVectors(this.ball.position, this.planets[this._attachedPlanetIdx].position)
+            .normalize();
+        }
+
+        // Orbit toggle available whenever ball is on a planet surface
+        const orbitAllowed = this._orbitalCapture.isOrbiting
+          ? this._attachedPlanetIdx === this._orbitalCapture.planetIdx
+          : this._attachedPlanetIdx >= 0;
+        this.inputSystem.setOrbitToggleAllowed(orbitAllowed);
+        if (this._orbitalCapture.isOrbiting && orbitAllowed) {
+          this.inputSystem.setOrbitActive(true);
+        } else if (!orbitAllowed && !this._orbitalCapture.isOrbiting) {
+          this._bouncePlanetIdx = -1;
+          this._bounceStreak = 0;
+        }
+
         // Broadcast stop with planet attachment so peers can follow sway
         eventBus.emit(Events.BALL_STOPPED, {
           pos: this.ball.position.clone(),
@@ -1122,11 +1322,13 @@ export class HoleScene {
         // If player already entered power phase while ball was settling, jump to AIMING
         if (this.inputSystem.isInPowerPhase()) {
           this._state = 'AIMING';
-          this.trajectoryPreview.show(); // frame loop drives updates from here
         } else {
           this._state = 'IDLE';
           this.inputSystem.setAiming(false);
         }
+        // Always show power bar and trajectory when ball is at rest
+        this.inputSystem.showBar();
+        this.trajectoryPreview.show();
       }
     }
 
@@ -1224,6 +1426,8 @@ export class HoleScene {
     gameState.ballInFlight = false;
     gameState.holeComplete = true;
     gameState.aimState = 'HOLE_COMPLETE';
+    this.inputSystem.hideBar();
+    this.trajectoryPreview.hide();
 
     // Nearest planet celebrates
     if (this.cup && this.planetObjects.length > 0) {
@@ -1345,7 +1549,9 @@ export class HoleScene {
       this._state = 'IDLE';
       gameState.ballInFlight = false;
       gameState.aimState = 'IDLE';
-      eventBus.emit(Events.BALL_RESET_TO_TEE); // reuse event for UI flash
+      this.inputSystem.showBar();
+      this.trajectoryPreview.show();
+      eventBus.emit(Events.BALL_RESET_TO_TEE);
       return;
     }
 
@@ -1357,12 +1563,13 @@ export class HoleScene {
     this._restoreLastValidAttachment();
     this._voidFrames = 0;
 
-    this._state = 'IDLE';
-    gameState.ballInFlight = false;
-    gameState.aimState = 'IDLE';
-    this.inputSystem.setAiming(false);
-
-    this._broadcastBallReset(resetPos);
+      this._state = 'IDLE';
+      gameState.ballInFlight = false;
+      gameState.aimState = 'IDLE';
+      this.inputSystem.setAiming(false);
+      this.inputSystem.showBar();
+      this.trajectoryPreview.show();
+      this._broadcastBallReset(resetPos);
   }
 
   // Compute the OOB spawn position — on the planet's current location if possible
@@ -1392,7 +1599,7 @@ export class HoleScene {
     if (!this._planetBasePos || this._planetBasePos.length === 0) return;
 
     const flip   = this.serverEvents.mapFlipProgress;
-    const frozen = this.serverEvents.staticActive;
+    const frozen = this.serverEvents.isStatic;
     // Use wall-clock seconds so all clients have identical planet positions
     // regardless of frame rate or when they joined.
     const t = Date.now() / 1000;
@@ -1413,10 +1620,9 @@ export class HoleScene {
         z += Math.sin(t * 0.42 + phase * 0.8) * 34;
       }
 
-      // Update physics data, visual mesh, and gravity field rings
+      // Update physics data and visual mesh
       this.planets[i].position.set(x, y, z);
       this.planetObjects[i].group.position.set(x, y, z);
-      this.planetObjects[i].gravityField.group.position.set(x, y, z);
     }
   }
 
@@ -1538,6 +1744,8 @@ export class HoleScene {
     if (this.ball.trail) this.ball.trail.setActive(false);
     this._attachedPlanetIdx  = -1;
     this._lastValidPlanetIdx = -1;
+    this._orbitalCapture.reset();
+    this.inputSystem.setOrbitToggleAllowed(false);
     const teePos = this._holeData.tee.clone().add(new Vector3(0, BALL.RADIUS + 0.2, 0));
     this.ball.setPosition(teePos);
     this.ball.setVelocity(new Vector3());
@@ -1546,6 +1754,8 @@ export class HoleScene {
     gameState.aimState = 'IDLE';
     this.inputSystem.enabled = true;
     this.inputSystem._reset();
+    this.inputSystem.showBar();
+    this.trajectoryPreview.show();
     this._broadcastBallReset(teePos);
   }
 
@@ -1679,6 +1889,7 @@ export class HoleScene {
 
   dispose() {
     this._clearCurrentHole();
+    this._orbitalCapture.dispose();
     this.trajectoryPreview.dispose();
     if (this._aimArrow) { this.scene.remove(this._aimArrow); this._aimArrow = null; }
     if (this.starField)   this.starField.dispose();

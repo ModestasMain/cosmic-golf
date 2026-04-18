@@ -45,6 +45,12 @@ export class InputSystem {
     this._lastDragVec  = new Vector2();
     this._lastDragDist = 0;
 
+    // Orbital capture toggle state
+    this._orbitToggleAllowed = false;
+    this._orbitActive = false;
+
+    this._trajectoryStatus = null;
+
     this._buildUI();
 
     this._onDown   = this._onDown.bind(this);
@@ -275,6 +281,68 @@ export class InputSystem {
 
     wrap.appendChild(this._label);
     wrap.appendChild(pyramidWrap);
+
+    // ── Orbit toggle button (planet icon below pyramid) ─────
+    const orbitBtn = document.createElement('div');
+    orbitBtn.style.cssText = [
+      'width:44px', 'height:44px',
+      'border-radius:50%',
+      'display:none',
+      'align-items:center', 'justify-content:center',
+      'cursor:pointer',
+      'pointer-events:auto',
+      'background:rgba(10,12,30,0.75)',
+      'border:1px solid rgba(100,160,255,0.35)',
+      'backdrop-filter:blur(4px)',
+      '-webkit-backdrop-filter:blur(4px)',
+      'transition:border-color 0.2s,box-shadow 0.2s,background 0.2s',
+      'touch-action:manipulation',
+      'user-select:none',
+      '-webkit-user-select:none',
+    ].join(';');
+    this._orbitBtn = orbitBtn;
+
+    // SVG planet/Saturn icon
+    const orbNS = 'http://www.w3.org/2000/svg';
+    const orbSvg = document.createElementNS(orbNS, 'svg');
+    orbSvg.setAttribute('width', '28');
+    orbSvg.setAttribute('height', '28');
+    orbSvg.setAttribute('viewBox', '0 0 28 28');
+    orbSvg.style.overflow = 'visible';
+
+    // Planet body (circle)
+    const planetCircle = document.createElementNS(orbNS, 'circle');
+    planetCircle.setAttribute('cx', '14');
+    planetCircle.setAttribute('cy', '14');
+    planetCircle.setAttribute('r', '6');
+    planetCircle.setAttribute('fill', 'rgba(100,180,255,0.85)');
+    planetCircle.setAttribute('stroke', 'rgba(160,220,255,0.6)');
+    planetCircle.setAttribute('stroke-width', '1');
+    orbSvg.appendChild(planetCircle);
+
+    // Saturn ring (ellipse)
+    const ring = document.createElementNS(orbNS, 'ellipse');
+    ring.setAttribute('cx', '14');
+    ring.setAttribute('cy', '14');
+    ring.setAttribute('rx', '12');
+    ring.setAttribute('ry', '4');
+    ring.setAttribute('fill', 'none');
+    ring.setAttribute('stroke', 'rgba(160,220,255,0.7)');
+    ring.setAttribute('stroke-width', '1.5');
+    ring.setAttribute('transform', 'rotate(-20 14 14)');
+    orbSvg.appendChild(ring);
+
+    orbitBtn.appendChild(orbSvg);
+    wrap.appendChild(orbitBtn);
+
+    orbitBtn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (this._orbitToggleAllowed) {
+        eventBus.emit(Events.ORBIT_TOGGLE);
+      }
+    });
+
     document.body.appendChild(wrap);
     this._wrap = wrap;
   }
@@ -282,6 +350,28 @@ export class InputSystem {
   _showLabel(text) {
     this._label.textContent = text;
     this._wrap.style.display = 'flex';
+  }
+
+  setTrajectoryStatus(outcome) {
+    this._trajectoryStatus = outcome;
+    if (!this._label) return;
+    const labels = {
+      cup:          'WILL HOLE',
+      wormhole:     'WORMHOLE',
+      settled:      'LANDS ON PLANET',
+      pinned:       'LANDS ON PLANET',
+      zero_g_stuck: 'LANDS ON PLANET',
+      oob:          'OUT OF BOUNDS',
+      limit:        'TAP PYRAMID TO SHOOT',
+    };
+    if (outcome && outcome !== 'limit') {
+      this._label.textContent = labels[outcome] ?? 'TAP PYRAMID TO SHOOT';
+      const isOob = outcome === 'oob';
+      this._label.style.color = isOob ? 'rgba(255,80,60,.95)' : outcome === 'cup' ? 'rgba(80,255,220,.95)' : 'rgba(160,210,255,.85)';
+    } else {
+      this._label.style.color = 'rgba(160,210,255,.85)';
+      // text will be set by _setBarPower
+    }
   }
 
   _setBarPower(p) {
@@ -344,8 +434,8 @@ export class InputSystem {
       this._pyPctLabel.setAttribute('fill', 'rgba(200,230,255,0)');
     }
 
-    // Update pyramid sub-label to reflect current state
-    if (this._label) {
+    // Update pyramid sub-label to reflect current state (trajectory status overrides when set)
+    if (this._label && !this._trajectoryStatus) {
       this._label.textContent = p > 0.02 ? 'TAP PYRAMID TO SHOOT' : 'DRAG PYRAMID FOR POWER';
     }
 
@@ -406,21 +496,11 @@ export class InputSystem {
     if (gameState.ballInFlight) return;
     e.preventDefault();
 
-    // Enter AIMING on first press anywhere
-    if (this._phase === 'IDLE') {
-      this._phase = 'AIMING';
-      this._setBarPower(0);
-      this._showLabel('DRAG PYRAMID FOR POWER');
-      eventBus.emit(Events.AIM_START);
-    }
-
-    if (this._phase !== 'AIMING') return;
-
     // Pyramid touch → power drag (or tap-to-shoot if released with minimal movement)
     if (this._isOverBar(e.clientX, e.clientY)) {
       this._pwrPtr     = e.pointerId;
-      this._pwrDownY   = e.clientY;  // raw Y — for tap detection
-      this._pwrStartY  = e.clientY + this._power * AIM.MAX_DRAG_DISTANCE; // offset for continuity
+      this._pwrDownY   = e.clientY;
+      this._pwrStartY  = e.clientY + this._power * AIM.MAX_DRAG_DISTANCE;
       this._pwrMaxMove = 0;
       return;
     }
@@ -435,7 +515,7 @@ export class InputSystem {
   }
 
   _onMove(e) {
-    if (this._phase !== 'AIMING') return;
+    if (gameState.ballInFlight) return;
     e.preventDefault();
 
     // Power drag
@@ -516,7 +596,8 @@ export class InputSystem {
 
   // ── Per-frame ─────────────────────────────────────────────
 
-  update(_dt) {}
+  update(dt) {
+  }
 
   // ── Helpers ───────────────────────────────────────────────
 
@@ -524,8 +605,23 @@ export class InputSystem {
     const drag  = this._lastDragVec.clone();
     const dist  = this._lastDragDist;
     const power = this._power * AIM.MAX_POWER;
-    this._reset();
+    this._resetForShot();
     eventBus.emit(Events.SHOT_TAKEN, { dragScreenVec: drag, dragDist: dist, power });
+  }
+
+  _resetForShot() {
+    this._phase      = 'IDLE';
+    this._power      = 0;
+    this._dirPtr     = null;
+    this._pwrPtr     = null;
+    this._dirMoved   = false;
+    this._pwrMaxMove = 0;
+    this._lastDragVec.set(0, 0);
+    this._lastDragDist = 0;
+    this._setBarPower(0);
+    this._orbitToggleAllowed = false;
+    this._orbitActive = false;
+    this._updateOrbitBtn();
   }
 
   _projectBall() {
@@ -545,9 +641,11 @@ export class InputSystem {
     this._dirMoved   = false;
     this._pwrMaxMove = 0;
     this._lastDragVec.set(0, 0);
-    this._lastDragDist       = 0;
-    this._wrap.style.display = 'none';
+    this._lastDragDist = 0;
     this._setBarPower(0);
+    this._orbitToggleAllowed = false;
+    this._orbitActive = false;
+    this._updateOrbitBtn();
   }
 
   // ── Public API ────────────────────────────────────────────
@@ -555,7 +653,31 @@ export class InputSystem {
   setBallPosition(pos) { this.ballPosition = pos; }
   setPlanets(planets)  { this.planets = planets; }
   setAiming(v)         {}
-  isInPowerPhase()     { return this._phase === 'AIMING'; }
+  isInPowerPhase()     { return this._power > 0.02; }
+  setOrbitToggleAllowed(v) {
+    this._orbitToggleAllowed = v;
+    if (!v) this._orbitActive = false;
+    this._updateOrbitBtn();
+  }
+  setOrbitActive(v) {
+    this._orbitActive = v;
+    this._updateOrbitBtn();
+  }
+  get orbitActive() { return this._orbitActive; }
+
+  _updateOrbitBtn() {
+    // Orbit feature disabled — always hide the button
+    if (this._orbitBtn) this._orbitBtn.style.display = 'none';
+  }
+
+  showBar() {
+    this._showLabel('DRAG PYRAMID FOR POWER');
+    this._setBarPower(this._power);
+  }
+
+  hideBar() {
+    this._wrap.style.display = 'none';
+  }
 
   dispose() {
     const c = this.renderer.domElement;

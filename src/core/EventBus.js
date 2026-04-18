@@ -114,4 +114,11 @@ export const Events = {
 
   // Cinematic
   CINEMATIC_COMPLETE: 'cinematic:complete',
+
+  // Ball style
+  BALL_STYLE_CHANGED: 'ball:style_changed', // { styleId: string }
+
+  // Orbital Capture
+  ORBIT_ENTER:         'orbit:enter',
+  ORBIT_TOGGLE:        'orbit:toggle',
 };

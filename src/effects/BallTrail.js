@@ -1,31 +1,52 @@
 // ============================================================
-// BallTrail.js — meteor fire trail
+// BallTrail.js — realistic comet trail
 //
-// Flaming comet tail: white-hot core fading through orange to red.
-// Per-player color tints the fire so multiplayer trails are distinct.
-// Tuned for up to 24 simultaneous instances.
-//
-// API:
-//   new BallTrail(scene, color)   — color: hex number (tints the fire)
-//   .setColor(hex)                — update player color live
-//   .setActive(bool)              — enable/disable
-//   .update(ballPos, dt)          — call every frame
-//   .dispose()                    — remove from scene
+// Four additive layers:
+//   1. Core spine    — tight bright thread along the path
+//   2. Nebula cloud  — wide soft gas plume, scatter ⊥ to velocity
+//   3. Spark scatter — bright individual embers drifting outward
+//   4. Glow head     — large volumetric bloom at ball position
 // ============================================================
 
 import {
   BufferGeometry, Float32BufferAttribute, PointsMaterial,
-  Points, AdditiveBlending, Color,
+  Points, AdditiveBlending, Color, Vector3, CanvasTexture,
 } from 'three';
+import { BALL } from '../core/Constants.js';
+
+const BALL_RADIUS = BALL.RADIUS;
 
 // ── Config ────────────────────────────────────────────────
-const HISTORY     = 45;   // frames of history — shorter = tighter tail
-const PER_POINT   = 5;    // ember particles per history step
-const TOTAL       = HISTORY * PER_POINT;
-const MAX_SCATTER = 1.6;  // max world-unit scatter at head
+const HISTORY       = 80;   // trail length in frames
+const NEBULA_COUNT  = 480;  // dense soft cloud — ~6 per history step for smooth mist
+const SPARK_COUNT   = 180;  // individual bright embers
+const GLOW_COUNT    = 20;   // tight head bloom
 
-// ── Layer builder ─────────────────────────────────────────
-function buildLayer(scene, count, size, renderOrder) {
+const CORE_SCATTER  = 0.4;  // tight spine width
+const NEBULA_SCATTER= 3.0;  // gas cloud half-width at widest point
+const SPARK_SCATTER = 2.8;  // spark drift radius
+
+// ── Soft circular sprite ──────────────────────────────────
+function makeSprite(innerStop = 0.0, outerStop = 1.0) {
+  const size = 64;
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const ctx = c.getContext('2d');
+  const half = size / 2;
+  const grad = ctx.createRadialGradient(half, half, 0, half, half, half);
+  grad.addColorStop(innerStop, 'rgba(255,255,255,1)');
+  grad.addColorStop(outerStop, 'rgba(255,255,255,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+  return new CanvasTexture(c);
+}
+
+const _spriteCore   = makeSprite(0.0, 0.45);
+const _spriteNebula = makeSprite(0.0, 1.0);
+const _spriteSpark  = makeSprite(0.0, 0.3);
+
+// ── Helpers ───────────────────────────────────────────────
+function buildLayer(scene, count, size, renderOrder, sprite) {
   const geo = new BufferGeometry();
   geo.setAttribute('position', new Float32BufferAttribute(new Float32Array(count * 3), 3));
   geo.setAttribute('color',    new Float32BufferAttribute(new Float32Array(count * 3), 3));
@@ -33,6 +54,8 @@ function buildLayer(scene, count, size, renderOrder) {
 
   const mat = new PointsMaterial({
     size,
+    map:             sprite,
+    alphaTest:       0.001,
     vertexColors:    true,
     transparent:     true,
     opacity:         1.0,
@@ -47,66 +70,66 @@ function buildLayer(scene, count, size, renderOrder) {
   pts.renderOrder   = renderOrder;
   scene.add(pts);
 
-  // Float32BufferAttribute copies the array — use the internal one for writes
   return {
-    pts,
-    geo,
+    pts, geo,
     pos: geo.attributes.position.array,
     col: geo.attributes.color.array,
   };
 }
 
-// Deterministic hash for turbulence — no allocs
 function hash(i, axis, t) {
   const v = Math.sin(i * 127.1 + axis * 311.7 + t * 1.8) * 43758.5453;
   return (v - Math.floor(v) - 0.5) * 2; // −1..+1
 }
 
-// Fire color driven by player color:
-// white-hot tip → player color through middle → dark tail
-// Each player gets a clearly distinct comet (blue=ice comet, red=fire, green=plasma, etc.)
+// White-hot head → player color middle → dark tail
 function fireColor(frac, pr, pg, pb) {
-  const fade      = Math.pow(frac, 0.65);
-  const whiteness = Math.pow(frac, 2.5) * 0.95; // flash of white at the very tip
-
+  const fade      = Math.pow(frac, 0.6);
+  const whiteness = Math.pow(frac, 2.2) * 1.0;
   return [
     Math.min(1, pr * fade + whiteness),
-    Math.min(1, pg * fade + whiteness * 0.92),
-    Math.min(1, pb * fade + whiteness * 0.85),
+    Math.min(1, pg * fade + whiteness * 0.90),
+    Math.min(1, pb * fade + whiteness * 0.80),
   ];
+}
+
+// Build two axes perpendicular to a direction vector
+const _up    = new Vector3(0, 1, 0);
+const _right = new Vector3(1, 0, 0);
+const _perp1 = new Vector3();
+const _perp2 = new Vector3();
+function buildPerp(dir) {
+  const ref = Math.abs(dir.dot(_up)) < 0.9 ? _up : _right;
+  _perp1.crossVectors(dir, ref).normalize();
+  _perp2.crossVectors(dir, _perp1).normalize();
 }
 
 // ──────────────────────────────────────────────────────────
 
 export class BallTrail {
-  /**
-   * @param {THREE.Scene} scene
-   * @param {number} color  Player color hex — tints the fire (e.g. 0xff4400)
-   */
   constructor(scene, color = 0xff6600) {
     this._history     = [];
     this._active      = false;
     this._chargeLevel = 0;
     this._t           = 0;
     this._color       = new Color(color);
+    this._vel         = new Vector3();
 
-    // Bright spine — tight core of the meteor
-    this._core  = buildLayer(scene, HISTORY, 2.2, 91);
-
-    // Ember scatter — turbulent fire halo
-    this._cloud = buildLayer(scene, TOTAL,   1.3, 90);
+    // Layer order (back → front): nebula, sparks, core, glow head
+    this._nebula = buildLayer(scene, NEBULA_COUNT,  4.5, 88, _spriteNebula);
+    this._sparks = buildLayer(scene, SPARK_COUNT,   2.5, 90, _spriteSpark);
+    this._core   = buildLayer(scene, HISTORY,        4.5, 92, _spriteCore);
+    this._glow   = buildLayer(scene, GLOW_COUNT,     8.0, 89, _spriteNebula);
   }
 
-  setColor(color) {
-    this._color.set(color);
-  }
+  setColor(color) { this._color.set(color); }
 
   setActive(active) {
     this._active = active;
     if (!active) {
       this._history = [];
-      this._core.geo.setDrawRange(0, 0);
-      this._cloud.geo.setDrawRange(0, 0);
+      for (const l of [this._core, this._nebula, this._sparks, this._glow])
+        l.geo.setDrawRange(0, 0);
     }
   }
 
@@ -121,8 +144,8 @@ export class BallTrail {
       if (this._chargeLevel > 0.05) {
         this._drawChargeAura(ballPos, this._t, this._color.r, this._color.g, this._color.b);
       } else {
-        this._core.geo.setDrawRange(0, 0);
-        this._cloud.geo.setDrawRange(0, 0);
+        for (const l of [this._core, this._nebula, this._sparks, this._glow])
+          l.geo.setDrawRange(0, 0);
       }
       return;
     }
@@ -130,113 +153,136 @@ export class BallTrail {
     this._history.unshift({ x: ballPos.x, y: ballPos.y, z: ballPos.z });
     if (this._history.length > HISTORY) this._history.pop();
     const n = this._history.length;
-    if (n < 2) return;
+    if (n < 2) { this._glow.geo.setDrawRange(0, 0); return; }
 
     const t  = this._t;
     const pr = this._color.r;
     const pg = this._color.g;
     const pb = this._color.b;
 
+    // Velocity direction from last two positions → perpendicular axes for spread
+    const h0 = this._history[0], h1 = this._history[1];
+    this._vel.set(h0.x - h1.x, h0.y - h1.y, h0.z - h1.z);
+    const speed = this._vel.length();
+    if (speed > 0.001) this._vel.divideScalar(speed);
+    buildPerp(this._vel);
+
     // ── CORE SPINE ──────────────────────────────────────────
     for (let i = 0; i < n; i++) {
       const p    = this._history[i];
       const frac = 1 - i / (n - 1);
+      const sc   = CORE_SCATTER * frac;
 
-      this._core.pos[i * 3]     = p.x;
-      this._core.pos[i * 3 + 1] = p.y;
-      this._core.pos[i * 3 + 2] = p.z;
+      this._core.pos[i * 3]     = p.x + hash(i, 0, t) * sc;
+      this._core.pos[i * 3 + 1] = p.y + hash(i, 1, t) * sc;
+      this._core.pos[i * 3 + 2] = p.z + hash(i, 2, t) * sc;
 
       const [r, g, b] = fireColor(frac, pr, pg, pb);
-      this._core.col[i * 3]     = r;
-      this._core.col[i * 3 + 1] = g;
-      this._core.col[i * 3 + 2] = b;
+      const bright = frac * frac; // extra brightness falloff toward tail
+      this._core.col[i * 3]     = r * bright;
+      this._core.col[i * 3 + 1] = g * bright;
+      this._core.col[i * 3 + 2] = b * bright;
     }
     this._core.geo.attributes.position.needsUpdate = true;
     this._core.geo.attributes.color.needsUpdate    = true;
     this._core.geo.setDrawRange(0, n);
 
-    // ── EMBER SCATTER ────────────────────────────────────────
-    let fi = 0;
-    for (let i = 0; i < n; i++) {
-      const p       = this._history[i];
-      const frac    = 1 - i / (n - 1);
-      const scatter = MAX_SCATTER * Math.pow(frac, 0.5);
+    // ── NEBULA CLOUD ─────────────────────────────────────────
+    // Dense mist: start from history[1] so ball stays visible.
+    // Narrow near head, peaks in width at ~30% of tail, tapers at end.
+    const nebulaStart = 1; // skip index 0 (ball position)
+    const nebulaSpan  = n - nebulaStart;
+    for (let i = 0; i < NEBULA_COUNT; i++) {
+      const hi   = nebulaStart + Math.floor((i / NEBULA_COUNT) * nebulaSpan);
+      const p    = this._history[Math.min(hi, n - 1)];
+      // t01: 0 at head, 1 at tail
+      const t01  = (hi - nebulaStart) / Math.max(nebulaSpan - 1, 1);
+      // Bell-ish envelope: zero at head, peak ~35% back, taper to tail
+      const envelope = Math.sin(t01 * Math.PI) * (0.4 + t01 * 0.6);
+      const spreadScale = NEBULA_SCATTER * envelope;
 
-      for (let f = 0; f < PER_POINT; f++) {
-        const idx = i * PER_POINT + f;
-        this._cloud.pos[fi * 3]     = p.x + hash(idx, 0, t) * scatter;
-        this._cloud.pos[fi * 3 + 1] = p.y + hash(idx, 1, t) * scatter;
-        this._cloud.pos[fi * 3 + 2] = p.z + hash(idx, 2, t) * scatter;
+      const a1 = hash(i, 3, t * 0.15) * spreadScale;
+      const a2 = hash(i, 4, t * 0.17) * spreadScale * 0.7;
+      const a3 = hash(i, 5, t * 0.08) * spreadScale * 0.2; // minor parallel drift
 
-        // Embers: brighter flicker, mostly orange/yellow
-        const flicker = 0.5 + 0.5 * Math.abs(Math.sin(t * 18 + idx * 3.1));
-        const ef      = Math.pow(frac, 1.4) * flicker;
-        const [r, g, b] = fireColor(frac * 0.85, pr, pg, pb);
-        this._cloud.col[fi * 3]     = r * ef * 0.8;
-        this._cloud.col[fi * 3 + 1] = g * ef * 0.8;
-        this._cloud.col[fi * 3 + 2] = b * ef * 0.8;
+      this._nebula.pos[i * 3]     = p.x + _perp1.x * a1 + _perp2.x * a2 + this._vel.x * a3;
+      this._nebula.pos[i * 3 + 1] = p.y + _perp1.y * a1 + _perp2.y * a2 + this._vel.y * a3;
+      this._nebula.pos[i * 3 + 2] = p.z + _perp1.z * a1 + _perp2.z * a2 + this._vel.z * a3;
 
-        fi++;
-      }
+      const frac = 1 - t01;
+      const pulse = 0.5 + 0.25 * Math.abs(Math.sin(t * 1.8 + i * 0.37));
+      const ni = Math.pow(frac, 0.5) * 0.22 * pulse;
+      const [r, g, b] = fireColor(frac * 0.75, pr, pg, pb);
+      this._nebula.col[i * 3]     = r * ni;
+      this._nebula.col[i * 3 + 1] = g * ni;
+      this._nebula.col[i * 3 + 2] = b * ni;
     }
-    this._cloud.geo.attributes.position.needsUpdate = true;
-    this._cloud.geo.attributes.color.needsUpdate    = true;
-    this._cloud.geo.setDrawRange(0, fi);
+    this._nebula.geo.attributes.position.needsUpdate = true;
+    this._nebula.geo.attributes.color.needsUpdate    = true;
+    this._nebula.geo.setDrawRange(0, NEBULA_COUNT);
+
+    // ── SPARK SCATTER ────────────────────────────────────────
+    // Bright individual embers that drift away from the spine
+    for (let i = 0; i < SPARK_COUNT; i++) {
+      const hi   = Math.floor((i / SPARK_COUNT) * n);
+      const p    = this._history[hi];
+      const frac = 1 - hi / (n - 1);
+
+      // Random scatter in all directions but biased ⊥ to velocity
+      const sc   = SPARK_SCATTER * Math.pow(1 - frac, 0.4);
+      const sx   = hash(i * 3,     0, t * 0.55) * sc;
+      const sy   = hash(i * 3,     1, t * 0.48) * sc;
+      const sz   = hash(i * 3,     2, t * 0.51) * sc;
+
+      this._sparks.pos[i * 3]     = p.x + sx;
+      this._sparks.pos[i * 3 + 1] = p.y + sy;
+      this._sparks.pos[i * 3 + 2] = p.z + sz;
+
+      const flicker = 0.3 + 0.7 * Math.abs(Math.sin(t * 22 + i * 2.9));
+      const sf      = Math.pow(frac, 1.8) * flicker;
+      const [r, g, b] = fireColor(frac * 0.9, pr, pg, pb);
+      this._sparks.col[i * 3]     = r * sf * 0.9;
+      this._sparks.col[i * 3 + 1] = g * sf * 0.9;
+      this._sparks.col[i * 3 + 2] = b * sf * 0.9;
+    }
+    this._sparks.geo.attributes.position.needsUpdate = true;
+    this._sparks.geo.attributes.color.needsUpdate    = true;
+    this._sparks.geo.setDrawRange(0, SPARK_COUNT);
+
+    // ── VOLUMETRIC GLOW HEAD ─────────────────────────────────
+    // Tight bright bloom just behind the ball (skip index 0)
+    const headSteps = Math.min(n - 1, 8);
+    for (let i = 0; i < GLOW_COUNT; i++) {
+      const hi   = 1 + Math.floor((i / GLOW_COUNT) * headSteps);
+      const p    = this._history[Math.min(hi, n - 1)];
+      const frac = 1 - (hi - 1) / Math.max(headSteps - 1, 1);
+      const spread = 1.2 * frac;
+
+      this._glow.pos[i * 3]     = p.x + hash(i * 11, 0, t * 0.3) * spread;
+      this._glow.pos[i * 3 + 1] = p.y + hash(i * 11, 1, t * 0.33) * spread;
+      this._glow.pos[i * 3 + 2] = p.z + hash(i * 11, 2, t * 0.28) * spread;
+
+      const pulse = 0.6 + 0.4 * Math.abs(Math.sin(t * 7.0 + i * 1.7));
+      const gi    = frac * 0.55 * pulse;
+      const [r, g, b] = fireColor(frac * 0.85, pr, pg, pb);
+      this._glow.col[i * 3]     = r * gi;
+      this._glow.col[i * 3 + 1] = g * gi;
+      this._glow.col[i * 3 + 2] = b * gi;
+    }
+    this._glow.geo.attributes.position.needsUpdate = true;
+    this._glow.geo.attributes.color.needsUpdate    = true;
+    this._glow.geo.setDrawRange(0, GLOW_COUNT);
   }
 
-  _drawChargeAura(ballPos, t, pr, pg, pb) {
-    const p  = this._chargeLevel;
-    const p2 = p * p;
-
-    // Orbit radius grows with power (tight halo → expanding swirl)
-    const radius = 0.6 + p2 * 2.4;
-
-    // ── Core: swirling arc of embers orbiting the ball ───────
-    const coreCount = Math.max(2, Math.floor(p * 28));
-    for (let i = 0; i < coreCount; i++) {
-      const phase = (i / coreCount) * Math.PI * 2;
-      const spin  = t * (2.5 + p * 3.0);   // faster spin at higher power
-      const angle = phase + spin;
-      const elev  = Math.sin(phase * 2.3 + t * 1.1) * 0.8;
-      const r     = radius * (0.7 + Math.sin(phase * 3.7 + t * 2.3) * 0.3);
-
-      this._core.pos[i * 3]     = ballPos.x + Math.cos(angle) * Math.cos(elev) * r;
-      this._core.pos[i * 3 + 1] = ballPos.y + Math.sin(elev) * r;
-      this._core.pos[i * 3 + 2] = ballPos.z + Math.sin(angle) * Math.cos(elev) * r;
-
-      const flicker = 0.5 + 0.5 * Math.abs(Math.sin(t * 13 + i * 1.9));
-      const [cr, cg, cb] = fireColor(p * flicker, pr, pg, pb);
-      this._core.col[i * 3]     = cr;
-      this._core.col[i * 3 + 1] = cg;
-      this._core.col[i * 3 + 2] = cb;
-    }
-    this._core.geo.attributes.position.needsUpdate = true;
-    this._core.geo.attributes.color.needsUpdate    = true;
-    this._core.geo.setDrawRange(0, coreCount);
-
-    // ── Ember cloud: turbulent scatter orbiting the ball ─────
-    const cloudCount = Math.floor(p2 * TOTAL * 0.45);
-    for (let i = 0; i < cloudCount; i++) {
-      const scatterR = radius * (0.3 + Math.abs(hash(i, 4, t * 0.4)));
-      this._cloud.pos[i * 3]     = ballPos.x + hash(i, 0, t * 1.8) * scatterR;
-      this._cloud.pos[i * 3 + 1] = ballPos.y + hash(i, 1, t * 2.1) * scatterR;
-      this._cloud.pos[i * 3 + 2] = ballPos.z + hash(i, 2, t * 1.6) * scatterR;
-
-      const flicker = 0.35 + 0.65 * Math.abs(Math.sin(t * 19 + i * 2.7));
-      const ef = p2 * flicker * 0.75;
-      const [cr, cg, cb] = fireColor(p * 0.75, pr, pg, pb);
-      this._cloud.col[i * 3]     = cr * ef;
-      this._cloud.col[i * 3 + 1] = cg * ef;
-      this._cloud.col[i * 3 + 2] = cb * ef;
-    }
-    this._cloud.geo.attributes.position.needsUpdate = true;
-    this._cloud.geo.attributes.color.needsUpdate    = true;
-    this._cloud.geo.setDrawRange(0, cloudCount);
+  _drawChargeAura(_ballPos, _t, _pr, _pg, _pb) {
+    for (const l of [this._core, this._nebula, this._sparks, this._glow])
+      l.geo.setDrawRange(0, 0);
   }
 
   dispose() {
-    for (const layer of [this._core, this._cloud]) {
+    for (const layer of [this._core, this._nebula, this._sparks, this._glow]) {
       layer.geo.dispose();
+      layer.pts.material.map?.dispose();
       layer.pts.material.dispose();
       if (layer.pts.parent) layer.pts.parent.remove(layer.pts);
     }

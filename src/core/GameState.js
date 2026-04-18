@@ -34,6 +34,8 @@ class GameState {
     this.aimState = 'IDLE';        // IDLE | AIMING | BALL_IN_FLIGHT | HOLE_COMPLETE
 
     this.leaderboardSessionId = null;
+
+    this.ballStyle = localStorage.getItem('cosmic-golf-ball-style') || 'basketball';
   }
 
   get currentPlayer() {
@@ -79,6 +81,11 @@ class GameState {
     if (this.currentHole >= HOLE.COUNT) {
       this.gameComplete = true;
     }
+  }
+
+  setBallStyle(styleId) {
+    this.ballStyle = styleId;
+    localStorage.setItem('cosmic-golf-ball-style', styleId);
   }
 
   advancePlayer() {

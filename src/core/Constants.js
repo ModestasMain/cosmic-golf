@@ -21,8 +21,11 @@ export const BALL = {
 export const AIM = {
   MAX_POWER: 800,          // deeper holes need more range
   MAX_DRAG_DISTANCE: 120,  // px
-  TRAJECTORY_STEPS: 160,
+  TRAJECTORY_STEPS: 10000,
   TRAJECTORY_DT: 0.016,
+  // Trajectory visual tuning — adjust these to change line density/dot size
+  TRAJECTORY_POINT_STEP: 4,     // Higher = more space between dots (1=every point, 5=every 5th)
+  TRAJECTORY_DOT_SIZE: 3.0,     // Size of each dot in pixels
 };
 
 export const HOLE = {
@@ -147,8 +150,16 @@ export const WORLD = {
 };
 
 export const SERVER_EVENTS = {
-  INTERVAL_MS: 90_000, // new event every 90 seconds
-  TYPES: ['ZERO_GRAVITY', 'MAP_FLIP', 'STATIC', 'ASTEROID_STORM'],
+  CYCLE_MS: 120_000,       // full cycle: 120 seconds (2 minutes)
+  EVENT_DURATION_MS: 30_000, // event lasts 30 seconds
+  // 90 seconds of default (static planets) between events
+  TYPES: ['ZERO_GRAVITY', 'MAP_FLIP', 'MOVING_PLANETS', 'ASTEROID_STORM'],
+};
+
+export const ORBIT = {
+  ORBIT_RADIUS_OFFSET: 6,
+  GRAVITY_BOOST:       200,
+  BOUNDARY_FACTOR:     2.5,
 };
 
 export const COLLECTIBLE = {

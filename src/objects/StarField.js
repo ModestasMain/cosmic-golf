@@ -38,23 +38,49 @@ function pickSpectral() {
   return SPECTRAL[SPECTRAL.length - 1].slice(1);
 }
 
-// ── Hero-star glow sprite (tight radial gradient) ─────────────
+// ── Hero-star sprite: soft glow + diffraction cross-spikes ───────
+// 128-px canvas so it stays sharp at large point sizes.
 let _heroSprite = null;
 function heroSprite() {
   if (_heroSprite) return _heroSprite;
-  const sz  = 32;
+  const sz = 128;
+  const c  = sz / 2;
   const cvs = document.createElement('canvas');
   cvs.width = cvs.height = sz;
-  const ctx  = cvs.getContext('2d');
-  const half = sz / 2;
-  const grad = ctx.createRadialGradient(half, half, 0, half, half, half);
-  grad.addColorStop(0.00, 'rgba(255,255,255,1.0)');
-  grad.addColorStop(0.12, 'rgba(255,255,255,0.95)');
-  grad.addColorStop(0.35, 'rgba(255,255,255,0.45)');
-  grad.addColorStop(0.70, 'rgba(255,255,255,0.10)');
-  grad.addColorStop(1.00, 'rgba(255,255,255,0.00)');
-  ctx.fillStyle = grad;
+  const ctx = cvs.getContext('2d');
+
+  // Large soft radial glow
+  const glow = ctx.createRadialGradient(c, c, 0, c, c, c);
+  glow.addColorStop(0.00, 'rgba(255,255,255,1.00)');
+  glow.addColorStop(0.05, 'rgba(255,255,255,0.98)');
+  glow.addColorStop(0.15, 'rgba(255,255,255,0.70)');
+  glow.addColorStop(0.30, 'rgba(255,255,255,0.30)');
+  glow.addColorStop(0.55, 'rgba(255,255,255,0.08)');
+  glow.addColorStop(0.80, 'rgba(255,255,255,0.02)');
+  glow.addColorStop(1.00, 'rgba(255,255,255,0.00)');
+  ctx.fillStyle = glow;
   ctx.fillRect(0, 0, sz, sz);
+
+  // Diffraction cross-spikes (horizontal + vertical)
+  ctx.globalCompositeOperation = 'lighter';
+  for (let angle = 0; angle < Math.PI; angle += Math.PI / 2) {
+    ctx.save();
+    ctx.translate(c, c);
+    ctx.rotate(angle);
+    const sg = ctx.createLinearGradient(0, -c, 0, c);
+    sg.addColorStop(0.00, 'rgba(255,255,255,0.00)');
+    sg.addColorStop(0.30, 'rgba(255,255,255,0.20)');
+    sg.addColorStop(0.47, 'rgba(255,255,255,0.85)');
+    sg.addColorStop(0.50, 'rgba(255,255,255,1.00)');
+    sg.addColorStop(0.53, 'rgba(255,255,255,0.85)');
+    sg.addColorStop(0.70, 'rgba(255,255,255,0.20)');
+    sg.addColorStop(1.00, 'rgba(255,255,255,0.00)');
+    ctx.fillStyle = sg;
+    ctx.fillRect(-1.5, -c, 3, sz);
+    ctx.restore();
+  }
+  ctx.globalCompositeOperation = 'source-over';
+
   _heroSprite = new CanvasTexture(cvs);
   return _heroSprite;
 }
@@ -145,20 +171,33 @@ export class StarField {
       }, 1.9, 1.0, null);
     }
 
-    // ── Hero / foreground stars (9%) — glowing, size variation ─
+    // ── Hero / foreground stars (9%) — glowing with cross-spike sprite
     const heroSpr = heroSprite();
-    // Slightly closer so they stand out
     this._buildLayer(Math.floor(N * 0.09), (i, pos, clr) => {
       const [x, y, z] = spherePt(R * (0.80 + Math.random() * 0.12));
       pos[i * 3]     = x;
       pos[i * 3 + 1] = y;
       pos[i * 3 + 2] = z;
       const [sr, sg, sb] = pickSpectral();
-      // Full brightness — these are the bright ones
       clr[i * 3]     = sr;
       clr[i * 3 + 1] = sg;
       clr[i * 3 + 2] = sb;
-    }, 4.2, 1.0, heroSpr);
+    }, 6.0, 1.0, heroSpr);
+
+    // ── Super-bright foreground stars — tiny count, massive presence ─
+    // Opacity intentionally > 1: additive blending makes them blinding.
+    this._buildLayer(30, (i, pos, clr) => {
+      const [x, y, z] = spherePt(R * (0.75 + Math.random() * 0.10));
+      pos[i * 3]     = x;
+      pos[i * 3 + 1] = y;
+      pos[i * 3 + 2] = z;
+      // Bias toward hot blue-white and warm orange for variety
+      const hot = Math.random() < 0.6;
+      const [sr, sg, sb] = hot ? SPECTRAL[1].slice(1) : SPECTRAL[4].slice(1);
+      clr[i * 3]     = sr;
+      clr[i * 3 + 1] = sg;
+      clr[i * 3 + 2] = sb;
+    }, 14.0, 1.6, heroSpr);
   }
 
   /** Build one layer and add it to the scene. */
@@ -192,21 +231,49 @@ export class StarField {
     this._layers.push({ pts, geo, mat, baseClr, clr });
   }
 
+  /**
+   * Live-tweak star brightness and hero star size.
+   * Called by DevPanel — safe to call any time after _build().
+   * @param {{ brightness?: number, heroScale?: number, shimmerAmp?: number }} p
+   */
+  setStarParams({ brightness = 1.0, heroScale = 1.0, shimmerAmp = 0.12 } = {}) {
+    this._starBrightness = brightness;
+    this._heroScale      = heroScale;
+    this._shimmerAmp     = shimmerAmp;
+
+    for (let li = 0; li < this._layers.length; li++) {
+      const { mat } = this._layers[li];
+      // Stash original build values once
+      if (mat._origOpacity === undefined) mat._origOpacity = mat.opacity;
+      if (mat._origSize    === undefined) mat._origSize    = mat.size;
+
+      // No cap — with AdditiveBlending opacity > 1.0 adds more light,
+      // making stars genuinely blinding. That is the intent.
+      const scaled = mat._origOpacity * brightness;
+      mat._baseOpacity = scaled;
+      mat.opacity      = scaled;
+
+      // Scale size on the two brightest layers (hero + super-bright)
+      const isBright = li >= this._layers.length - 2;
+      if (isBright) mat.size = mat._origSize * heroScale;
+    }
+  }
+
   /** Animate star shimmer — call every frame. */
   update(dt) {
     this._t = (this._t ?? 0) + dt;
-    const t = this._t;
+    const t   = this._t;
+    const amp = this._shimmerAmp ?? 0.12;
     // Each layer breathes at a slightly different frequency and phase
-    const freqs   = [0.41, 0.37, 0.29, 0.53, 0.23, 0.19, 0.47, 0.61, 0.33, 0.58, 0.44, 0.38];
-    const phases  = [0.00, 1.13, 2.27, 0.71, 1.88, 3.14, 0.44, 2.53, 1.05, 1.62, 2.91, 0.82];
+    const freqs  = [0.41, 0.37, 0.29, 0.53, 0.23, 0.19, 0.47, 0.61, 0.33, 0.58, 0.44, 0.38];
+    const phases = [0.00, 1.13, 2.27, 0.71, 1.88, 3.14, 0.44, 2.53, 1.05, 1.62, 2.91, 0.82];
     for (let li = 0; li < this._layers.length; li++) {
       const { mat } = this._layers[li];
-      const freq    = freqs[li % freqs.length];
-      const phase   = phases[li % phases.length];
-      // Tiny opacity shimmer — barely perceptible, just enough to feel alive
+      const freq   = freqs[li  % freqs.length];
+      const phase  = phases[li % phases.length];
       const base   = mat._baseOpacity ?? mat.opacity;
       if (!mat._baseOpacity) mat._baseOpacity = mat.opacity;
-      mat.opacity  = base * (0.88 + 0.12 * Math.sin(t * freq + phase));
+      mat.opacity  = base * (1.0 - amp + amp * 2.0 * Math.sin(t * freq + phase));
     }
   }
 

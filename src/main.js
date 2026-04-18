@@ -2,8 +2,8 @@
 // main.js — Cosmic Golf entry point
 // ============================================================
 
-import { WebGLRenderer } from 'three';
-import { EffectComposer, RenderPass, BloomEffect, EffectPass, VignetteEffect } from 'postprocessing';
+import { WebGLRenderer, Vector2 } from 'three';
+import { EffectComposer, RenderPass, BloomEffect, EffectPass, VignetteEffect, ChromaticAberrationEffect, DepthOfFieldEffect, TiltShiftEffect } from 'postprocessing';
 import { eventBus, Events } from './core/EventBus.js';
 import { gameState } from './core/GameState.js';
 import { InputSystem } from './systems/InputSystem.js';
@@ -20,7 +20,9 @@ import { PlayerLabels } from './ui/PlayerLabels.js';
 import { AnnouncerUI } from './ui/AnnouncerUI.js';
 import { EventHUD } from './ui/EventHUD.js';
 import { LobbyPanel } from './ui/LobbyPanel.js';
+import { BallStylePicker } from './ui/BallStylePicker.js';
 import { audioManager } from './audio/AudioManager.js';
+import { DevPanel } from './debug/DevPanel.js';
 
 class Game {
   constructor() {
@@ -52,7 +54,7 @@ class Game {
       stencil: false,
       depth: true,
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setClearColor(0x000000);
     document.body.appendChild(this.renderer.domElement);
@@ -66,19 +68,53 @@ class Game {
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(scene, camera));
 
-    const bloom = new BloomEffect({
-      intensity: 2.2,
-      luminanceThreshold: 0.22,
-      luminanceSmoothing: 0.08,
-      mipmapBlur: true,
+    this.bloom = new BloomEffect({
+      intensity:           0.9,
+      luminanceThreshold:  0.85,
+      luminanceSmoothing:  0,
+      mipmapBlur:          true,
+      levels:              4,   // fewer mip levels = fewer blur passes (default is 8)
     });
 
-    const vignette = new VignetteEffect({
-      offset: 0.38,
-      darkness: 0.65,
+    this.chromAb = new ChromaticAberrationEffect({
+      offset: new Vector2(0, 0),
     });
 
-    this.composer.addPass(new EffectPass(camera, bloom, vignette));
+    this.vignette = new VignetteEffect({
+      offset:   0.2,
+      darkness: 0.73,
+    });
+
+    this.dof = new DepthOfFieldEffect(camera, {
+      focusDistance: 0,
+      focusRange:    0,
+      bokehScale:    0,
+    });
+
+    this.tiltShift = new TiltShiftEffect({
+      offset:    0.0,
+      rotation:  0.0,
+      focusArea: 0.8,
+      feather:   0.3,
+    });
+
+    this.composer.addPass(new EffectPass(camera, this.bloom, this.chromAb, this.vignette));
+    this.blurPass = new EffectPass(camera, this.dof, this.tiltShift);
+    this._blurPassAdded = false; // added to composer on first use
+
+    // Dev panel — toggle with backtick key
+    this.devPanel = new DevPanel({
+      spaceBg:    this.holeScene.spaceBg,
+      starField:  this.holeScene.starField,
+      blurPass:   this.blurPass,
+      composer:   this.composer,
+      holeScene:  this.holeScene,
+      bloom:      this.bloom,
+      vignette:   this.vignette,
+      chromAb:    this.chromAb,
+      dof:        this.dof,
+      tiltShift:  this.tiltShift,
+    });
   }
 
   _setupState() {
@@ -117,6 +153,7 @@ class Game {
     this.announcer   = new AnnouncerUI();
     this.eventHUD    = new EventHUD();
     this.lobbyPanel  = new LobbyPanel();
+    this.ballStylePicker = new BallStylePicker();
   }
 
   _setupMultiplayer() {
@@ -249,6 +286,7 @@ class Game {
       this.playerLabels.addPlayer(gameState.players[0].id, name, color);
       this.mp.joinPublic(name, color);
       this.holeScene.loadHole(0);
+      this.ballStylePicker.show();
       setTimeout(() => this.mp.updateIdentity(name, color), 2000);
       return;
     }
@@ -261,6 +299,7 @@ class Game {
 
       this.playerLabels.addPlayer(gameState.players[0].id, name, color);
       this.holeScene.loadHole(0);
+      this.ballStylePicker.show();
       setTimeout(() => this.tutorial.show(), 600);
       setTimeout(() => this.mp.updateIdentity(name, color), 2000);
     });

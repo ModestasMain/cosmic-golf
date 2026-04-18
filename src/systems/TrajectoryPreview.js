@@ -57,6 +57,7 @@ export class TrajectoryPreview {
     this._targetPlanetIdx = -1;
     this._behindPlanetIdxs = [];
     this._lastOutcome = 'limit';
+    this._cachedDrawCount = 0; // total dots written into buffer by last update()
     this._buildMesh();
     this._buildEndpointMarker();
   }
@@ -242,6 +243,7 @@ export class TrajectoryPreview {
 
     this.geometry.attributes.position.needsUpdate = true;
     this.geometry.attributes.color.needsUpdate    = true;
+    this._cachedDrawCount = count;
     this.geometry.setDrawRange(0, count);
 
     // Endpoint marker — place at last trajectory point, pulse, color by outcome
@@ -266,6 +268,34 @@ export class TrajectoryPreview {
     }
 
     return this._lastOutcome;
+  }
+
+  /**
+   * Trim the trajectory line so dots behind the ball disappear.
+   * Scans the cached buffer for the closest point to ballPos and advances
+   * the draw range start — no re-simulation needed.
+   */
+  advanceFrom(ballPos) {
+    if (this._cachedDrawCount === 0) return;
+    const positions = this.geometry.attributes.position.array;
+    const total = this._cachedDrawCount;
+    // Search only the first 70% — ball won't skip past that in a single frame
+    const searchEnd = Math.min(total, Math.floor(total * 0.7));
+    let closestIdx = 0;
+    let closestDist = Infinity;
+    for (let i = 0; i < searchEnd; i++) {
+      const dx = positions[i * 3]     - ballPos.x;
+      const dy = positions[i * 3 + 1] - ballPos.y;
+      const dz = positions[i * 3 + 2] - ballPos.z;
+      const d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 < closestDist) { closestDist = d2; closestIdx = i; }
+    }
+    this.geometry.setDrawRange(closestIdx, total - closestIdx);
+    this._endpointMarker.visible = this.visible;
+    const pulseSpeed = this._lastOutcome === 'oob' ? 8 : 2.5;
+    const pulse = 0.55 + Math.sin(Date.now() * 0.001 * pulseSpeed) * 0.3;
+    this._endpointMat.opacity = pulse;
+    this.points.visible = this.visible;
   }
 
   _applyPlanetHighlights(planetObjects) {

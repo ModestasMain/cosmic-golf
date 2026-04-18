@@ -78,6 +78,10 @@ export class HoleScene {
     this._bounceGraceFrames = 0;  // counts down after bounce — suppresses drift-OOB
     this._voidFrames = 0;         // zero-gravity void timer — frames away from any planet
 
+    // Trajectory freeze: compute once on shot/bounce, advance head each frame
+    this._trajNeedsRecompute = false;
+    this._accumDt = 0; // physics time accumulator for fixed-step substepping
+
     // Camera facing direction — rotated by aim drag, trails velocity in flight
     this._facingDir  = new Vector3(0, 0, -1);
     this._aimStartDir = new Vector3(0, 0, -1);
@@ -792,6 +796,8 @@ export class HoleScene {
     this._lastBounceTime = 0;
     this._launchGraceFrames = PHYSICS.LAUNCH_GRACE_FRAMES;
     this._voidFrames = 0;
+    this._trajNeedsRecompute = true; // compute trajectory once after hit-freeze clears
+    this._accumDt = 0;
   }
 
   /**
@@ -895,12 +901,19 @@ export class HoleScene {
       if (this._state === 'BALL_IN_FLIGHT') {
         const flightVel = this.ball.velocity.clone();
         if (flightVel.length() > 1.0) {
-          trajOptions.graceFrames = this._launchGraceFrames;
-          this.trajectoryPreview.update(
-            this.ball.position.clone(), flightVel, trajPlanets, this.planets,
-            combinedGravity, trajOrbitPlanet, trajOptions,
-            this.camera, this.planetObjects,
-          );
+          if (this._trajNeedsRecompute) {
+            // Recompute trajectory from current ball state (shot fired or bounce)
+            this._trajNeedsRecompute = false;
+            trajOptions.graceFrames = 0;
+            this.trajectoryPreview.update(
+              this.ball.position.clone(), flightVel, trajPlanets, this.planets,
+              combinedGravity, trajOrbitPlanet, trajOptions,
+              this.camera, this.planetObjects,
+            );
+          } else {
+            // Just trim dots behind the ball — no re-simulation
+            this.trajectoryPreview.advanceFrom(this.ball.position);
+          }
           this.trajectoryPreview.show();
         }
       } else {
@@ -992,7 +1005,20 @@ export class HoleScene {
         ? [this.planets[this._orbitalCapture.planetIdx]]
         : this._holeData.planets;
       const orbitPlanet = this._orbitalCapture.isOrbiting ? physicsPlanets[0] : null;
-      const result = stepBall(this.ball, physicsPlanets, dt, combinedGravityScale, orbitPlanet);
+
+      // Fixed-timestep accumulator: physics always advances in exact TRAJECTORY_DT
+      // chunks so Euler integration matches the trajectory simulation step-for-step.
+      this._accumDt += Math.min(dt, 0.1);
+      let result = { bounced: false, bouncePlanet: null };
+      while (this._accumDt >= AIM.TRAJECTORY_DT) {
+        result = stepBall(this.ball, physicsPlanets, AIM.TRAJECTORY_DT, combinedGravityScale, orbitPlanet);
+        this._accumDt -= AIM.TRAJECTORY_DT;
+        if (result.bounced) {
+          this._accumDt = 0;
+          this._trajNeedsRecompute = true; // recompute trajectory post-bounce
+          break;
+        }
+      }
 
       // ZERO_GRAVITY sticky: ball touches a planet → kill velocity, stay on surface
       if (this.serverEvents.gravityScale === 0.0) {

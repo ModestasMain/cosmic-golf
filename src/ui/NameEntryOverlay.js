@@ -440,12 +440,463 @@ function hexToRgb(hex) {
   return `${(n>>16)&255},${(n>>8)&255},${n&255}`;
 }
 
+// ─── HowToPlayPanel ───────────────────────────────────────────────────────────
+
+class HowToPlayPanel {
+  constructor() {
+    this._t = 0;
+    this._raf = null;
+    this._scenes = [];
+    this._panel = this._build();
+  }
+
+  _build() {
+    const panel = document.createElement('div');
+    panel.id = 'how-to-play-panel';
+    panel.style.cssText = [
+      'position:absolute', 'right:50px', 'top:50%', 'transform:translateY(-50%)',
+      'z-index:2',
+      'display:flex', 'flex-direction:column', 'gap:14px',
+      'width:min(34vw,560px)',
+      'height:min(88vh,980px)',
+      'min-height:700px',
+    ].join(';');
+
+    const title = document.createElement('div');
+    title.style.cssText = [
+      'font-size:9px', 'letter-spacing:4px',
+      'color:rgba(140,180,255,0.45)',
+      'font-family:monospace', 'padding-left:2px',
+    ].join(';');
+    title.textContent = 'HOW TO PLAY';
+    panel.appendChild(title);
+
+    const defs = [
+      { label: 'AIM & DRAG TO SHOOT', fn: this._drawAimScene.bind(this), videoSrc: '/videos/aim.mp4' },
+      { label: 'SINK INTO THE BLACK HOLE', fn: this._drawBlackholeScene.bind(this), videoSrc: '/videos/blackhole.mp4' },
+      { label: 'WORMHOLES ARE PORTALS', fn: this._drawWormholeScene.bind(this), videoSrc: '/videos/wormholes.mp4' },
+    ];
+
+    for (const def of defs) {
+      const wrap = document.createElement('div');
+      wrap.style.cssText = [
+        'background:rgba(8,10,30,0.55)',
+        'border:1px solid rgba(100,160,255,0.14)',
+        'border-radius:12px', 'overflow:hidden',
+        'display:flex', 'flex-direction:column',
+        'flex:1', 'min-height:0',
+      ].join(';');
+
+      const canvas = document.createElement('canvas');
+      canvas.width = 720;
+      canvas.height = 220;
+      canvas.style.cssText = 'width:100%;height:100%;display:none;';
+
+      const mediaWrap = document.createElement('div');
+      mediaWrap.style.cssText = 'position:relative;width:100%;flex:1;min-height:0;';
+      mediaWrap.appendChild(canvas);
+
+      const video = document.createElement('video');
+      video.muted = true;
+      video.loop = true;
+      video.autoplay = true;
+      video.playsInline = true;
+      video.controls = false;
+      video.src = def.videoSrc;
+      video.style.cssText = 'width:100%;height:100%;display:block;object-fit:cover;background:#000;';
+      video.addEventListener('error', () => {
+        video.style.display = 'none';
+        canvas.style.display = 'block';
+      });
+      mediaWrap.appendChild(video);
+
+      const label = document.createElement('div');
+      label.style.cssText = [
+        'font-family:monospace', 'font-size:9px', 'letter-spacing:3px',
+        'color:rgba(160,200,255,0.5)',
+        'padding:7px 12px 9px',
+        'border-top:1px solid rgba(100,160,255,0.08)',
+      ].join(';');
+      label.textContent = def.label;
+
+      wrap.appendChild(mediaWrap);
+      wrap.appendChild(label);
+      panel.appendChild(wrap);
+
+      this._scenes.push({ canvas, fn: def.fn, video });
+    }
+
+    return panel;
+  }
+
+  // ── Scene 1: Aim & Drag ────────────────────────────────────
+  _drawAimScene(ctx, w, h, t) {
+    ctx.clearRect(0, 0, w, h);
+
+    const bg = ctx.createLinearGradient(0, 0, w, h);
+    bg.addColorStop(0, '#060410');
+    bg.addColorStop(1, '#080620');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // Static stars
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    for (let i = 0; i < 18; i++) {
+      ctx.beginPath();
+      ctx.arc((i * 47.3 + 10) % w, (i * 31.7 + 15) % h, 0.6, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    const bx = w * 0.28, by = h * 0.5;
+    const aimAngle = -0.3 + Math.sin(t * 0.9) * 0.45;
+
+    // Dotted trajectory
+    const steps = 22;
+    for (let i = 1; i < steps; i++) {
+      const frac = i / steps;
+      const tx = bx + Math.cos(aimAngle) * frac * w * 0.6;
+      const ty = by + Math.sin(aimAngle) * frac * w * 0.6;
+      const alpha = (1 - frac) * 0.55;
+      ctx.fillStyle = `rgba(100,180,255,${alpha})`;
+      ctx.beginPath();
+      ctx.arc(tx, ty, Math.max(0.5, 2 - frac * 1.5), 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    // Drag line (pull-back arrow)
+    const pullLen = 38 + Math.sin(t * 0.9) * 14;
+    const ax = bx + Math.cos(aimAngle + Math.PI) * pullLen;
+    const ay = by + Math.sin(aimAngle + Math.PI) * pullLen;
+
+    ctx.strokeStyle = 'rgba(255,110,70,0.75)';
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(bx, by);
+    ctx.lineTo(ax, ay);
+    ctx.stroke();
+
+    // Arrowhead
+    const ha = Math.atan2(ay - by, ax - bx);
+    ctx.fillStyle = 'rgba(255,110,70,0.85)';
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(ax - Math.cos(ha - 0.45) * 9, ay - Math.sin(ha - 0.45) * 9);
+    ctx.lineTo(ax - Math.cos(ha + 0.45) * 9, ay - Math.sin(ha + 0.45) * 9);
+    ctx.closePath();
+    ctx.fill();
+
+    // Power bar
+    const bW = 52, bH = 4, bX = bx - bW/2, bY = by + 18;
+    ctx.fillStyle = 'rgba(255,255,255,0.1)';
+    ctx.beginPath();
+    ctx.roundRect(bX, bY, bW, bH, 2);
+    ctx.fill();
+    const power = 0.5 + 0.5 * Math.sin(t * 0.9 + 1.5);
+    const pg = ctx.createLinearGradient(bX, 0, bX + bW, 0);
+    pg.addColorStop(0, '#4488ff');
+    pg.addColorStop(1, '#ff4488');
+    ctx.fillStyle = pg;
+    ctx.beginPath();
+    ctx.roundRect(bX, bY, bW * power, bH, 2);
+    ctx.fill();
+
+    // Golf ball
+    const glow = ctx.createRadialGradient(bx, by, 0, bx, by, 13);
+    glow.addColorStop(0, 'rgba(200,220,255,0.3)');
+    glow.addColorStop(1, 'rgba(100,160,255,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(bx, by, 13, 0, Math.PI*2);
+    ctx.fill();
+
+    const core = ctx.createRadialGradient(bx - 1.5, by - 1.5, 0, bx, by, 5.5);
+    core.addColorStop(0, '#fff');
+    core.addColorStop(1, '#a0c8ff');
+    ctx.fillStyle = core;
+    ctx.beginPath();
+    ctx.arc(bx, by, 5.5, 0, Math.PI*2);
+    ctx.fill();
+
+    // Finger ring at drag point
+    ctx.strokeStyle = 'rgba(255,210,120,0.7)';
+    ctx.lineWidth = 1.5;
+    ctx.fillStyle = 'rgba(255,210,120,0.1)';
+    ctx.beginPath();
+    ctx.arc(ax, ay, 8, 0, Math.PI*2);
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  // ── Scene 2: Black Hole ────────────────────────────────────
+  _drawBlackholeScene(ctx, w, h, t) {
+    ctx.clearRect(0, 0, w, h);
+
+    const bg = ctx.createRadialGradient(w*0.5, h*0.5, 0, w*0.5, h*0.5, w*0.6);
+    bg.addColorStop(0, '#08040f');
+    bg.addColorStop(1, '#030208');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    for (let i = 0; i < 22; i++) {
+      ctx.beginPath();
+      ctx.arc((i * 41.7 + 5) % w, (i * 37.3 + 8) % h, 0.5, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    const hx = w * 0.55, hy = h * 0.5;
+
+    // Accretion disk glow
+    const diskGrad = ctx.createRadialGradient(hx, hy, 8, hx, hy, 44);
+    diskGrad.addColorStop(0,   'rgba(80,0,120,0.0)');
+    diskGrad.addColorStop(0.4, 'rgba(120,40,180,0.38)');
+    diskGrad.addColorStop(0.7, 'rgba(80,100,255,0.22)');
+    diskGrad.addColorStop(1,   'rgba(80,100,255,0)');
+    ctx.fillStyle = diskGrad;
+    ctx.beginPath();
+    ctx.ellipse(hx, hy, 44, 23, 0.2, 0, Math.PI*2);
+    ctx.fill();
+
+    // Rotating disk particles
+    for (let i = 0; i < 14; i++) {
+      const a = (i / 14) * Math.PI * 2 + t * 1.3;
+      const r = 18 + Math.sin(i * 2.1) * 5;
+      const alpha = 0.3 + 0.3 * Math.sin(a * 2);
+      ctx.fillStyle = `hsla(${260 + i * 10},80%,60%,${alpha})`;
+      ctx.beginPath();
+      ctx.arc(hx + Math.cos(a) * r, hy + Math.sin(a) * r * 0.35, 1.5, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    // Black hole core
+    const coreGrad = ctx.createRadialGradient(hx, hy, 0, hx, hy, 14);
+    coreGrad.addColorStop(0,    '#000');
+    coreGrad.addColorStop(0.72, '#000');
+    coreGrad.addColorStop(0.88, 'rgba(80,0,120,0.55)');
+    coreGrad.addColorStop(1,    'rgba(80,0,120,0)');
+    ctx.fillStyle = coreGrad;
+    ctx.beginPath();
+    ctx.arc(hx, hy, 14, 0, Math.PI*2);
+    ctx.fill();
+
+    // Flag above hole
+    const fX = hx + 17, fY = hy - 27;
+    ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(fX, hy - 12);
+    ctx.lineTo(fX, fY);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,80,80,0.85)';
+    ctx.beginPath();
+    ctx.moveTo(fX, fY);
+    ctx.lineTo(fX + 13, fY + 4);
+    ctx.lineTo(fX, fY + 8);
+    ctx.closePath();
+    ctx.fill();
+
+    // Orbiting ball (spirals slowly inward then resets)
+    const orbitR = 38 - ((t * 0.12) % 1) * 22;
+    const bAngle = t * 2.3;
+    const ballX = hx + Math.cos(bAngle) * orbitR;
+    const ballY = hy + Math.sin(bAngle) * orbitR * 0.6;
+
+    // Trail
+    for (let i = 1; i <= 10; i++) {
+      const ta = bAngle - i * 0.16;
+      const tr = orbitR + i * 0.5;
+      const alpha = (1 - i/10) * 0.38;
+      ctx.fillStyle = `rgba(100,200,255,${alpha})`;
+      ctx.beginPath();
+      ctx.arc(hx + Math.cos(ta) * tr, hy + Math.sin(ta) * tr * 0.6, Math.max(0.3, 2.5 - i * 0.18), 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    if (orbitR > 14) {
+      const bG = ctx.createRadialGradient(ballX - 1, ballY - 1, 0, ballX, ballY, 5);
+      bG.addColorStop(0, '#fff');
+      bG.addColorStop(1, '#80c0ff');
+      ctx.fillStyle = bG;
+      ctx.beginPath();
+      ctx.arc(ballX, ballY, 4.5, 0, Math.PI*2);
+      ctx.fill();
+    }
+  }
+
+  // ── Scene 3: Wormhole ──────────────────────────────────────
+  _drawWormholeScene(ctx, w, h, t) {
+    ctx.clearRect(0, 0, w, h);
+
+    const bg = ctx.createLinearGradient(0, 0, w, h);
+    bg.addColorStop(0, '#050310');
+    bg.addColorStop(1, '#080618');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    for (let i = 0; i < 20; i++) {
+      ctx.fillStyle = 'rgba(255,255,255,0.28)';
+      ctx.beginPath();
+      ctx.arc((i * 53.1 + 7) % w, (i * 29.7 + 11) % h, 0.5, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    const w1x = w * 0.22, w1y = h * 0.5;
+    const w2x = w * 0.78, w2y = h * 0.5;
+    const pR = 19;
+
+    const drawPortal = (px, py, h1, h2) => {
+      const glowG = ctx.createRadialGradient(px, py, 0, px, py, pR * 2.2);
+      glowG.addColorStop(0,   `hsla(${h1},100%,60%,0.22)`);
+      glowG.addColorStop(0.5, `hsla(${h2},80%,50%,0.1)`);
+      glowG.addColorStop(1,   'rgba(0,0,0,0)');
+      ctx.fillStyle = glowG;
+      ctx.beginPath();
+      ctx.arc(px, py, pR * 2.2, 0, Math.PI*2);
+      ctx.fill();
+
+      for (let i = 0; i < 8; i++) {
+        const a1 = (i / 8) * Math.PI * 2 + t * 1.6;
+        const a2 = a1 + Math.PI * 0.22;
+        const alpha = 0.5 + 0.4 * Math.sin(t * 2 + i);
+        ctx.strokeStyle = `hsla(${h1 + i * 15},90%,65%,${alpha})`;
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.arc(px, py, pR, a1, a2);
+        ctx.stroke();
+      }
+
+      const innerG = ctx.createRadialGradient(px, py, 0, px, py, pR * 0.75);
+      innerG.addColorStop(0,   'rgba(0,0,0,0.95)');
+      innerG.addColorStop(0.6, `hsla(${h1},80%,10%,0.8)`);
+      innerG.addColorStop(1,   'rgba(0,0,0,0)');
+      ctx.fillStyle = innerG;
+      ctx.beginPath();
+      ctx.arc(px, py, pR, 0, Math.PI*2);
+      ctx.fill();
+    };
+
+    drawPortal(w1x, w1y, 200, 280);
+    drawPortal(w2x, w2y, 140, 200);
+
+    // Dashed connector
+    ctx.setLineDash([4, 5]);
+    ctx.strokeStyle = 'rgba(140,180,255,0.22)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(w1x + pR + 4, w1y);
+    ctx.lineTo(w2x - pR - 4, w2y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Ball travelling through wormhole
+    const cycle = (t * 0.55) % 1;
+    let ballX = 0, ballY = w1y;
+    let ballVisible = true;
+    let ballScale = 1;
+
+    if (cycle < 0.10) {
+      // approaching entry portal
+      ballX = w1x - 55 + (cycle / 0.10) * 55;
+      ballY = w1y;
+    } else if (cycle < 0.18) {
+      // entering (shrink)
+      const p = (cycle - 0.10) / 0.08;
+      ballX = w1x;
+      ballY = w1y;
+      ballScale = 1 - p;
+      if (ballScale <= 0) ballVisible = false;
+    } else if (cycle < 0.48) {
+      // inside wormhole — invisible
+      ballVisible = false;
+      ballX = w1x;
+      ballY = w1y;
+    } else if (cycle < 0.56) {
+      // exiting right portal (grow)
+      const p = (cycle - 0.48) / 0.08;
+      ballX = w2x;
+      ballY = w2y;
+      ballScale = p;
+      if (ballScale <= 0) ballVisible = false;
+    } else if (cycle < 0.82) {
+      // flying away from right portal
+      const p = (cycle - 0.56) / 0.26;
+      ballX = w2x + p * 60;
+      ballY = w2y;
+    } else {
+      ballVisible = false;
+    }
+
+    if (ballVisible && ballScale > 0) {
+      const trailDir = (cycle >= 0.56 && cycle < 0.82) ? -1 : 1;
+      for (let i = 1; i <= 8; i++) {
+        const alpha = (1 - i/8) * 0.35 * Math.min(ballScale, 1);
+        ctx.fillStyle = `rgba(120,200,255,${alpha})`;
+        ctx.beginPath();
+        ctx.arc(ballX + trailDir * i * -4, ballY, Math.max(0.2, (3 - i * 0.25) * ballScale), 0, Math.PI*2);
+        ctx.fill();
+      }
+
+      const r = 5 * Math.min(ballScale, 1);
+      if (r > 0.3) {
+        const bG = ctx.createRadialGradient(ballX - 1, ballY - 1, 0, ballX, ballY, r);
+        bG.addColorStop(0, '#fff');
+        bG.addColorStop(1, '#60d0ff');
+        ctx.fillStyle = bG;
+        ctx.beginPath();
+        ctx.arc(ballX, ballY, r, 0, Math.PI*2);
+        ctx.fill();
+      }
+    }
+
+    // IN / OUT labels
+    ctx.font = '8px monospace';
+    ctx.fillStyle = 'rgba(140,200,255,0.5)';
+    ctx.textAlign = 'center';
+    ctx.fillText('IN', w1x, w1y + pR + 16);
+    ctx.fillText('OUT', w2x, w2y + pR + 16);
+  }
+
+  start() {
+    if (this._raf) return;
+    for (const s of this._scenes) {
+      if (s.video?.src) s.video.play().catch(() => {});
+    }
+    let last = performance.now();
+    const tick = (now) => {
+      const dt = Math.min((now - last) / 1000, 0.05);
+      last = now;
+      this._t += dt;
+      for (const s of this._scenes) {
+        if (s.video && !s.video.error) continue;
+        const ctx = s.canvas.getContext('2d');
+        s.fn(ctx, s.canvas.width, s.canvas.height, this._t);
+      }
+      this._raf = requestAnimationFrame(tick);
+    };
+    this._raf = requestAnimationFrame(tick);
+  }
+
+  stop() {
+    if (this._raf) cancelAnimationFrame(this._raf);
+    this._raf = null;
+    for (const s of this._scenes) {
+      if (s.video) s.video.pause();
+    }
+  }
+
+  get element() { return this._panel; }
+}
+
 // ─── NameEntryOverlay ─────────────────────────────────────────────────────────
 
 export class NameEntryOverlay {
   constructor() {
     this._resolve = null;
     this._cosmos = null;
+    this._howToPlay = new HowToPlayPanel();
     this._build();
   }
 
@@ -455,17 +906,28 @@ export class NameEntryOverlay {
     overlay.id = 'name-entry-overlay';
     overlay.style.cssText = [
       'position:fixed', 'inset:0', 'z-index:1000',
-      'display:flex', 'flex-direction:column', 'align-items:center', 'justify-content:center',
-      'font-family:monospace', 'overflow:hidden',
+      'display:flex', 'align-items:center', 'justify-content:center',
+      'font-family:monospace', 'overflow:auto',
     ].join(';');
 
-    // Cosmos canvas lives inside the overlay (behind the card)
+    // Cosmos canvas lives inside the overlay (behind the content)
     this._cosmos = new CosmosCanvas(overlay);
+
+    // Content wrapper — holds card + how-to-play panel side by side
+    const contentWrap = document.createElement('div');
+    contentWrap.style.cssText = [
+      'position:relative', 'z-index:2',
+      'display:flex', 'flex-direction:row', 'align-items:center',
+      'justify-content:center', 'gap:20px',
+      'flex-wrap:wrap', 'padding:20px',
+      'width:100%', 'min-height:100%',
+      'box-sizing:border-box',
+    ].join(';');
 
     // Frosted glass card
     const card = document.createElement('div');
     card.style.cssText = [
-      'position:relative', 'z-index:2',
+      'position:relative',
       'display:flex', 'flex-direction:column', 'align-items:center', 'gap:22px',
       'width:min(420px,90vw)',
       'background:rgba(8,10,30,0.62)',
@@ -474,7 +936,7 @@ export class NameEntryOverlay {
       'padding:36px 32px 28px',
       'backdrop-filter:blur(20px)', '-webkit-backdrop-filter:blur(20px)',
       'box-shadow:0 0 60px rgba(80,100,255,0.18), 0 0 120px rgba(80,60,200,0.1), inset 0 1px 0 rgba(255,255,255,0.07)',
-      'max-height:90vh', 'overflow-y:auto',
+      'flex-shrink:0',
     ].join(';');
 
     // ── Title area ──────────────────────────────────────────
@@ -592,49 +1054,15 @@ export class NameEntryOverlay {
     achBtn.addEventListener('click', () => this._showAchievements());
     this._achBtn = achBtn;
 
-    // ── Rules ─────────────────────────────────────────────────
-    const rules = document.createElement('div');
-    rules.style.cssText = [
-      'width:100%',
-      'border-top:1px solid rgba(100,160,255,0.12)',
-      'padding-top:16px', 'display:flex', 'flex-direction:column', 'gap:7px',
-    ].join(';');
-
-    const rulesTitle = document.createElement('div');
-    rulesTitle.style.cssText = 'font-size:9px;letter-spacing:4px;color:rgba(140,180,255,0.4);margin-bottom:6px;';
-    rulesTitle.textContent = 'HOW TO PLAY';
-
-    const ruleItems = [
-      ['🎯', 'Set your direction and pull on the power to charge your ball'],
-      ['🪐', 'Use planet gravity to slingshot to the hole'],
-      ['⛳', '10 holes — fewest strokes wins'],
-      ['🌀', 'Sink into the black hole to finish the hole'],
-      ['👥', 'Auto-joins multiplayer — compete live'],
-      ['', 'Wormholes are portals straight to hole in ones - but can you hit it?'],
-    ];
-
-    rules.appendChild(rulesTitle);
-    for (const [icon, text] of ruleItems) {
-      const row = document.createElement('div');
-      row.style.cssText = [
-        'display:flex', 'align-items:center', 'gap:12px',
-        'color:rgba(190,215,255,0.55)', 'font-size:11px', 'letter-spacing:0.5px',
-        'padding:4px 8px', 'border-radius:6px',
-        'transition:background 0.2s',
-      ].join(';');
-      row.innerHTML = `<span style="font-size:15px;min-width:22px;text-align:center;filter:drop-shadow(0 0 4px rgba(200,200,255,0.4))">${icon}</span><span>${text}</span>`;
-      row.addEventListener('pointerenter', () => { row.style.background = 'rgba(100,160,255,0.07)'; });
-      row.addEventListener('pointerleave', () => { row.style.background = ''; });
-      rules.appendChild(row);
-    }
-
-    // ── Assemble ──────────────────────────────────────────────
+    // ── Assemble card ──────────────────────────────────────────
     card.appendChild(titleWrap);
     card.appendChild(inputsWrap);
     card.appendChild(btn);
     card.appendChild(this._achBtn);
-    card.appendChild(rules);
-    overlay.appendChild(card);
+
+    contentWrap.appendChild(card);
+    contentWrap.appendChild(this._howToPlay.element);
+    overlay.appendChild(contentWrap);
 
     // CSS animations injected once
     if (!document.getElementById('cosmos-styles')) {
@@ -656,6 +1084,9 @@ export class NameEntryOverlay {
         }
         #name-entry-overlay input::placeholder { color: rgba(140,180,255,0.35); }
         #name-entry-overlay input:focus { outline: none; }
+        @media (max-width: 760px) {
+          #how-to-play-panel { display: none; }
+        }
       `;
       document.head.appendChild(style);
     }
@@ -825,6 +1256,7 @@ export class NameEntryOverlay {
     const rawName = this._nameInput.value.trim().toUpperCase();
     const name = rawName.length > 0 ? rawName : (this._nameInput.placeholder || this._randomName());
     this._cosmos.stop();
+    this._howToPlay.stop();
     this._overlay.style.opacity = '0';
     this._overlay.style.transition = 'opacity 0.4s ease';
     setTimeout(() => {
@@ -839,6 +1271,7 @@ export class NameEntryOverlay {
     this._overlay.style.display = 'flex';
     this._overlay.style.opacity = '1';
     this._cosmos.start();
+    this._howToPlay.start();
     setTimeout(() => this._nameInput.focus(), 50);
     return new Promise(resolve => { this._resolve = resolve; });
   }

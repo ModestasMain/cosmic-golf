@@ -3,7 +3,7 @@
 // ============================================================
 
 import { WebGLRenderer, Vector2 } from 'three';
-import { EffectComposer, RenderPass, BloomEffect, EffectPass, VignetteEffect, ChromaticAberrationEffect, DepthOfFieldEffect, TiltShiftEffect } from 'postprocessing';
+import { EffectComposer, RenderPass, BloomEffect, EffectPass, VignetteEffect, ChromaticAberrationEffect, DepthOfFieldEffect, TiltShiftEffect, SMAAEffect, SMAAPreset } from 'postprocessing';
 import { eventBus, Events } from './core/EventBus.js';
 import { gameState } from './core/GameState.js';
 import { InputSystem } from './systems/InputSystem.js';
@@ -98,7 +98,10 @@ class Game {
       feather:   0.3,
     });
 
+    this.smaa = new SMAAEffect({ preset: SMAAPreset.HIGH });
+
     this.composer.addPass(new EffectPass(camera, this.bloom, this.chromAb, this.vignette));
+    this.composer.addPass(new EffectPass(camera, this.smaa));
     this.blurPass = new EffectPass(camera, this.dof, this.tiltShift);
     this._blurPassAdded = false; // added to composer on first use
 

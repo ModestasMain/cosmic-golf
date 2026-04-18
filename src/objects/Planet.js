@@ -530,7 +530,7 @@ export class Planet {
   }
 
   _buildMesh(seq) {
-    const geo = new SphereGeometry(this.radius, 28, 20);
+    const geo = new SphereGeometry(this.radius, 36, 26);
     const s   = Math.floor(seq() * 99999);
 
     const override = textureManager.getPlanetOverride();
@@ -689,7 +689,7 @@ export class Planet {
     // Expose the uniform object — setOpacity() and update() write to .value directly
     this._glowMult = mat.uniforms.glowMult;
 
-    const geo = new SphereGeometry(this.radius * scale, 16, 12);
+    const geo = new SphereGeometry(this.radius * scale, 24, 18);
     this.glowMesh = new Mesh(geo, mat);
     this.bodyGroup.add(this.glowMesh);
   }

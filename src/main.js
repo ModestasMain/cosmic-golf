@@ -3,7 +3,7 @@
 // ============================================================
 
 import { WebGLRenderer, Vector2 } from 'three';
-import { EffectComposer, RenderPass, BloomEffect, EffectPass, VignetteEffect, ChromaticAberrationEffect } from 'postprocessing';
+import { EffectComposer, RenderPass, BloomEffect, EffectPass, VignetteEffect, ChromaticAberrationEffect, DepthOfFieldEffect, TiltShiftEffect } from 'postprocessing';
 import { eventBus, Events } from './core/EventBus.js';
 import { gameState } from './core/GameState.js';
 import { InputSystem } from './systems/InputSystem.js';
@@ -69,10 +69,10 @@ class Game {
     this.composer.addPass(new RenderPass(scene, camera));
 
     this.bloom = new BloomEffect({
-      intensity: 0,
-      luminanceThreshold: 0.28,
-      luminanceSmoothing: 0.45,
-      mipmapBlur: true,
+      intensity:           0,
+      luminanceThreshold:  0.28,
+      luminanceSmoothing:  0.45,
+      mipmapBlur:          true,
     });
 
     this.chromAb = new ChromaticAberrationEffect({
@@ -80,20 +80,39 @@ class Game {
     });
 
     this.vignette = new VignetteEffect({
-      offset: 0,
-      darkness: 0,
+      offset:   0.3,
+      darkness: 0.8,
+    });
+
+    this.dof = new DepthOfFieldEffect(camera, {
+      focusDistance: 10,
+      focusRange:    6,
+      bokehScale:    0,
+    });
+
+    this.tiltShift = new TiltShiftEffect({
+      offset:    0.0,
+      rotation:  0.0,
+      focusArea: 0.85,
+      feather:   0.3,
     });
 
     this.composer.addPass(new EffectPass(camera, this.bloom, this.chromAb, this.vignette));
+    this.blurPass = new EffectPass(camera, this.dof, this.tiltShift);
+    this._blurPassAdded = false; // added to composer on first use
 
     // Dev panel — toggle with backtick key
     this.devPanel = new DevPanel({
-      spaceBg:   this.holeScene.spaceBg,
-      starField: this.holeScene.starField,
-      holeScene: this.holeScene,
-      bloom:     this.bloom,
-      vignette:  this.vignette,
-      chromAb:   this.chromAb,
+      spaceBg:    this.holeScene.spaceBg,
+      starField:  this.holeScene.starField,
+      blurPass:   this.blurPass,
+      composer:   this.composer,
+      holeScene:  this.holeScene,
+      bloom:      this.bloom,
+      vignette:   this.vignette,
+      chromAb:    this.chromAb,
+      dof:        this.dof,
+      tiltShift:  this.tiltShift,
     });
   }
 

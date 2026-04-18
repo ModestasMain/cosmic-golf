@@ -666,22 +666,8 @@ export class InputSystem {
   get orbitActive() { return this._orbitActive; }
 
   _updateOrbitBtn() {
-    const btn = this._orbitBtn;
-    if (!btn) return;
-    if (this._orbitToggleAllowed || this._orbitActive) {
-      btn.style.display = 'flex';
-    } else {
-      btn.style.display = 'none';
-    }
-    if (this._orbitActive) {
-      btn.style.borderColor = 'rgba(80,220,255,0.9)';
-      btn.style.boxShadow = '0 0 12px rgba(80,220,255,0.5), 0 0 24px rgba(80,220,255,0.25)';
-      btn.style.background = 'rgba(30,60,120,0.85)';
-    } else {
-      btn.style.borderColor = 'rgba(100,160,255,0.35)';
-      btn.style.boxShadow = 'none';
-      btn.style.background = 'rgba(10,12,30,0.75)';
-    }
+    // Orbit feature disabled — always hide the button
+    if (this._orbitBtn) this._orbitBtn.style.display = 'none';
   }
 
   showBar() {

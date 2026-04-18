@@ -158,7 +158,14 @@ export class DevPanel {
 
   // ── POST FX ─────────────────────────────────────────────────
   _buildPostFX(gui) {
-    const { bloom, vignette, chromAb } = this._refs;
+    const { bloom, vignette, chromAb, dof, tiltShift, blurPass, composer } = this._refs;
+    let blurAdded = false;
+    const enableBlur = () => {
+      if (!blurAdded && blurPass && composer) {
+        composer.addPass(blurPass);
+        blurAdded = true;
+      }
+    };
 
     const p = {
       bloomIntensity:   bloom.intensity,
@@ -167,6 +174,13 @@ export class DevPanel {
       vignetteOffset:   vignette.offset,
       vignetteDarkness: vignette.darkness,
       chromOffset:      chromAb.offset.x,
+      dofBokeh:         dof.bokehScale,
+      dofFocusDist:     dof.cocMaterial.focusDistance,
+      dofFocusRange:    dof.cocMaterial.focusRange,
+      tiltFocusArea:    tiltShift.focusArea,
+      tiltFeather:      tiltShift.feather,
+      tiltOffset:       tiltShift.offset,
+      tiltRotation:     tiltShift.rotation,
     };
 
     const f = gui.addFolder('✨ Post FX');
@@ -181,7 +195,25 @@ export class DevPanel {
     vF.add(p, 'vignetteDarkness', 0, 1,   0.01).name('Darkness')   .onChange(v => { vignette.darkness = v; });
 
     const cF = f.addFolder('Chromatic Aberration');
-    cF.add(p, 'chromOffset', 0, 0.01, 0.0001)   .name('Offset')    .onChange(v => { chromAb.offset.set(v, v); });
+    cF.add(p, 'chromOffset', 0, 0.01, 0.0001)  .name('Offset')     .onChange(v => { chromAb.offset.set(v, v); });
+
+    const dofF = f.addFolder('🔭 Depth of Field');
+    dofF.add(p, 'dofBokeh',      0, 10,   0.1).name('Bokeh scale (0=off)')
+      .onChange(v => { enableBlur(); dof.bokehScale = v; });
+    dofF.add(p, 'dofFocusDist',  0, 500,  1)  .name('Focus distance (world units)')
+      .onChange(v => { enableBlur(); dof.cocMaterial.focusDistance = v; });
+    dofF.add(p, 'dofFocusRange', 0, 200,  1)  .name('Focus range (depth of band)')
+      .onChange(v => { enableBlur(); dof.cocMaterial.focusRange = v; });
+
+    const tsF = f.addFolder('🎞 Tilt Shift Blur');
+    tsF.add(p, 'tiltFocusArea', 0,  1,  0.01) .name('Focus area (1=off, 0=full blur)')
+      .onChange(v => { enableBlur(); tiltShift.focusArea = v; });
+    tsF.add(p, 'tiltFeather',   0,  1,  0.01) .name('Feather')
+      .onChange(v => { enableBlur(); tiltShift.feather = v; });
+    tsF.add(p, 'tiltOffset',   -1,  1,  0.01) .name('Offset (up/down)')
+      .onChange(v => { enableBlur(); tiltShift.offset = v; });
+    tsF.add(p, 'tiltRotation', -Math.PI, Math.PI, 0.01).name('Rotation')
+      .onChange(v => { enableBlur(); tiltShift.rotation = v; });
 
     f.add({ copy: () => this._copy('PostFX', p) }, 'copy').name('📋 Copy JSON');
   }

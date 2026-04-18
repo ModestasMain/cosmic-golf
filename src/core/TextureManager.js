@@ -97,6 +97,11 @@ class TextureManager {
     const idx = Math.abs(Math.floor(base)) % pool.length;
     return pool[idx];
   }
+
+  getMercuryTexture() {
+    const pool = this._ensurePlanetPool();
+    return pool.find(t => t.name && t.name.includes('mercury')) ?? null;
+  }
 }
 
 export const textureManager = new TextureManager();

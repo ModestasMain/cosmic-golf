@@ -203,44 +203,39 @@ export function simulateTrajectory(startPos, startVel, planets, allPlanets, step
       }
     }
 
-    // 3. Bounce handling + 3-bounce pin (with cooldown — mirrors HoleScene)
+    // 3. Bounce handling + 3-bounce pin (disabled in orbit mode — mirrors HoleScene)
     if (result.bounced) {
       if (bounceCooldownSteps <= 0) {
         bounceCooldownSteps = bounceCooldownTotal;
         hitFreezeFrames += 4; // mirror HoleScene: each bounce freezes physics for 4 frames
         bounceGraceSteps = bounceGraceTotal;
-        const pIdx = allPlanets.indexOf(result.bouncePlanet);
-        if (pIdx < 0) {
-          const altIdx = planets.indexOf(result.bouncePlanet);
-          if (altIdx >= 0) {
-            // In orbit mode the bounce planet is in `planets` not `allPlanets`
-            // Find it in allPlanets by reference
+
+        if (!orbitPlanet) {
+          // Find the planet index in allPlanets
+          let foundIdx = -1;
+          for (let j = 0; j < allPlanets.length; j++) {
+            if (allPlanets[j] === result.bouncePlanet) { foundIdx = j; break; }
           }
-        }
-        // Find the planet index in allPlanets
-        let foundIdx = -1;
-        for (let j = 0; j < allPlanets.length; j++) {
-          if (allPlanets[j] === result.bouncePlanet) { foundIdx = j; break; }
-        }
-        if (foundIdx >= 0) {
-          if (foundIdx === bouncePlanetIdx) {
-            bounceStreak++;
+          if (foundIdx >= 0) {
+            if (foundIdx === bouncePlanetIdx) {
+              bounceStreak++;
+            } else {
+              bouncePlanetIdx = foundIdx;
+              bounceStreak = 1;
+            }
+            if (bounceStreak >= 3) {
+              _bounceNormal.subVectors(ball.position, result.bouncePlanet.position).normalize();
+              ball.position.copy(result.bouncePlanet.position).addScaledVector(_bounceNormal, result.bouncePlanet.radius + BALL.RADIUS);
+              ball.velocity.set(0, 0, 0);
+              points.push(ball.position.clone());
+              danger.push(0);
+              stopReason = 'pinned';
+              return { points, danger, stopReason };
+            }
           } else {
-            bouncePlanetIdx = foundIdx;
-            bounceStreak = 1;
+            bouncePlanetIdx = -1;
+            bounceStreak = 0;
           }
-          if (bounceStreak >= 3) {
-            _bounceNormal.subVectors(ball.position, result.bouncePlanet.position).normalize();
-            ball.position.copy(result.bouncePlanet.position).addScaledVector(_bounceNormal, result.bouncePlanet.radius + BALL.RADIUS);
-            ball.velocity.set(0, 0, 0);
-            points.push(ball.position.clone());
-            danger.push(0);
-            stopReason = 'pinned';
-            return { points, danger, stopReason };
-          }
-        } else {
-          bouncePlanetIdx = -1;
-          bounceStreak = 0;
         }
       }
     }

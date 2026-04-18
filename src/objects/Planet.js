@@ -494,16 +494,18 @@ function buildMoon(group, parentRadius, color, seed) {
   group.add(orbit);
 
   const geo = new SphereGeometry(moonR, 12, 8);
-  const col = new Color(color);
-  // Moons are desaturated — grey-ish tint of parent color
-  col.lerp(new Color(0x888888), 0.5);
-  // MeshBasicMaterial: moons render at their natural grey without being washed out by scene lighting
-  const mat = new MeshBasicMaterial({ color: col });
+  const mercuryTex = textureManager.getMercuryTexture();
+  const mat = mercuryTex
+    ? new MeshStandardMaterial({ map: mercuryTex, roughness: 0.85, metalness: 0.0, emissive: 0x111111, emissiveIntensity: 0.06 })
+    : new MeshStandardMaterial({ color: new Color(color).lerp(new Color(0x888888), 0.5), roughness: 0.85, metalness: 0.0 });
   const mesh = new Mesh(geo, mat);
   mesh.position.x = orbitR;
   orbit.add(mesh);
 
-  return { orbit, speed: 0.15 + seq() * 0.4, mesh };
+  const bobAmp   = orbitR * (0.08 + seq() * 0.12); // radial drift amplitude
+  const bobFreq  = 0.4 + seq() * 0.8;             // bob frequency (rad/s)
+  const bobPhase = seq() * Math.PI * 2;
+  return { orbit, speed: 0.5 + seq() * 1.0, mesh, orbitR, bobAmp, bobFreq, bobPhase };
 }
 
 // ── Planet type selector ──────────────────────────────────────
@@ -564,7 +566,15 @@ export class Planet {
       texture = override;
       this._hasCustomTexture = true;
       this._textureName = override.name ?? '';
-    } else {
+    } else if (this.radius < 26) {
+      const mercuryTex = textureManager.getMercuryTexture();
+      if (mercuryTex) {
+        texture = mercuryTex;
+        this._hasCustomTexture = true;
+        this._textureName = mercuryTex.name ?? '';
+      }
+    }
+    if (!texture) {
       const poolTex = textureManager.getRandomPlanetTexture(s);
       if (poolTex) {
         texture = poolTex;
@@ -608,11 +618,9 @@ export class Planet {
     };
 
     if (this._hasCustomTexture) {
-      // Custom / AI-generated texture: MeshBasicMaterial ignores all scene lighting,
-      // so the image displays at its exact pixel colors without being washed out.
-      this._matOpaque      = new MeshBasicMaterial({ map: texture });
-      this._matTransparent = new MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false, opacity: 0.3 });
-      this._baseEmissiveIntensity = 0;
+      this._matOpaque = new MeshStandardMaterial({ map: texture, roughness: 0.8, metalness: 0.0, emissive: 0x111111, emissiveIntensity: 0.08 });
+      this._matTransparent = new MeshStandardMaterial({ map: texture, roughness: 0.8, metalness: 0.0, transparent: true, depthWrite: false, opacity: 0.3 });
+      this._baseEmissiveIntensity = 0.08;
     } else {
       // Opaque material — default, writes depth, fully solid
       this._matOpaque = new MeshStandardMaterial({ ...sharedProps });
@@ -961,9 +969,13 @@ export class Planet {
       if (this._cloudMesh)     this._cloudMesh.rotation.y     += this._cloudSpinRate  * dt;
       if (this._cityLightsMesh) this._cityLightsMesh.rotation.y += this._cityLightsRate * dt;
       if (this._ringGroup)     this._ringGroup.rotation.y     += this._ringSpinRate   * dt;
-      for (const m of this._moons) {
-        m.orbit.rotation.y += m.speed * dt;
-      }
+    }
+
+    // Moons always orbit regardless of frozen state
+    for (const m of this._moons) {
+      m.orbit.rotation.y += m.speed * dt;
+      m.mesh.position.x = m.orbitR + Math.sin(t * m.bobFreq + m.bobPhase) * m.bobAmp;
+      m.mesh.position.y = Math.cos(t * m.bobFreq * 0.7 + m.bobPhase) * m.bobAmp * 0.5;
     }
 
     // Lava planet: emissive flicker + animated crack overlay

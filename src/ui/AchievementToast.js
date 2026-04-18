@@ -6,6 +6,8 @@ export class AchievementToast {
   constructor() {
     this._queue = [];
     this._showing = false;
+    this._hideTimer = null;
+    this._nextTimer = null;
     this._build();
   }
 
@@ -29,7 +31,13 @@ export class AchievementToast {
     if (!this._showing) this._showNext();
   }
 
+  _clearTimers() {
+    if (this._hideTimer) { clearTimeout(this._hideTimer); this._hideTimer = null; }
+    if (this._nextTimer) { clearTimeout(this._nextTimer); this._nextTimer = null; }
+  }
+
   _showNext() {
+    this._clearTimers();
     if (this._queue.length === 0) {
       this._showing = false;
       return;
@@ -86,9 +94,11 @@ export class AchievementToast {
       this._el.style.top = '16px';
     });
 
-    setTimeout(() => {
+    this._hideTimer = setTimeout(() => {
+      this._hideTimer = null;
       this._el.style.top = '-80px';
-      setTimeout(() => {
+      this._nextTimer = setTimeout(() => {
+        this._nextTimer = null;
         this._showNext();
       }, 500);
     }, 3500);
@@ -126,6 +136,7 @@ export class AchievementToast {
   }
 
   dispose() {
+    this._clearTimers();
     this._el.remove();
   }
 }

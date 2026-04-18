@@ -383,33 +383,6 @@ function makeTextureSand(color, seed) {
 
 // ── City-lights texture — scattered warm/cool dots for TERRAN night side ─
 
-function makeTextureCityLights(seed) {
-  const c = document.createElement('canvas'); c.width = c.height = R;
-  const ctx = c.getContext('2d');
-  ctx.fillStyle = '#000000'; ctx.fillRect(0, 0, R, R);
-  const seq = makeSeq(seed + 9999);
-
-  const clusters = 6 + Math.floor(seq() * 7);
-  for (let i = 0; i < clusters; i++) {
-    const cx = seq() * R;
-    const cy = seq() * R;
-    const dots = 6 + Math.floor(seq() * 18);
-    for (let j = 0; j < dots; j++) {
-      const x = cx + (seq() - 0.5) * 80;
-      const y = cy + (seq() - 0.5) * 55;
-      const r = 0.6 + seq() * 2.4;
-      const warm = seq() > 0.55; // orange-warm or blue-cool
-      const a = 0.5 + seq() * 0.5;
-      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fillStyle = warm
-        ? `rgba(255,${180 + Math.floor(seq() * 75)},${80 + Math.floor(seq() * 80)},${a})`
-        : `rgba(${160 + Math.floor(seq() * 80)},${200 + Math.floor(seq() * 55)},255,${a})`;
-      ctx.fill();
-    }
-  }
-  return new CanvasTexture(c);
-}
-
 function makeCraterTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = 128;
@@ -496,8 +469,8 @@ function buildMoon(group, parentRadius, color, seed) {
   const geo = new SphereGeometry(moonR, 12, 8);
   const mercuryTex = textureManager.getMercuryTexture();
   const mat = mercuryTex
-    ? new MeshStandardMaterial({ map: mercuryTex, roughness: 0.85, metalness: 0.0, emissive: 0x111111, emissiveIntensity: 0.06 })
-    : new MeshStandardMaterial({ color: new Color(color).lerp(new Color(0x888888), 0.5), roughness: 0.85, metalness: 0.0 });
+    ? new MeshBasicMaterial({ map: mercuryTex })
+    : new MeshBasicMaterial({ color: new Color(color).lerp(new Color(0x888888), 0.5) });
   const mesh = new Mesh(geo, mat);
   mesh.position.x = orbitR;
   orbit.add(mesh);
@@ -557,7 +530,7 @@ export class Planet {
   }
 
   _buildMesh(seq) {
-    const geo = new SphereGeometry(this.radius, 40, 30);
+    const geo = new SphereGeometry(this.radius, 28, 20);
     const s   = Math.floor(seq() * 99999);
 
     const override = textureManager.getPlanetOverride();
@@ -618,8 +591,8 @@ export class Planet {
     };
 
     if (this._hasCustomTexture) {
-      this._matOpaque = new MeshStandardMaterial({ map: texture, roughness: 0.8, metalness: 0.0, emissive: 0x111111, emissiveIntensity: 0.08 });
-      this._matTransparent = new MeshStandardMaterial({ map: texture, roughness: 0.8, metalness: 0.0, transparent: true, depthWrite: false, opacity: 0.3 });
+      this._matOpaque = new MeshStandardMaterial({ map: texture, roughness: 0.55, metalness: 0.05, emissive: 0x111111, emissiveIntensity: 0.06 });
+      this._matTransparent = new MeshStandardMaterial({ map: texture, roughness: 0.55, metalness: 0.05, transparent: true, depthWrite: false, opacity: 0.3 });
       this._baseEmissiveIntensity = 0.08;
     } else {
       // Opaque material — default, writes depth, fully solid
@@ -662,34 +635,49 @@ export class Planet {
 
     this._baseGlowOpacity = strength;
 
-    // ShaderMaterial fresnel — works with WebGLRenderer, same visual as TSL version.
-    // Using abs(nDotV) handles BackSide normals correctly (edge-on = 0 → bright rim).
+    // Sun direction — matches dirLight.position in HoleScene (normalised once)
+    const SUN_DIR = new Vector3(50, 80, 60).normalize();
+
     const mat = new ShaderMaterial({
       uniforms: {
         glowColor: { value: baseCol.clone() },
         power:     { value: power },
         glowMult:  { value: strength },
+        sunDir:    { value: SUN_DIR },
       },
       vertexShader: /* glsl */`
         varying vec3 vWorldNormal;
         varying vec3 vWorldPosition;
         void main() {
-          vWorldNormal    = normalize(mat3(modelMatrix) * normal);
-          vWorldPosition  = (modelMatrix * vec4(position, 1.0)).xyz;
-          gl_Position     = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          vWorldNormal   = normalize(mat3(modelMatrix) * normal);
+          vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;
+          gl_Position    = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         }
       `,
       fragmentShader: /* glsl */`
         uniform vec3  glowColor;
         uniform float power;
         uniform float glowMult;
+        uniform vec3  sunDir;
         varying vec3  vWorldNormal;
         varying vec3  vWorldPosition;
         void main() {
+          vec3  n       = normalize(vWorldNormal);
           vec3  viewDir = normalize(cameraPosition - vWorldPosition);
-          float nDotV   = abs(dot(normalize(vWorldNormal), viewDir));
+          float nDotV   = abs(dot(n, viewDir));
           float fresnel = pow(1.0 - nDotV, power);
-          gl_FragColor  = vec4(glowColor * fresnel * glowMult, 1.0);
+
+          // Sun-facing factor: positive on lit side, negative on dark side.
+          // Offset by +0.35 so the dark limb retains a faint scatter glow.
+          float sunFacing = dot(n, sunDir);
+          float sunMask   = smoothstep(-0.5, 0.6, sunFacing + 0.35);
+
+          // Warm the lit-side glow slightly toward white, cool the dark scatter
+          vec3 litColor  = mix(glowColor, glowColor * 1.6 + vec3(0.15, 0.10, 0.05), sunMask);
+          vec3 col       = litColor * fresnel * glowMult * sunMask
+                         + glowColor * fresnel * glowMult * 0.12; // dark-side scatter
+
+          gl_FragColor = vec4(col, fresnel * glowMult);
         }
       `,
       transparent: true,
@@ -701,14 +689,14 @@ export class Planet {
     // Expose the uniform object — setOpacity() and update() write to .value directly
     this._glowMult = mat.uniforms.glowMult;
 
-    const geo = new SphereGeometry(this.radius * scale, 24, 18);
+    const geo = new SphereGeometry(this.radius * scale, 16, 12);
     this.glowMesh = new Mesh(geo, mat);
     this.bodyGroup.add(this.glowMesh);
   }
 
   _buildTrajectoryHighlight() {
     // Slightly larger than the atmosphere (1.12x) so it glows outward as a halo
-    const geo = new SphereGeometry(this.radius * 1.22, 20, 14);
+    const geo = new SphereGeometry(this.radius * 1.22, 14, 10);
     // Use the atmosphere color (already stored in glowMesh uniform) brightened
     const atmoColor = this.glowMesh
       ? this.glowMesh.material.uniforms.glowColor.value.clone()
@@ -744,128 +732,12 @@ export class Planet {
       this._ringSpinRate = (seq() - 0.5) * 0.06;
     }
 
-    const allowProceduralOverlays = !this._hasCustomTexture;
-
-    // Cloud layer for TERRAN and GAS
-    if (allowProceduralOverlays && (this.type === 'TERRAN' || this.type === 'GAS')) {
-      const cloudGeo = new SphereGeometry(this.radius * 1.04, 28, 20);
-      const cloudTex = makeTextureTerran(0xffffff, seed + 333);
-      this._textures.push(cloudTex);
-      const cloudMat = new MeshBasicMaterial({
-        map: cloudTex, transparent: true,
-        opacity: 0.04, depthWrite: false, blending: AdditiveBlending,
-      });
-      this._cloudMesh     = new Mesh(cloudGeo, cloudMat);
-      this._cloudSpinRate = (seq() - 0.5) * 0.08;
-      this.bodyGroup.add(this._cloudMesh);
-    }
-
-    // City lights for TERRAN — visible on the night side only (additive overlay)
-    if (allowProceduralOverlays && this.type === 'TERRAN') {
-      const lightsTex = makeTextureCityLights(seed + 7777);
-      this._textures.push(lightsTex);
-      const lightsMat = new MeshBasicMaterial({
-        map: lightsTex, transparent: true,
-        opacity: 0.55, depthWrite: false, blending: AdditiveBlending,
-      });
-      this._cityLightsMesh = new Mesh(
-        new SphereGeometry(this.radius * 1.002, 28, 20),
-        lightsMat,
-      );
-      // City lights rotate very slowly opposite to clouds — subtle parallax
-      this._cityLightsRate = -(this._cloudSpinRate ?? 0.04) * 0.3;
-      this.bodyGroup.add(this._cityLightsMesh);
-    }
-
     // 0–2 moons — larger planets more likely to have them
     const moonChance = this.radius > 18 ? 0.8 : this.radius > 13 ? 0.45 : 0.2;
     const moonCount  = seq() < moonChance ? (seq() < 0.35 ? 2 : 1) : 0;
     for (let i = 0; i < moonCount; i++) {
       this._moons.push(buildMoon(this.group, this.radius, this.color, seed + i * 1000 + 77));
     }
-
-    // Lava: animated overlay makes glowing cracks appear to flow
-    if (allowProceduralOverlays && this.type === 'LAVA') {
-      this._buildLavaAnimation();
-    }
-
-    // Ice: specular shimmer overlay — starlight glinting off the frozen surface
-    if (allowProceduralOverlays && this.type === 'ICE') {
-      this._buildIceShimmer();
-    }
-  }
-
-  _buildIceShimmer() {
-    // ShaderMaterial that produces animated specular glints on the ice surface.
-    // A virtual light source rotates slowly, creating the impression of starlight
-    // catching facets and ice crystals as the planet turns.
-    const col = new Color(this.color);
-    col.lerp(new Color(0xffffff), 0.75);
-
-    const mat = new ShaderMaterial({
-      uniforms: {
-        shimmerColor: { value: col },
-        shimmerTime:  { value: 0 },
-      },
-      vertexShader: /* glsl */`
-        varying vec3 vWorldNormal;
-        varying vec3 vWorldPosition;
-        void main() {
-          vWorldNormal   = normalize(mat3(modelMatrix) * normal);
-          vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;
-          gl_Position    = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }
-      `,
-      fragmentShader: /* glsl */`
-        uniform vec3  shimmerColor;
-        uniform float shimmerTime;
-        varying vec3  vWorldNormal;
-        varying vec3  vWorldPosition;
-        void main() {
-          vec3 viewDir  = normalize(cameraPosition - vWorldPosition);
-          // Slowly rotating virtual light — three overlapping sources for richness
-          vec3 l1 = normalize(vec3(sin(shimmerTime * 0.27),  cos(shimmerTime * 0.19),  sin(shimmerTime * 0.13)));
-          vec3 l2 = normalize(vec3(cos(shimmerTime * 0.21), -sin(shimmerTime * 0.31),  cos(shimmerTime * 0.17)));
-          vec3 l3 = normalize(vec3(sin(shimmerTime * 0.15),  sin(shimmerTime * 0.23), -cos(shimmerTime * 0.29)));
-          vec3 n  = normalize(vWorldNormal);
-          float s1 = pow(max(0.0, dot(n, normalize(viewDir + l1))), 12.0);
-          float s2 = pow(max(0.0, dot(n, normalize(viewDir + l2))), 18.0);
-          float s3 = pow(max(0.0, dot(n, normalize(viewDir + l3))), 24.0);
-          float shimmer = s1 * 0.22 + s2 * 0.16 + s3 * 0.10;
-          gl_FragColor  = vec4(shimmerColor * shimmer, 1.0);
-        }
-      `,
-      transparent: true,
-      depthWrite:  false,
-      blending:    AdditiveBlending,
-    });
-
-    this._iceShimmerMat = mat;
-    const geo = new SphereGeometry(this.radius * 1.001, 36, 26);
-    this._iceShimmerMesh = new Mesh(geo, mat);
-    this.bodyGroup.add(this._iceShimmerMesh);
-  }
-
-  _buildLavaAnimation() {
-    // Overlay mesh with a cloned, tiling copy of the lava texture.
-    // UV offset is incremented each frame in update() to make cracks appear to flow.
-    // Additive blending: bright cracks/pools accumulate, dark crust stays invisible.
-    const lavaTex = this._textures[0].clone();
-    lavaTex.wrapS = lavaTex.wrapT = RepeatWrapping;
-    lavaTex.needsUpdate = true;
-    this._textures.push(lavaTex);
-
-    const mat = new MeshBasicMaterial({
-      map:         lavaTex,
-      transparent: true,
-      depthWrite:  false,
-      blending:    AdditiveBlending,
-      opacity:     0.22,
-    });
-
-    const geo = new SphereGeometry(this.radius * 1.002, 36, 26);
-    this._lavaAnimMesh = new Mesh(geo, mat);
-    this.bodyGroup.add(this._lavaAnimMesh);
   }
 
   /**
@@ -966,8 +838,6 @@ export class Planet {
     // Self-rotation (frozen during STATIC event)
     if (!frozen) {
       this.mesh.rotation.y += this._spinSpeed * dt;
-      if (this._cloudMesh)     this._cloudMesh.rotation.y     += this._cloudSpinRate  * dt;
-      if (this._cityLightsMesh) this._cityLightsMesh.rotation.y += this._cityLightsRate * dt;
       if (this._ringGroup)     this._ringGroup.rotation.y     += this._ringSpinRate   * dt;
     }
 
@@ -978,17 +848,12 @@ export class Planet {
       m.mesh.position.y = Math.cos(t * m.bobFreq * 0.7 + m.bobPhase) * m.bobAmp * 0.5;
     }
 
-    // Lava planet: emissive flicker + animated crack overlay
+    // Lava planet: emissive flicker
     if (this.type === 'LAVA' && !this._hasCustomTexture) {
       const flicker = 0.28 + Math.sin(t * 3.9) * 0.09 + Math.sin(t * 7.3) * 0.05
                            + Math.sin(t * 13.1) * 0.02;
       this._matOpaque.emissiveIntensity      = flicker;
       this._matTransparent.emissiveIntensity = flicker * 0.25;
-      // Scroll the lava overlay UV to make cracks appear to flow
-      if (this._lavaAnimMesh) {
-        const map = this._lavaAnimMesh.material.map;
-        map.offset.set(t * 0.007, t * 0.003);
-      }
     }
 
     // UV animation — skip if a custom texture is active (would scroll the user's image)
@@ -1003,11 +868,6 @@ export class Planet {
         const map = this._matOpaque.map;
         if (map) map.offset.set(t * 0.004, t * 0.002);
       }
-    }
-
-    // Ice specular shimmer — update time uniform
-    if (this._iceShimmerMat) {
-      this._iceShimmerMat.uniforms.shimmerTime.value = t;
     }
 
     // Atmosphere breathe — gentle sine pulse on glow (skip while celebration is active)
@@ -1090,13 +950,9 @@ export class Planet {
     for (const t of this._textures) t.dispose();
     this.glowMesh.geometry.dispose();
     this.glowMesh.material.dispose();
-    if (this._lavaAnimMesh)   { this._lavaAnimMesh.geometry.dispose();   this._lavaAnimMesh.material.dispose(); }
-    if (this._iceShimmerMesh) { this._iceShimmerMesh.geometry.dispose(); this._iceShimmerMesh.material.dispose(); }
     if (this._ringGroup) {
       this._ringGroup.traverse(c => { if (c.isMesh) { c.geometry.dispose(); c.material.dispose(); } });
     }
-    if (this._cloudMesh)      { this._cloudMesh.geometry.dispose();      this._cloudMesh.material.dispose(); }
-    if (this._cityLightsMesh) { this._cityLightsMesh.geometry.dispose(); this._cityLightsMesh.material.dispose(); }
     for (const m of this._moons) {
       m.mesh.geometry.dispose(); m.mesh.material.dispose();
     }

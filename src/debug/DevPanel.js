@@ -123,15 +123,59 @@ export class DevPanel {
     const dir  = holeScene.dirLight;
     const hemi = holeScene.hemiLight;
 
+    // Helper: push new sun direction to all planet atmosphere shaders
+    const syncSunDir = (x, y, z) => {
+      const len = Math.sqrt(x*x + y*y + z*z) || 1;
+      const nx = x/len, ny = y/len, nz = z/len;
+      if (!holeScene.planetObjects) return;
+      for (const planet of holeScene.planetObjects) {
+        if (!planet.glowMesh) continue;
+        const u = planet.glowMesh.material.uniforms?.sunDir;
+        if (u) { u.value.set(nx, ny, nz); }
+      }
+    };
+
+    // Helper: push roughness/metalness to all planet surface materials
+    const syncPlanetMat = (roughness, metalness) => {
+      if (!holeScene.planetObjects) return;
+      for (const planet of holeScene.planetObjects) {
+        for (const mat of [planet._matOpaque, planet._matTransparent]) {
+          if (mat && mat.roughness !== undefined) {
+            mat.roughness  = roughness;
+            mat.metalness  = metalness;
+            mat.needsUpdate = true;
+          }
+        }
+      }
+    };
+
+    // Helper: push glow power / mult to all planet atmosphere shaders
+    const syncAtmo = (power, mult) => {
+      if (!holeScene.planetObjects) return;
+      for (const planet of holeScene.planetObjects) {
+        if (!planet.glowMesh) continue;
+        const u = planet.glowMesh.material.uniforms;
+        if (u?.power)    u.power.value    = power;
+        if (u?.glowMult) u.glowMult.value = mult;
+      }
+    };
+
     const p = {
-      ambColor:      '#' + amb.color.getHexString(),
-      ambIntensity:  amb.intensity,
-      dirColor:      '#' + dir.color.getHexString(),
-      dirIntensity:  dir.intensity,
-      hemiSky:       '#' + hemi.color.getHexString(),
-      hemiGround:    '#' + hemi.groundColor.getHexString(),
-      hemiIntensity: hemi.intensity,
-      lockLighting:  false,
+      ambColor:       '#' + amb.color.getHexString(),
+      ambIntensity:   amb.intensity,
+      dirColor:       '#' + dir.color.getHexString(),
+      dirIntensity:   dir.intensity,
+      dirX:           dir.position.x,
+      dirY:           dir.position.y,
+      dirZ:           dir.position.z,
+      hemiSky:        '#' + hemi.color.getHexString(),
+      hemiGround:     '#' + hemi.groundColor.getHexString(),
+      hemiIntensity:  hemi.intensity,
+      atmoGlowPower:  1.0,
+      atmoGlowMult:   0.0,
+      planetRoughness: 0.7,
+      planetMetalness: 0.34,
+      lockLighting:   false,
     };
     holeScene._devLightLock = false;
 
@@ -141,17 +185,32 @@ export class DevPanel {
       .onChange(v => { holeScene._devLightLock = v; });
 
     const aF = f.addFolder('Ambient');
-    aF.addColor(p, 'ambColor')              .name('Colour')    .onChange(v => amb.color.set(v));
-    aF.add(p, 'ambIntensity',  0, 3,  0.05) .name('Intensity') .onChange(v => { amb.intensity = v; });
+    aF.addColor(p, 'ambColor')               .name('Colour')     .onChange(v => amb.color.set(v));
+    aF.add(p, 'ambIntensity',   0, 5,  0.05) .name('Intensity')  .onChange(v => { amb.intensity = v; });
 
-    const dF = f.addFolder('Directional');
-    dF.addColor(p, 'dirColor')              .name('Colour')    .onChange(v => dir.color.set(v));
-    dF.add(p, 'dirIntensity',  0, 5,  0.05) .name('Intensity') .onChange(v => { dir.intensity = v; });
+    const dF = f.addFolder('Sun (Directional)');
+    dF.addColor(p, 'dirColor')               .name('Colour')     .onChange(v => dir.color.set(v));
+    dF.add(p, 'dirIntensity',   0, 10, 0.1)  .name('Intensity')  .onChange(v => { dir.intensity = v; });
+    const moveSun = () => {
+      syncSunDir(p.dirX, p.dirY, p.dirZ);
+      if (holeScene._moveSunTo) holeScene._moveSunTo(p.dirX, p.dirY, p.dirZ);
+    };
+    dF.add(p, 'dirX',          -200, 200, 1) .name('Position X') .onChange(v => { dir.position.x = v; moveSun(); });
+    dF.add(p, 'dirY',          -200, 200, 1) .name('Position Y') .onChange(v => { dir.position.y = v; moveSun(); });
+    dF.add(p, 'dirZ',          -200, 200, 1) .name('Position Z') .onChange(v => { dir.position.z = v; moveSun(); });
 
-    const hF = f.addFolder('Hemisphere');
-    hF.addColor(p, 'hemiSky')               .name('Sky')       .onChange(v => hemi.color.set(v));
-    hF.addColor(p, 'hemiGround')            .name('Ground')    .onChange(v => hemi.groundColor.set(v));
-    hF.add(p, 'hemiIntensity', 0, 3,  0.05) .name('Intensity') .onChange(v => { hemi.intensity = v; });
+    const hF = f.addFolder('Hemisphere (Galaxy fill)');
+    hF.addColor(p, 'hemiSky')                .name('Sky')        .onChange(v => hemi.color.set(v));
+    hF.addColor(p, 'hemiGround')             .name('Ground')     .onChange(v => hemi.groundColor.set(v));
+    hF.add(p, 'hemiIntensity',  0, 5,  0.05) .name('Intensity')  .onChange(v => { hemi.intensity = v; });
+
+    const atF = f.addFolder('Atmosphere Glow');
+    atF.add(p, 'atmoGlowPower',  1, 12, 0.1) .name('Fresnel power (tightness)') .onChange(v => syncAtmo(v, p.atmoGlowMult));
+    atF.add(p, 'atmoGlowMult',   0, 3,  0.05).name('Glow strength')              .onChange(v => syncAtmo(p.atmoGlowPower, v));
+
+    const pmF = f.addFolder('Planet Surface');
+    pmF.add(p, 'planetRoughness', 0, 1, 0.01).name('Roughness') .onChange(v => syncPlanetMat(v, p.planetMetalness));
+    pmF.add(p, 'planetMetalness', 0, 1, 0.01).name('Metalness') .onChange(v => syncPlanetMat(p.planetRoughness, v));
 
     f.add({ copy: () => this._copy('Lighting', p) }, 'copy').name('📋 Copy JSON');
   }

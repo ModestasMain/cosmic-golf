@@ -5,9 +5,9 @@
 
 import {
   Scene, PerspectiveCamera, AmbientLight, DirectionalLight, HemisphereLight,
-  Vector3, Quaternion, ArrowHelper, CanvasTexture, Color,
+  Vector3, Quaternion, ArrowHelper, CanvasTexture,
+  Sprite, SpriteMaterial, AdditiveBlending,
 } from 'three';
-import { Lensflare, LensflareElement } from 'three/examples/jsm/objects/Lensflare.js';
 import { update as tweenUpdate } from '@tweenjs/tween.js';
 import { eventBus, Events } from '../core/EventBus.js';
 import { gameState } from '../core/GameState.js';
@@ -185,20 +185,20 @@ export class HoleScene {
   }
 
   _setupLighting() {
-    this.ambientLight = new AmbientLight(0x000000, 0.4);
+    this.ambientLight = new AmbientLight(0xfff5f5, 2.25);
     this.scene.add(this.ambientLight);
 
-    this.dirLight = new DirectionalLight(0xffd6d6, 2.3);
-    this.dirLight.position.set(50, 80, 60);
+    this.dirLight = new DirectionalLight(0xffad14, 10);
+    this.dirLight.position.set(-33, 64, 61);
     this.scene.add(this.dirLight);
 
-    this.hemiLight = new HemisphereLight(0xa3a3a3, 0x000000, 3.0);
+    this.hemiLight = new HemisphereLight(0xffffff, 0xffffff, 0.4);
     this.scene.add(this.hemiLight);
 
-    this._addSunLensflare();
+    this._buildSunStar();
   }
 
-  _makeFlareTex(size, drawFn) {
+  _makeSpriteTex(size, drawFn) {
     const c = document.createElement('canvas');
     c.width = c.height = size;
     drawFn(c.getContext('2d'), size);
@@ -207,64 +207,88 @@ export class HoleScene {
     return tex;
   }
 
-  _addSunLensflare() {
-    // Main glow — large soft radial
-    const texGlow = this._makeFlareTex(256, (ctx, s) => {
-      const g = ctx.createRadialGradient(s/2, s/2, 0, s/2, s/2, s/2);
-      g.addColorStop(0,    'rgba(255,240,200,1)');
-      g.addColorStop(0.08, 'rgba(255,200,100,0.9)');
-      g.addColorStop(0.25, 'rgba(255,140,40,0.5)');
-      g.addColorStop(0.6,  'rgba(255,80,0,0.12)');
+  _buildSunStar() {
+    // Sun is placed very far along the directional light's direction
+    const SUN_DIST = 8000;
+    const sunDir = this.dirLight.position.clone().normalize();
+    const sunPos = sunDir.clone().multiplyScalar(SUN_DIST);
+
+    // ── 1. Hard disc — the actual star surface ──────────────────
+    const texDisc = this._makeSpriteTex(256, (ctx, s) => {
+      const cx = s / 2;
+      const g = ctx.createRadialGradient(cx, cx, 0, cx, cx, cx);
+      g.addColorStop(0,    'rgba(255,255,230,1)');
+      g.addColorStop(0.18, 'rgba(255,240,180,1)');
+      g.addColorStop(0.38, 'rgba(255,200,80,0.95)');
+      g.addColorStop(0.52, 'rgba(248,176,42,0.5)');
       g.addColorStop(1,    'rgba(0,0,0,0)');
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, s, s);
     });
 
-    // Starburst — thin spikes
-    const texBurst = this._makeFlareTex(256, (ctx, s) => {
-      ctx.clearRect(0, 0, s, s);
-      const cx = s / 2, cy = s / 2;
-      const spikes = 8;
-      ctx.save();
-      ctx.translate(cx, cy);
-      for (let i = 0; i < spikes; i++) {
-        ctx.rotate(Math.PI / spikes);
-        const g = ctx.createLinearGradient(-s/2, 0, s/2, 0);
-        g.addColorStop(0,    'rgba(255,220,120,0)');
-        g.addColorStop(0.48, 'rgba(255,240,180,0.9)');
-        g.addColorStop(0.5,  'rgba(255,255,255,1)');
-        g.addColorStop(0.52, 'rgba(255,240,180,0.9)');
-        g.addColorStop(1,    'rgba(255,220,120,0)');
-        ctx.fillStyle = g;
-        ctx.fillRect(-s/2, -1.5, s, 3);
-      }
-      ctx.restore();
-    });
-
-    // Small hexagon iris element
-    const texIris = this._makeFlareTex(64, (ctx, s) => {
-      const g = ctx.createRadialGradient(s/2, s/2, 0, s/2, s/2, s/2);
-      g.addColorStop(0,   'rgba(180,210,255,0.9)');
-      g.addColorStop(0.4, 'rgba(100,160,255,0.4)');
-      g.addColorStop(1,   'rgba(0,0,0,0)');
+    // ── 2. Wide soft corona ─────────────────────────────────────
+    const texCorona = this._makeSpriteTex(512, (ctx, s) => {
+      const cx = s / 2;
+      const g = ctx.createRadialGradient(cx, cx, 0, cx, cx, cx);
+      g.addColorStop(0,    'rgba(255,230,120,0.55)');
+      g.addColorStop(0.12, 'rgba(255,190,60,0.35)');
+      g.addColorStop(0.3,  'rgba(255,140,20,0.15)');
+      g.addColorStop(0.6,  'rgba(255,100,0,0.04)');
+      g.addColorStop(1,    'rgba(0,0,0,0)');
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, s, s);
     });
 
-    const lensflare = new Lensflare();
-    // Main glow at source (distance 0)
-    lensflare.addElement(new LensflareElement(texGlow,  700, 0,   new Color(1.0, 0.95, 0.7)));
-    // Starburst at source
-    lensflare.addElement(new LensflareElement(texBurst, 500, 0,   new Color(1.0, 0.90, 0.5)));
-    // Iris artifacts along the flare axis
-    lensflare.addElement(new LensflareElement(texIris,  60,  0.3, new Color(0.6, 0.8, 1.0)));
-    lensflare.addElement(new LensflareElement(texIris,  80,  0.5, new Color(0.4, 0.6, 1.0)));
-    lensflare.addElement(new LensflareElement(texIris,  40,  0.8, new Color(0.8, 0.5, 1.0)));
-    lensflare.addElement(new LensflareElement(texIris,  50,  1.0, new Color(1.0, 0.4, 0.3)));
+    // ── 3. Starburst — 6 diffraction spikes ────────────────────
+    const texSpikes = this._makeSpriteTex(512, (ctx, s) => {
+      ctx.clearRect(0, 0, s, s);
+      const cx = s / 2;
+      ctx.save();
+      ctx.translate(cx, cx);
+      const spikes = 6;
+      for (let i = 0; i < spikes; i++) {
+        ctx.rotate(Math.PI / spikes);
+        const g = ctx.createLinearGradient(-cx, 0, cx, 0);
+        g.addColorStop(0,    'rgba(255,230,150,0)');
+        g.addColorStop(0.42, 'rgba(255,240,180,0.6)');
+        g.addColorStop(0.5,  'rgba(255,255,255,1)');
+        g.addColorStop(0.58, 'rgba(255,240,180,0.6)');
+        g.addColorStop(1,    'rgba(255,230,150,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(-cx, -1.2, s, 2.4);
+      }
+      ctx.restore();
+    });
 
-    lensflare.position.copy(this.dirLight.position).multiplyScalar(10);
-    this.scene.add(lensflare);
-    this._lensflare = lensflare;
+    const makeSprite = (tex, worldSize, color = 0xffffff) => {
+      const mat = new SpriteMaterial({
+        map: tex,
+        color,
+        blending: AdditiveBlending,
+        depthWrite: false,
+        transparent: true,
+      });
+      const sp = new Sprite(mat);
+      sp.scale.setScalar(worldSize);
+      sp.position.copy(sunPos);
+      this.scene.add(sp);
+      return sp;
+    };
+
+    this._sunDisc   = makeSprite(texDisc,   180, 0xfff8e0);
+    this._sunCorona = makeSprite(texCorona, 900, 0xf8b02a);
+    this._sunSpikes = makeSprite(texSpikes, 700, 0xffe090);
+
+  }
+
+  // Move sun sprites when DevPanel changes sun position
+  _moveSunTo(x, y, z) {
+    const SUN_DIST = 8000;
+    const dir = new Vector3(x, y, z).normalize();
+    const pos = dir.multiplyScalar(SUN_DIST);
+    for (const s of [this._sunDisc, this._sunCorona, this._sunSpikes]) {
+      if (s) s.position.copy(pos);
+    }
   }
 
   _setupEventListeners() {
@@ -507,7 +531,7 @@ export class HoleScene {
 
     if (!this._devLightLock) {
       this.ambientLight.color.set(palette.ambient);
-      this.dirLight.color.set(palette.dirLight);
+      // dirLight color is fixed to the sun colour — palette no longer overrides it
     }
     if (this.starField)   this.starField.setColor(palette.stars);
     if (this.nebulaField) this.nebulaField.setColors(palette);

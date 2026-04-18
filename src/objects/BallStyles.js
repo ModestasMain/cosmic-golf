@@ -211,6 +211,7 @@ const STYLE_DEFS = {
   volleyball: { type: 'file', file: 'volleyball.png', name: 'Volleyball', fallbackColor: '#FAFAFA' },
 };
 
+export { STYLE_DEFS };
 export const BALL_STYLE_IDS = Object.keys(STYLE_DEFS);
 
 // --- Legacy Migration ---

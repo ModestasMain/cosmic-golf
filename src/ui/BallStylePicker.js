@@ -2,7 +2,7 @@
 // BallStylePicker.js — horizontal scrollable ball skin selector
 // ============================================================
 
-import { BALL_STYLE_IDS, buildBallStyleSync } from '../objects/BallStyles.js';
+import { BALL_STYLE_IDS, STYLE_DEFS } from '../objects/BallStyles.js';
 import { gameState } from '../core/GameState.js';
 import { eventBus, Events } from '../core/EventBus.js';
 
@@ -59,7 +59,7 @@ export class BallStylePicker {
       'flex-direction:row',
       'flex-wrap:wrap',
       'gap:6px',
-      'max-width:min(320px, 70vw)',
+      'max-width:min(380px, 80vw)',
       'padding:8px',
       'background:rgba(4,6,20,0.88)',
       'border:1px solid rgba(100,160,255,0.25)',
@@ -69,13 +69,24 @@ export class BallStylePicker {
     ].join(';');
 
     for (const id of BALL_STYLE_IDS) {
-      const style = buildBallStyleSync(id);
+      const def = STYLE_DEFS[id];
+
+      // Wrapper: circle preview + label underneath
+      const wrap = document.createElement('div');
+      wrap.style.cssText = [
+        'display:flex',
+        'flex-direction:column',
+        'align-items:center',
+        'gap:3px',
+        'cursor:pointer',
+        'touch-action:manipulation',
+      ].join(';');
+
       const btn = document.createElement('button');
       btn.dataset.styleId = id;
-      btn.title = style.name;
       btn.style.cssText = [
-        'width:44px',
-        'height:44px',
+        'width:48px',
+        'height:48px',
         'border-radius:50%',
         'border:2px solid rgba(100,160,255,0.3)',
         'cursor:pointer',
@@ -85,44 +96,48 @@ export class BallStylePicker {
         'align-items:center',
         'justify-content:center',
         'background:#111',
-        'transition:border-color 0.15s',
+        'transition:border-color 0.15s, box-shadow 0.15s',
         'touch-action:manipulation',
+        'flex-shrink:0',
       ].join(';');
 
-      const preview = this._makePreview(style);
-      btn.appendChild(preview);
+      const img = document.createElement('img');
+      img.src = `/textures/balls/${def.file}`;
+      img.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:50%;display:block;';
+      btn.appendChild(img);
+
+      const label = document.createElement('span');
+      label.textContent = def.name.toUpperCase();
+      label.style.cssText = [
+        'font-size:8px',
+        'letter-spacing:0.5px',
+        'color:rgba(160,210,255,0.7)',
+        'text-align:center',
+        'max-width:52px',
+        'line-height:1.1',
+        'pointer-events:none',
+        'user-select:none',
+      ].join(';');
 
       if (id === this._selected) {
         btn.style.borderColor = '#ffd700';
+        btn.style.boxShadow = '0 0 6px rgba(255,215,0,0.5)';
+        label.style.color = 'rgba(255,215,0,0.9)';
       }
 
-      btn.addEventListener('pointerdown', (e) => {
+      wrap.appendChild(btn);
+      wrap.appendChild(label);
+
+      wrap.addEventListener('pointerdown', (e) => {
         e.preventDefault();
         this._select(id);
       });
 
-      this._panel.appendChild(btn);
+      this._panel.appendChild(wrap);
     }
 
     this.el.appendChild(this._panel);
     document.body.appendChild(this.el);
-  }
-
-  _makePreview(style) {
-    const size = 36;
-    const c = document.createElement('canvas');
-    c.width = c.height = size;
-    c.style.cssText = 'width:100%;height:100%;border-radius:50%;';
-    const ctx = c.getContext('2d');
-
-    const srcCanvas = style.albedo.image;
-    if (srcCanvas) {
-      ctx.drawImage(srcCanvas, 0, 0, srcCanvas.width, srcCanvas.height, 0, 0, size, size);
-    } else {
-      ctx.fillStyle = '#' + style.color.toString(16).padStart(6, '0');
-      ctx.fillRect(0, 0, size, size);
-    }
-    return c;
   }
 
   _select(id) {
@@ -130,9 +145,12 @@ export class BallStylePicker {
     gameState.setBallStyle(id);
     eventBus.emit(Events.BALL_STYLE_CHANGED, { styleId: id });
 
-    const buttons = this._panel.querySelectorAll('button');
-    for (const btn of buttons) {
-      btn.style.borderColor = btn.dataset.styleId === id ? '#ffd700' : 'rgba(100,160,255,0.3)';
+    for (const wrap of this._panel.children) {
+      const btn   = wrap.querySelector('button');
+      const label = wrap.querySelector('span');
+      const active = btn?.dataset.styleId === id;
+      if (btn)   { btn.style.borderColor = active ? '#ffd700' : 'rgba(100,160,255,0.3)'; btn.style.boxShadow = active ? '0 0 6px rgba(255,215,0,0.5)' : 'none'; }
+      if (label) { label.style.color = active ? 'rgba(255,215,0,0.9)' : 'rgba(160,210,255,0.7)'; }
     }
   }
 

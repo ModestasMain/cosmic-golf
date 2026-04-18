@@ -39,8 +39,7 @@ export class GolfBall {
 
   async _buildMesh() {
     this.mesh = new Mesh(SHARED_GEO, new MeshBasicMaterial({
-      transparent:         false,
-      toneMapped:          false,
+      color:               0xffffff,
       polygonOffset:       true,
       polygonOffsetFactor: -1,
       polygonOffsetUnits:  -4,

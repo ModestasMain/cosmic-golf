@@ -54,7 +54,7 @@ class Game {
       stencil: false,
       depth: true,
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setClearColor(0x000000);
     document.body.appendChild(this.renderer.domElement);
@@ -69,10 +69,11 @@ class Game {
     this.composer.addPass(new RenderPass(scene, camera));
 
     this.bloom = new BloomEffect({
-      intensity:           0,
-      luminanceThreshold:  0.28,
-      luminanceSmoothing:  0.45,
+      intensity:           0.9,
+      luminanceThreshold:  0.85,
+      luminanceSmoothing:  0,
       mipmapBlur:          true,
+      levels:              4,   // fewer mip levels = fewer blur passes (default is 8)
     });
 
     this.chromAb = new ChromaticAberrationEffect({
@@ -80,20 +81,20 @@ class Game {
     });
 
     this.vignette = new VignetteEffect({
-      offset:   0.3,
-      darkness: 0.8,
+      offset:   0.2,
+      darkness: 0.73,
     });
 
     this.dof = new DepthOfFieldEffect(camera, {
-      focusDistance: 10,
-      focusRange:    6,
+      focusDistance: 0,
+      focusRange:    0,
       bokehScale:    0,
     });
 
     this.tiltShift = new TiltShiftEffect({
       offset:    0.0,
       rotation:  0.0,
-      focusArea: 0.85,
+      focusArea: 0.8,
       feather:   0.3,
     });
 

@@ -502,6 +502,7 @@ class HowToPlayPanel {
       video.autoplay = true;
       video.playsInline = true;
       video.controls = false;
+      video.preload = 'auto';
       video.src = def.videoSrc;
       video.style.cssText = 'width:100%;height:100%;display:block;object-fit:cover;background:#000;';
       video.addEventListener('error', () => {

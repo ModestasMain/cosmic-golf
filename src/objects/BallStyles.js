@@ -197,18 +197,18 @@ function loadTexture(path) {
 
 // --- Style Definitions ---
 const STYLE_DEFS = {
-  basketball: { type: 'file', file: 'basketball.png', name: 'Basketball', fallbackColor: '#E65100' },
-  bomb:       { type: 'file', file: 'bomb.png',       name: 'Bomb',       fallbackColor: '#311B92' },
-  ghost:      { type: 'file', file: 'ghost.png',      name: 'Ghost',      fallbackColor: '#E8E8E8' },
-  tennis:     { type: 'file', file: 'tennis.png',     name: 'Tennis',     fallbackColor: '#C6D300' },
-  deathstar:  { type: 'file', file: 'deathstar.png',  name: 'Death Star', fallbackColor: '#757575' },
-  pumpkin:    { type: 'file', file: 'pumpkin.png',    name: 'Pumpkin',    fallbackColor: '#F57C00' },
-  soccer:     { type: 'file', file: 'soccer.png',     name: 'Soccer',     fallbackColor: '#FFFFFF' },
-  pixel:      { type: 'file', file: 'pixel.png',      name: 'Pixel',      fallbackColor: '#FFB74D' },
-  football:   { type: 'file', file: 'football.png',   name: 'Football',   fallbackColor: '#8D6E63' },
-  donut:      { type: 'file', file: 'donut.png',      name: 'Donut',      fallbackColor: '#F50057' },
-  eightball:  { type: 'file', file: 'eightball.png',  name: '8-Ball',     fallbackColor: '#212121' },
-  volleyball: { type: 'file', file: 'volleyball.png', name: 'Volleyball', fallbackColor: '#FAFAFA' },
+  basketball: { type: 'file', file: 'basketball.webp', name: 'Basketball', fallbackColor: '#E65100' },
+  bomb:       { type: 'file', file: 'bomb.webp',       name: 'Bomb',       fallbackColor: '#311B92' },
+  ghost:      { type: 'file', file: 'ghost.webp',      name: 'Ghost',      fallbackColor: '#E8E8E8' },
+  tennis:     { type: 'file', file: 'tennis.webp',     name: 'Tennis',     fallbackColor: '#C6D300' },
+  deathstar:  { type: 'file', file: 'deathstar.webp',  name: 'Death Star', fallbackColor: '#757575' },
+  pumpkin:    { type: 'file', file: 'pumpkin.webp',    name: 'Pumpkin',    fallbackColor: '#F57C00' },
+  soccer:     { type: 'file', file: 'soccer.webp',     name: 'Soccer',     fallbackColor: '#FFFFFF' },
+  pixel:      { type: 'file', file: 'pixel.webp',      name: 'Pixel',      fallbackColor: '#FFB74D' },
+  football:   { type: 'file', file: 'football.webp',   name: 'Football',   fallbackColor: '#8D6E63' },
+  donut:      { type: 'file', file: 'donut.webp',      name: 'Donut',      fallbackColor: '#F50057' },
+  eightball:  { type: 'file', file: 'eightball.webp',  name: '8-Ball',     fallbackColor: '#212121' },
+  volleyball: { type: 'file', file: 'volleyball.webp', name: 'Volleyball', fallbackColor: '#FAFAFA' },
 };
 
 export { STYLE_DEFS };
@@ -274,21 +274,3 @@ export function buildBallStyleSync(styleId) {
 
   return { albedo: texture, color: 0xffffff, roughness: 0.45, metalness: 0.05, name: def.name };
 }
-
-// --- AI Generation Prompts ---
-// These describe what the FLAT UNWRAPPED texture image should look like,
-// designed to wrap correctly onto a 3D sphere.
-export const AI_GENERATION_PROMPTS = {
-  basketball: "A flat rectangular texture map for a 3D sphere. Solid orange pebbled leather background. Three thin black seam lines: one perfectly straight horizontal line across the exact vertical center, and two S-shaped wavy lines that travel horizontally from left edge to right edge — one in the upper half, one in the lower half — gently curving up then down. No sphere shape, no shading, no 3D, purely flat 2D artwork.",
-  bomb: "A flat rectangular texture map for a 3D sphere. Solid matte black background. Bright orange glowing fuse cord snaking in a loose horizontal S-curve from left to right across the middle. Small orange ember sparks scattered around it. Cartoon style, flat 2D, no shading, no sphere shape.",
-  ghost: "A flat rectangular texture map for a 3D sphere. Solid white background. In the center: two large black oval eyes side by side and a wide black curved smile below them. Subtle pale blue wash around the edges fading to white in the middle. Flat 2D illustration, no shading, no sphere shape.",
-  tennis: "A flat rectangular texture map for a 3D sphere. Solid bright yellow-green felt texture background. Two bold white curved lines — one sweeping from bottom-left corner up to top-right, one sweeping from top-left corner down to bottom-right — crossing in an X in the center. Fuzzy felt look, flat 2D, no sphere shape, no 3D shading.",
-  deathstar: "A flat rectangular texture map for a 3D sphere. Solid medium-gray metal background. Even grid of dark rectangular panel lines covering the whole image. A bold dark horizontal band runs straight across the vertical center. One large circular dish shape in the upper-right quadrant. Flat 2D, no shading, no sphere shape.",
-  pumpkin: "A flat rectangular texture map for a 3D sphere. Solid bright orange background. Six evenly-spaced dark orange vertical stripe lines running top to bottom across the full image, giving a ribbed pumpkin look. In the center: two glowing triangle eyes and a jagged carved grin in a darker orange. Flat 2D, no 3D shading, no sphere shape.",
-  soccer: "A flat rectangular texture map for a 3D sphere. White background. Black filled pentagon shapes distributed in a regular repeating pattern across the entire image, with white hexagons filling the gaps, like an unrolled soccer ball. Bold clean outlines, flat 2D, no sphere shape, no shading.",
-  pixel: "A flat rectangular texture map for a 3D sphere. Large chunky pixel art, hard pixel edges. Solid orange skin tone fills the background. In the center: two white rectangular eyes with black pupils, a wide toothed pixel smile below. At the top: a solid blue pixel rectangle as a beanie hat. Bold flat colors, no gradients, no sphere shape.",
-  football: "A flat rectangular texture map for a 3D sphere. Solid dark brown leather background with subtle grain. A thick white horizontal stripe band near the top edge and another near the bottom edge. In the center vertically: a column of small white oval lace stitches. Flat 2D, no 3D shading, no sphere shape.",
-  donut: "A flat rectangular texture map for a 3D sphere. Thick pink frosting color fills the entire background. Dense colorful candy sprinkles — short red, yellow, blue, green rectangles — scattered randomly across the whole image. Flat 2D illustration, cartoon style, no sphere shape, no shading.",
-  eightball: "A flat rectangular texture map for a 3D sphere. Pure glossy black background. Centered in the image: one large white filled circle. Inside the circle: a bold black number 8. Flat 2D graphic, high contrast, no shading, no sphere shape.",
-  volleyball: "A flat rectangular texture map for a 3D sphere. White background. Three pairs of parallel curved stripe lines — one pair in blue sweeping from top-left to bottom-right, one in yellow sweeping the opposite direction, one in blue running across the horizontal center — forming the classic volleyball panel layout. Flat 2D, clean bold lines, no shading, no sphere shape.",
-};

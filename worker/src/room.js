@@ -1,21 +1,53 @@
 // ============================================================
 // CosmicGolfRoom — Durable Object
 // Pure relay + persistent leaderboard per room.
-// Leaderboard stores top 10 scores, scoped to this room's holes.
 // ============================================================
 
 const MAX_PLAYERS = 24;
 const MAX_LEADERBOARD = 10;
+const MAX_MSG_BYTES = 2048;
 const LB_KEY = 'leaderboard';
+
+// ── Validation helpers ────────────────────────────────────────
+
+function isVec3(v) {
+  return v != null && typeof v === 'object' &&
+    Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z);
+}
+
+function isGamePos(v) {
+  return isVec3(v) &&
+    Math.abs(v.x) < 6000 && Math.abs(v.y) < 6000 && Math.abs(v.z) < 6000;
+}
+
+function isGameVel(v) {
+  return isVec3(v) &&
+    Math.abs(v.x) < 1500 && Math.abs(v.y) < 1500 && Math.abs(v.z) < 1500;
+}
+
+function sanitizeName(name) {
+  if (typeof name !== 'string') return 'PLAYER';
+  return name.replace(/[^\w\s\-!?.]/g, '').slice(0, 12).trim() || 'PLAYER';
+}
+
+function sanitizeColor(color) {
+  if (typeof color !== 'number' || !Number.isInteger(color) || color < 0 || color > 0xffffff) return 0xffffff;
+  return color;
+}
+
+// ── Room ──────────────────────────────────────────────────────
 
 export class CosmicGolfRoom {
   constructor(state, env) {
     this.state = state;
-    this._leaderboard = null;
+    this._leaderboard = [];
+    // Rate limiting: ws → last message timestamp (in-memory, resets on hibernation — acceptable)
+    this._msgLastTs = new Map();
+    // Pre-load leaderboard before any messages are handled
+    this.state.blockConcurrencyWhile(() => this._loadLeaderboard());
   }
 
   async _loadLeaderboard() {
-    if (this._leaderboard !== null) return;
     const stored = await this.state.storage.get(LB_KEY);
     this._leaderboard = Array.isArray(stored) ? stored : [];
   }
@@ -41,32 +73,57 @@ export class CosmicGolfRoom {
   }
 
   async webSocketMessage(ws, rawMessage) {
+    // Reject oversized messages
+    if (rawMessage.length > MAX_MSG_BYTES) return;
+
+    // Per-socket rate limit: max 60 messages/sec (1 per 16ms)
+    const now = Date.now();
+    const last = this._msgLastTs.get(ws) ?? 0;
+    if (now - last < 16) return;
+    this._msgLastTs.set(ws, now);
+
     let data;
     try { data = JSON.parse(rawMessage); } catch { return; }
+    if (!data?.type) return;
 
+    // ── Join ─────────────────────────────────────────────────
     if (data.type === 'join' && data.playerId) {
-      ws.serializeAttachment({ playerId: data.playerId, name: data.name, color: data.color });
+      const name  = sanitizeName(data.name);
+      const color = sanitizeColor(data.color);
+      ws.serializeAttachment({ playerId: data.playerId, name, color });
 
+      // Tell the new joiner about everyone already in the room
       for (const socket of this.state.getWebSockets()) {
         if (socket === ws) continue;
         const info = socket.deserializeAttachment();
         if (!info?.playerId) continue;
-        ws.send(JSON.stringify({
-          type: 'join',
-          playerId: info.playerId,
-          name: info.name,
-          color: info.color,
-        }));
+        ws.send(JSON.stringify({ type: 'join', playerId: info.playerId, name: info.name, color: info.color }));
       }
 
-      await this._loadLeaderboard();
+      // Relay sanitized join to all others
+      this._broadcastExcept(ws, JSON.stringify({ type: 'join', playerId: data.playerId, name, color }));
+
       ws.send(JSON.stringify({ type: 'leaderboard', entries: this._leaderboard }));
       return;
     }
 
+    // ── Leaderboard submit ────────────────────────────────────
     if (data.type === 'leaderboard_submit' && data.entry) {
-      await this._loadLeaderboard();
-      this._upsertEntry(data.entry);
+      const e = data.entry;
+      if (typeof e.sessionId !== 'string' || !e.sessionId) return;
+      if (typeof e.totalStrokes !== 'number' || e.totalStrokes < 0 || e.totalStrokes > 9999) return;
+
+      const safeEntry = {
+        sessionId:      e.sessionId.slice(0, 32),
+        name:           sanitizeName(e.name),
+        totalStrokes:   Math.round(e.totalStrokes),
+        holesCompleted: Math.min(10, Math.max(0, Math.round(e.holesCompleted ?? 0))),
+        totalTime:      typeof e.totalTime === 'number' && e.totalTime >= 0 ? e.totalTime : 0,
+        strokes:        Array.isArray(e.strokes)
+          ? e.strokes.slice(0, 10).map(s => (typeof s === 'number' && s >= 0) ? Math.min(99, Math.round(s)) : null)
+          : [],
+      };
+      this._upsertEntry(safeEntry);
       this._sortLeaderboard();
       this._leaderboard = this._leaderboard.slice(0, MAX_LEADERBOARD);
       await this._saveLeaderboard();
@@ -74,21 +131,45 @@ export class CosmicGolfRoom {
       return;
     }
 
+    // ── Leaderboard get ───────────────────────────────────────
     if (data.type === 'leaderboard_get') {
-      await this._loadLeaderboard();
       ws.send(JSON.stringify({ type: 'leaderboard', entries: this._leaderboard }));
       return;
     }
+
+    // ── Validate positional messages before relay ─────────────
+    if (data.type === 'ball_state') {
+      if (!isGamePos(data.pos) || !isGameVel(data.vel)) return;
+    }
+    if (data.type === 'ball_stopped') {
+      if (!isGamePos(data.pos)) return;
+    }
+    if (data.type === 'shot') {
+      if (!isVec3(data.direction)) return;
+      if (typeof data.power !== 'number' || data.power < 0 || data.power > 1200) return;
+    }
+    if (data.type === 'ball_hit') {
+      if (!isGameVel(data.velocity)) return;
+    }
+
+    // Ignore pings — they're just keepalive
+    if (data.type === 'ping') return;
 
     this._broadcastExcept(ws, rawMessage);
   }
 
   _upsertEntry(entry) {
     const idx = this._leaderboard.findIndex(e => e.sessionId === entry.sessionId);
-    if (idx >= 0) {
-      this._leaderboard[idx] = entry;
-    } else {
+    if (idx < 0) {
       this._leaderboard.push(entry);
+      return;
+    }
+    const existing = this._leaderboard[idx];
+    const newHoles = entry.holesCompleted ?? 0;
+    const oldHoles = existing.holesCompleted ?? 0;
+    // Only advance the record — never regress to fewer holes or more strokes
+    if (newHoles > oldHoles || (newHoles === oldHoles && entry.totalStrokes < existing.totalStrokes)) {
+      this._leaderboard[idx] = { ...existing, ...entry };
     }
   }
 
@@ -108,6 +189,7 @@ export class CosmicGolfRoom {
   async webSocketError(ws) { this._handleDisconnect(ws); }
 
   _handleDisconnect(ws) {
+    this._msgLastTs.delete(ws);
     const info = ws.deserializeAttachment();
     if (!info?.playerId) return;
     this._broadcastExcept(ws, JSON.stringify({ type: 'leave', playerId: info.playerId }));

@@ -18,8 +18,8 @@ export default {
       });
     }
 
-    // Route: /party/{ROOM_CODE}
-    const match = url.pathname.match(/^\/party\/([A-Za-z0-9]+)$/);
+    // Route: /party/{ROOM_CODE}  (underscores allowed — used by PUBLIC_2, PUBLIC_3, etc.)
+    const match = url.pathname.match(/^\/party\/([A-Za-z0-9_]+)$/);
     if (!match) {
       return new Response('Not found', { status: 404 });
     }

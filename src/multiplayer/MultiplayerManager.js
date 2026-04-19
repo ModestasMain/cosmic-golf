@@ -7,6 +7,23 @@ import { eventBus, Events } from '../core/EventBus.js';
 import { gameState } from '../core/GameState.js';
 import { MULTIPLAYER } from '../core/Constants.js';
 
+// ── Client-side validation ────────────────────────────────────
+
+function isVec3(v) {
+  return v != null && typeof v === 'object' &&
+    Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z);
+}
+
+function isGamePos(v) {
+  return isVec3(v) && Math.abs(v.x) < 6000 && Math.abs(v.y) < 6000 && Math.abs(v.z) < 6000;
+}
+
+function isGameVel(v) {
+  return isVec3(v) && Math.abs(v.x) < 1500 && Math.abs(v.y) < 1500 && Math.abs(v.z) < 1500;
+}
+
+// ── Manager ───────────────────────────────────────────────────
+
 export class MultiplayerManager {
   constructor() {
     this.ws = null;
@@ -17,6 +34,7 @@ export class MultiplayerManager {
     this._ballStateCallback = null;
     this._isConnected = false;
     this._isSolo = false;
+    this._heartbeatTimer = null;
   }
 
   joinPublic(playerName = 'PLAYER', playerColor) {
@@ -74,6 +92,13 @@ export class MultiplayerManager {
           name: playerName,
           color: playerColor,
         });
+        // Keepalive ping every 30s to prevent idle disconnects
+        if (this._heartbeatTimer) clearInterval(this._heartbeatTimer);
+        this._heartbeatTimer = setInterval(() => {
+          if (this.ws?.readyState === WebSocket.OPEN) {
+            this.ws.send('{"type":"ping"}');
+          }
+        }, 30000);
       };
 
       this.ws.onmessage = (e) => {
@@ -87,6 +112,7 @@ export class MultiplayerManager {
 
       this.ws.onclose = () => {
         this._isConnected = false;
+        if (this._heartbeatTimer) { clearInterval(this._heartbeatTimer); this._heartbeatTimer = null; }
         if (!opened) {
           // Never opened — room was full or unreachable; try next slot
           console.log('[MP] Room full or rejected:', this.roomCode);
@@ -127,43 +153,47 @@ export class MultiplayerManager {
         eventBus.emit(Events.MP_PLAYER_LEFT, { playerId: msg.playerId });
         break;
 
-      case 'shot':
-        if (msg.playerId !== this.playerId && this._shotCallback) {
-          this._shotCallback({
-            playerId: msg.playerId,
-            direction: msg.direction,
-            power: msg.power,
-            holeIndex: msg.holeIndex,
-          });
-        }
+      case 'shot': {
+        if (msg.playerId === this.playerId || !this._shotCallback) break;
+        if (!isVec3(msg.direction)) break;
+        if (typeof msg.power !== 'number' || msg.power < 0 || msg.power > 1200) break;
+        this._shotCallback({
+          playerId:  msg.playerId,
+          direction: msg.direction,
+          power:     msg.power,
+          holeIndex: msg.holeIndex,
+        });
         break;
+      }
 
-      case 'ball_state':
-        if (msg.playerId !== this.playerId && this._ballStateCallback) {
-          this._ballStateCallback({
-            playerId: msg.playerId,
-            pos: msg.pos,
-            vel: msg.vel,
-            holeIndex: msg.holeIndex,
-            ts: msg.ts,
-            bounce: msg.bounce ?? false,
-            planetIdx: msg.planetIdx ?? null,
-            normal: msg.normal ?? null,
-          });
-        }
+      case 'ball_state': {
+        if (msg.playerId === this.playerId || !this._ballStateCallback) break;
+        if (!isGamePos(msg.pos) || !isGameVel(msg.vel)) break;
+        this._ballStateCallback({
+          playerId:  msg.playerId,
+          pos:       msg.pos,
+          vel:       msg.vel,
+          holeIndex: msg.holeIndex,
+          ts:        msg.ts,
+          bounce:    msg.bounce ?? false,
+          planetIdx: msg.planetIdx ?? null,
+          normal:    msg.normal ?? null,
+        });
         break;
+      }
 
-      case 'ball_stopped':
-        if (msg.playerId !== this.playerId) {
-          eventBus.emit(Events.MP_BALL_STOPPED, {
-            playerId: msg.playerId,
-            pos: msg.pos,
-            holeIndex: msg.holeIndex,
-            planetIdx: msg.planetIdx ?? null,
-            normal: msg.normal ?? null,
-          });
-        }
+      case 'ball_stopped': {
+        if (msg.playerId === this.playerId) break;
+        if (!isGamePos(msg.pos)) break;
+        eventBus.emit(Events.MP_BALL_STOPPED, {
+          playerId:  msg.playerId,
+          pos:       msg.pos,
+          holeIndex: msg.holeIndex,
+          planetIdx: msg.planetIdx ?? null,
+          normal:    msg.normal ?? null,
+        });
         break;
+      }
 
       case 'hole_complete':
         if (msg.playerId !== this.playerId) {
@@ -174,22 +204,24 @@ export class MultiplayerManager {
       case 'collected':
         if (msg.playerId !== this.playerId) {
           eventBus.emit(Events.COLLECTIBLE_COLLECTED, {
-            type: msg.collectibleType, id: msg.collectibleId,
-            playerId: msg.playerId, holeIndex: msg.holeIndex,
-            remote: true,
-          });
-        }
-        break;
-
-      case 'ball_hit':
-        if (msg.targetId === this.playerId) {
-          eventBus.emit(Events.BILLIARD_HIT, {
-            targetId: msg.targetId,
-            velocity: msg.velocity,
+            type:     msg.collectibleType, id: msg.collectibleId,
+            playerId: msg.playerId,        holeIndex: msg.holeIndex,
             remote:   true,
           });
         }
         break;
+
+      case 'ball_hit': {
+        if (msg.targetId !== this.playerId) break;
+        if (!isGameVel(msg.velocity)) break;
+        eventBus.emit(Events.BILLIARD_HIT, {
+          targetId:  msg.targetId,
+          velocity:  msg.velocity,
+          holeIndex: msg.holeIndex,
+          remote:    true,
+        });
+        break;
+      }
 
       case 'ball_reset':
         if (msg.playerId !== this.playerId) {
@@ -206,7 +238,6 @@ export class MultiplayerManager {
       case 'leaderboard':
         eventBus.emit(Events.LEADERBOARD_UPDATE, { entries: msg.entries });
         break;
-
     }
   }
 
@@ -225,7 +256,6 @@ export class MultiplayerManager {
     this._send({ type: 'hole_complete', playerId: this.playerId, strokes, timeMs });
   }
 
-
   onShotReceived(callback) {
     this._shotCallback = callback;
   }
@@ -243,10 +273,10 @@ export class MultiplayerManager {
   broadcastBallState(pos, vel, holeIndex, bounce = false, planetIdx = null, normal = null, reset = false) {
     if (!this._isConnected || this._isSolo) return;
     const msg = {
-      type: 'ball_state',
-      playerId: this.playerId,
+      type:      'ball_state',
+      playerId:  this.playerId,
       holeIndex,
-      ts: Date.now(),
+      ts:        Date.now(),
       bounce,
       reset,
       pos: { x: pos.x, y: pos.y, z: pos.z },
@@ -262,8 +292,8 @@ export class MultiplayerManager {
   broadcastBallStopped(pos, holeIndex, planetIdx = null, normal = null) {
     if (!this._isConnected || this._isSolo) return;
     const msg = {
-      type: 'ball_stopped',
-      playerId: this.playerId,
+      type:      'ball_stopped',
+      playerId:  this.playerId,
       holeIndex,
       pos: { x: pos.x, y: pos.y, z: pos.z },
     };
@@ -279,13 +309,14 @@ export class MultiplayerManager {
     this._send({ type: 'collected', playerId: this.playerId, collectibleId, collectibleType, holeIndex });
   }
 
-  broadcastBallHit(targetId, velocity) {
+  broadcastBallHit(targetId, velocity, holeIndex) {
     if (!this._isConnected || this._isSolo) return;
     this._send({
-      type:     'ball_hit',
-      playerId: this.playerId,
+      type:      'ball_hit',
+      playerId:  this.playerId,
       targetId,
-      velocity: { x: velocity.x, y: velocity.y, z: velocity.z },
+      velocity:  { x: velocity.x, y: velocity.y, z: velocity.z },
+      holeIndex,
     });
   }
 
@@ -323,6 +354,7 @@ export class MultiplayerManager {
   }
 
   disconnect() {
+    if (this._heartbeatTimer) { clearInterval(this._heartbeatTimer); this._heartbeatTimer = null; }
     if (this.ws) this.ws.close();
   }
 }

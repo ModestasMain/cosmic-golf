@@ -496,8 +496,9 @@ export class HoleScene {
     });
 
     // Remote ball hit our ball
-    eventBus.on(Events.BILLIARD_HIT, ({ remote, velocity }) => {
+    eventBus.on(Events.BILLIARD_HIT, ({ remote, velocity, holeIndex }) => {
       if (remote && this.ball) {
+        if (holeIndex !== undefined && holeIndex !== gameState.currentHole) return;
         const v = new Vector3(velocity.x, velocity.y, velocity.z);
         this.ball.setVelocity(v);
         this.ball.syncMesh();
@@ -1687,8 +1688,10 @@ export class HoleScene {
           remote.ball.syncMesh();
 
           if (this.mp) {
-            this.mp.broadcastBallHit(playerId, remote.ball.velocity);
+            this.mp.broadcastBallHit(playerId, remote.ball.velocity, gameState.currentHole);
           }
+          // Update local ghost buffer so interpolation reflects the post-collision velocity
+          this._applyCollisionToGhostBuffer(remote);
 
           this._billiardCooldowns.set(playerId, now + 500);
           this.screenShake.trigger(0.45, 0.35);
@@ -1718,8 +1721,10 @@ export class HoleScene {
             remote.ball.syncMesh();
 
             if (this.mp) {
-              this.mp.broadcastBallHit(playerId, remote.ball.velocity);
+              this.mp.broadcastBallHit(playerId, remote.ball.velocity, gameState.currentHole);
             }
+            // Update local ghost buffer so interpolation reflects the post-collision velocity
+            this._applyCollisionToGhostBuffer(remote);
 
             this._billiardCooldowns.set(playerId, now + 500);
             this.screenShake.trigger(0.45, 0.35);
@@ -1728,6 +1733,17 @@ export class HoleScene {
         }
       }
     }
+  }
+
+  _applyCollisionToGhostBuffer(remote) {
+    // Stamp the new post-collision velocity into the ghost's state buffer so
+    // interpolation doesn't snap back to the pre-collision trajectory.
+    if (remote._stateBuffer.length > 0) {
+      remote._stateBuffer[remote._stateBuffer.length - 1].vel = remote.ball.velocity.clone();
+    } else {
+      remote._stateBuffer.push({ ts: Date.now(), pos: remote.ball.position.clone(), vel: remote.ball.velocity.clone() });
+    }
+    remote.inFlight = true;
   }
 
   _getLatestRemotePos(remote) {
@@ -1852,7 +1868,8 @@ export class HoleScene {
 
         if (before && after && before !== after) {
           // Normal case: smooth lerp between two known states
-          const t = Math.max(0, Math.min(1, (renderTs - before.ts) / (after.ts - before.ts)));
+          const deltaTs = after.ts - before.ts;
+          const t = deltaTs > 0 ? Math.max(0, Math.min(1, (renderTs - before.ts) / deltaTs)) : 0;
           remote.ball.position.lerpVectors(before.pos, after.pos, t);
           remote.ball.velocity.lerpVectors(before.vel, after.vel, t);
         } else if (before) {

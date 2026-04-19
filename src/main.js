@@ -220,6 +220,8 @@ class Game {
   }
 
   _setupAudio() {
+    // Init audio context on first interaction (browser autoplay policy)
+    // BGM itself only starts after GAME_LAUNCHED event (pressed "Launch into Space")
     document.addEventListener('pointerdown', () => audioManager.init(), { once: true });
   }
 
@@ -291,6 +293,8 @@ class Game {
       this.holeScene.loadHole(0);
       this.ballStylePicker.show();
       setTimeout(() => this.mp.updateIdentity(name, color), 2000);
+      // Portal skips the name overlay — start BGM on first interaction instead
+      document.addEventListener('pointerdown', () => eventBus.emit(Events.GAME_LAUNCHED), { once: true });
       return;
     }
 

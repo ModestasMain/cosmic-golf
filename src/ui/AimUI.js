@@ -28,7 +28,7 @@ export class AimUI {
     this._aimHintVisible = true;
     this._penaltyTimer = null;
 
-    this._setupMuteButton();
+    this._setupVolumeSlider();
     this._setupCupIndicator();
     this._setupListeners();
 
@@ -220,37 +220,68 @@ export class AimUI {
     }
   }
 
-  _setupMuteButton() {
-    const btn = document.createElement('button');
-    btn.id = 'mute-btn';
-    btn.textContent = '🔊';
-    btn.style.cssText = [
+  _setupVolumeSlider() {
+    const saved = parseFloat(localStorage.getItem('masterVolume') ?? '1');
+    const initVol = isNaN(saved) ? 1 : Math.min(1, Math.max(0, saved));
+
+    if (!document.getElementById('volume-slider-style')) {
+      const s = document.createElement('style');
+      s.id = 'volume-slider-style';
+      s.textContent = `
+        #volume-slider{-webkit-appearance:none;appearance:none;width:72px;height:4px;
+          background:rgba(100,160,255,0.3);border-radius:2px;outline:none;
+          transform:rotate(-90deg);cursor:pointer;}
+        #volume-slider::-webkit-slider-runnable-track{height:4px;background:rgba(100,160,255,0.3);border-radius:2px;}
+        #volume-slider::-moz-range-track{height:4px;background:rgba(100,160,255,0.3);border-radius:2px;}
+        #volume-slider::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;
+          border-radius:50%;background:rgba(160,200,255,0.9);border:1px solid rgba(100,160,255,0.5);
+          cursor:pointer;margin-top:-5px;}
+        #volume-slider::-moz-range-thumb{width:14px;height:14px;border-radius:50%;
+          background:rgba(160,200,255,0.9);border:1px solid rgba(100,160,255,0.5);
+          cursor:pointer;box-sizing:border-box;}
+      `;
+      document.head.appendChild(s);
+    }
+
+    const wrap = document.createElement('div');
+    wrap.style.cssText = [
       'position:fixed',
-      'bottom:max(20px, env(safe-area-inset-bottom, 0px))',
-      'right:max(20px, env(safe-area-inset-right, 0px))',
+      'bottom:max(16px, env(safe-area-inset-bottom, 0px))',
+      'right:max(16px, env(safe-area-inset-right, 0px))',
       'z-index:200',
-      'background:rgba(0,0,0,0.55)',
-      'color:#fff',
-      'border:1px solid rgba(255,255,255,0.25)',
-      'border-radius:50%',
-      'width:40px',
-      'height:40px',
-      'cursor:pointer',
-      'font-size:18px',
-      'line-height:1',
-      'padding:0',
       'display:flex',
+      'flex-direction:column',
       'align-items:center',
-      'justify-content:center',
+      'gap:4px',
+      'touch-action:none',
     ].join(';');
 
-    btn.addEventListener('click', () => {
-      eventBus.emit(Events.AUDIO_MUTE_TOGGLE);
-      btn.textContent = gameState.isMuted ? '🔇' : '🔊';
+    const icon = document.createElement('div');
+    icon.style.cssText = 'font-size:15px;line-height:1;color:rgba(160,200,255,0.8);user-select:none;';
+    icon.textContent = initVol === 0 ? '🔇' : '🔊';
+
+    const sliderBox = document.createElement('div');
+    sliderBox.style.cssText = 'width:28px;height:76px;display:flex;align-items:center;justify-content:center;overflow:visible;';
+
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.id = 'volume-slider';
+    slider.min = '0';
+    slider.max = '1';
+    slider.step = '0.02';
+    slider.value = String(initVol);
+
+    slider.addEventListener('input', () => {
+      const v = parseFloat(slider.value);
+      icon.textContent = v === 0 ? '🔇' : '🔊';
+      eventBus.emit(Events.AUDIO_VOLUME_CHANGE, { volume: v });
     });
 
-    document.body.appendChild(btn);
-    this._muteBtn = btn;
+    sliderBox.appendChild(slider);
+    wrap.appendChild(icon);
+    wrap.appendChild(sliderBox);
+    document.body.appendChild(wrap);
+    this._volumeWrap = wrap;
   }
 
   _setupListeners() {

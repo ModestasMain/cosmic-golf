@@ -2,6 +2,8 @@
 // NameEntryOverlay.js — animated cosmic frontpage
 // ============================================================
 
+import { eventBus, Events } from '../core/EventBus.js';
+
 const RANDOM_NAMES = [
   'COSMO', 'NOVA', 'VEGA', 'ORBIT', 'PULSAR',
   'QUARK', 'NEXUS', 'ZEPHYR', 'LYRA', 'DRACO',
@@ -454,12 +456,9 @@ class HowToPlayPanel {
     const panel = document.createElement('div');
     panel.id = 'how-to-play-panel';
     panel.style.cssText = [
-      'position:absolute', 'right:50px', 'top:50%', 'transform:translateY(-50%)',
       'z-index:2',
       'display:flex', 'flex-direction:column', 'gap:14px',
-      'width:min(34vw,560px)',
-      'height:min(88vh,980px)',
-      'min-height:700px',
+      'width:min(40vw,540px)',
     ].join(';');
 
     const title = document.createElement('div');
@@ -484,16 +483,15 @@ class HowToPlayPanel {
         'border:1px solid rgba(100,160,255,0.14)',
         'border-radius:12px', 'overflow:hidden',
         'display:flex', 'flex-direction:column',
-        'flex:1', 'min-height:0',
       ].join(';');
 
       const canvas = document.createElement('canvas');
       canvas.width = 720;
       canvas.height = 220;
-      canvas.style.cssText = 'width:100%;height:100%;display:none;';
+      canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;display:none;';
 
       const mediaWrap = document.createElement('div');
-      mediaWrap.style.cssText = 'position:relative;width:100%;flex:1;min-height:0;';
+      mediaWrap.style.cssText = 'position:relative;width:100%;aspect-ratio:16/7;overflow:hidden;';
       mediaWrap.appendChild(canvas);
 
       const video = document.createElement('video');
@@ -504,7 +502,7 @@ class HowToPlayPanel {
       video.controls = false;
       video.preload = 'auto';
       video.src = def.videoSrc;
-      video.style.cssText = 'width:100%;height:100%;display:block;object-fit:cover;background:#000;';
+      video.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;display:block;object-fit:cover;background:#000;';
       video.addEventListener('error', () => {
         video.style.display = 'none';
         canvas.style.display = 'block';
@@ -1085,8 +1083,11 @@ export class NameEntryOverlay {
         }
         #name-entry-overlay input::placeholder { color: rgba(140,180,255,0.35); }
         #name-entry-overlay input:focus { outline: none; }
-        @media (max-width: 760px) {
-          #how-to-play-panel { display: none; }
+        @media (max-width: 820px) {
+          #how-to-play-panel { width: min(92vw, 540px); }
+        }
+        @media (max-width: 480px) {
+          #how-to-play-panel { width: min(92vw, 400px); gap: 8px; }
         }
       `;
       document.head.appendChild(style);
@@ -1256,6 +1257,7 @@ export class NameEntryOverlay {
   _confirm() {
     const rawName = this._nameInput.value.trim().toUpperCase();
     const name = rawName.length > 0 ? rawName : (this._nameInput.placeholder || this._randomName());
+    eventBus.emit(Events.GAME_LAUNCHED);
     this._cosmos.stop();
     this._howToPlay.stop();
     this._overlay.style.opacity = '0';

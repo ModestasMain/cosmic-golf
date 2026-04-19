@@ -1,6 +1,6 @@
 // ============================================================
 // AudioManager.js — Web Audio API procedural audio
-// BGM: space ambient step sequencer (no files, no ZzFX)
+// BGM: looped MP3 + Web Audio routing
 // SFX: one-shot oscillator chains, zero memory leaks
 // ============================================================
 
@@ -349,6 +349,91 @@ const sfx = {
     oneShot({ freq: 640, freqEnd: 1760, type: 'sine',    volume: 0.08, attack: 0.02, decay: 0.22 });
   },
 
+  // CINEMATIC_SWISH — 5-second deep whoosh: blackhole → golfball
+  // Three layers: (1) lowpass noise sweep for the whoosh body,
+  //               (2) deep sine swell that rises from sub-bass,
+  //               (3) low sawtooth engine growl for weight.
+  // Returns a stop(fadeMs) function so callers can cut it early.
+  cinematicSwish() {
+    if (gameState.isMuted) return () => {};
+    const c   = ctx();
+    const now = c.currentTime;
+    // Must match CinematicController DURATION exactly
+    const DUR = 5.0;
+
+    // Master gain for this swish — fade here to stop everything at once
+    const swishMaster = c.createGain();
+    swishMaster.gain.setValueAtTime(1, now);
+    swishMaster.connect(master());
+
+    // 1. Whoosh body — white noise through lowpass sweeping open then settling
+    //    Sustain holds until t=4.0s, then LINEAR fade to 0 at exactly t=5.0s
+    //    (exponential ramp sounds gone at halfway — linear fade keeps it present)
+    const bufSize = Math.ceil(c.sampleRate * DUR);
+    const nBuf    = c.createBuffer(1, bufSize, c.sampleRate);
+    const nData   = nBuf.getChannelData(0);
+    for (let i = 0; i < bufSize; i++) nData[i] = Math.random() * 2 - 1;
+    const nSrc  = c.createBufferSource();
+    nSrc.buffer = nBuf;
+    const lp    = c.createBiquadFilter();
+    lp.type     = 'lowpass'; lp.Q.value = 0.9;
+    lp.frequency.setValueAtTime(100, now);
+    lp.frequency.linearRampToValueAtTime(2400, now + DUR * 0.45);
+    lp.frequency.linearRampToValueAtTime(350, now + DUR);
+    const nGain = c.createGain();
+    nGain.gain.setValueAtTime(0.0001, now);
+    nGain.gain.linearRampToValueAtTime(0.55, now + 0.20);
+    nGain.gain.setValueAtTime(0.55, now + DUR * 0.80);
+    nGain.gain.linearRampToValueAtTime(0.0001, now + DUR);
+    nSrc.connect(lp); lp.connect(nGain); nGain.connect(swishMaster);
+    nSrc.start(now); nSrc.stop(now + DUR + 0.05);
+
+    // 2. Deep sine swell — sustains until t=4.0s, linear fade to 0 at t=5.0s
+    const subOsc  = c.createOscillator();
+    const subFilt = c.createBiquadFilter();
+    const subGain = c.createGain();
+    subOsc.type   = 'sine';
+    subFilt.type  = 'lowpass'; subFilt.frequency.value = 200; subFilt.Q.value = 0.5;
+    subOsc.frequency.setValueAtTime(28, now);
+    subOsc.frequency.linearRampToValueAtTime(90, now + DUR * 0.45);
+    subOsc.frequency.linearRampToValueAtTime(35, now + DUR);
+    subGain.gain.setValueAtTime(0.0001, now);
+    subGain.gain.linearRampToValueAtTime(0.80, now + 0.12);
+    subGain.gain.setValueAtTime(0.80, now + DUR * 0.80);
+    subGain.gain.linearRampToValueAtTime(0.0001, now + DUR);
+    subOsc.connect(subFilt); subFilt.connect(subGain); subGain.connect(swishMaster);
+    subOsc.start(now); subOsc.stop(now + DUR + 0.05);
+
+    // 3. Low sawtooth growl — fades slightly earlier so clean noise tail at arrival
+    const sawOsc  = c.createOscillator();
+    const sawFilt = c.createBiquadFilter();
+    const sawGain = c.createGain();
+    sawOsc.type   = 'sawtooth';
+    sawFilt.type  = 'lowpass'; sawFilt.frequency.value = 160; sawFilt.Q.value = 1.2;
+    sawOsc.frequency.setValueAtTime(38, now);
+    sawOsc.frequency.linearRampToValueAtTime(75, now + DUR * 0.50);
+    sawOsc.frequency.linearRampToValueAtTime(42, now + DUR * 0.85);
+    sawGain.gain.setValueAtTime(0.0001, now);
+    sawGain.gain.linearRampToValueAtTime(0.22, now + 0.25);
+    sawGain.gain.setValueAtTime(0.22, now + DUR * 0.70);
+    sawGain.gain.linearRampToValueAtTime(0.0001, now + DUR * 0.90);
+    sawOsc.connect(sawFilt); sawFilt.connect(sawGain); sawGain.connect(swishMaster);
+    sawOsc.start(now); sawOsc.stop(now + DUR * 0.93);
+
+    // Returns a fade-out function for early stop (skip button)
+    return (fadeMs = 250) => {
+      const t    = c.currentTime;
+      const fade = fadeMs / 1000;
+      swishMaster.gain.cancelScheduledValues(t);
+      swishMaster.gain.setValueAtTime(swishMaster.gain.value, t);
+      swishMaster.gain.linearRampToValueAtTime(0, t + fade);
+      const stopAt = t + fade + 0.05;
+      try { nSrc.stop(stopAt);   } catch {}
+      try { subOsc.stop(stopAt); } catch {}
+      try { sawOsc.stop(stopAt); } catch {}
+    };
+  },
+
   // GAME_COMPLETE — triumphant fanfare
   // A 5-note ascending fanfare on a major chord, with rich harmonics
   // and a long sustain on the final note. Feels earned.
@@ -647,234 +732,83 @@ class FlightDrone {
   }
 }
 
-// ── BGM Step Sequencer ────────────────────────────────────
-//
-// Upbeat cosmic jam: 128 BPM with kick/snare/hi-hat, funky bass,
-// catchy square-wave lead and chord stabs. 32-step loop (2 bars).
-// Lookahead scheduler for sample-accurate timing despite JS jitter.
-
-class BGMSequencer {
+class FileBGM {
   constructor() {
-    this._running    = false;
-    this._nextBeat   = 0;
-    this._beatIdx    = 0;
-    this._timeoutId  = null;
-    this._gainNode   = null;
-
-    // 112 BPM → 16th note ≈ 0.134 s, 128 steps ≈ 17 s loop
-    this._bpm        = 112;
-    this._beatSec    = 60 / this._bpm;
-    this._stepSec    = this._beatSec / 4;
-    this._lookahead  = 0.1;
-    this._scheduleHz = 50;
-
-    this._pattern = this._buildPattern();
+    this._running = false;
+    this._el = null;
+    this._srcNode = null;
+    this._gainNode = null;
+    this._unlock = null;
   }
 
-  _midiToHz(midi) {
-    return 440 * Math.pow(2, (midi - 69) / 12);
-  }
-
-  _buildPattern() {
-    // 128 steps = 8 bars at 112 BPM (16th notes) ≈ 17 s loop.
-    // Vibe: space ambient jam — warm pads carry the harmony,
-    // sine bass breathes slowly, sparse lead floats above, drums sit way back.
-    //
-    // MIDI: C2=36 E2=40 F2=41 G2=43 A2=45
-    //       E3=52 F3=53 G3=55 A3=57 B3=59
-    //       C4=60 D4=62 E4=64 G4=67
-    //       C5=72 D5=74 E5=76 F5=77 G5=79 A5=81
-
-    const _ = null;
-    const pattern = Array.from({ length: 128 }, () => ({
-      kick: false, rim: false, hat: false,
-      bass: _, pad: _,
-    }));
-
-    const K = (...ss) => ss.forEach(s => { pattern[s].kick = true; });
-    const R = (...ss) => ss.forEach(s => { pattern[s].rim  = true; });
-    const H = (...ss) => ss.forEach(s => { pattern[s].hat  = true; });
-    const B = (s, n)  => { pattern[s].bass = n; };
-    const P = (s, ch) => { pattern[s].pad  = ch; };
-
-    // Mid-register pad chords — warm, not piercing
-    const Cmaj = [60, 64, 67];   // C4 E4 G4
-    const Am   = [57, 60, 64];   // A3 C4 E4
-    const Fmaj = [53, 57, 60];   // F3 A3 C4
-    const Gmaj = [55, 59, 62];   // G3 B3 D4
-    const Em   = [52, 55, 59];   // E3 G3 B3
-
-    // ── Drums: light, never dominant ─────────────────────────
-    // Soft kick only on beat 1 of each bar (every 16 steps)
-    K(0, 16, 32, 48, 64, 80, 96, 112);
-    // Ghost rim on beat 3
-    R(8, 24, 40, 56, 72, 88, 104, 120);
-    // Sparse hi-hats — off-beat 8ths in sections A, B and D only
-    H(6, 14, 22, 30, 38, 46, 54, 62);
-    H(102, 110, 118, 126);
-
-    // ── SECTION A: bars 1-2 (steps 0-31) — Main theme ────────
-    P(0,  Cmaj);
-    P(16, Am);
-
-    B(0, 36); B(8, 43);    // C2 → G2
-    B(16, 45); B(24, 43);  // A2 → G2
-
-    // ── SECTION B: bars 3-4 (steps 32-63) — F→G variation ───
-    P(32, Fmaj);
-    P(48, Gmaj);
-
-    B(32, 41); B(40, 43);  // F2 → G2
-    B(48, 43); B(56, 36);  // G2 → C2
-
-    // ── SECTION C: bars 5-6 (steps 64-95) — Open space ───────
-    // No hats — just pads and bass breathing. Stars-out-the-window moment.
-    P(64, Am);
-    P(80, Em);
-
-    B(64, 45); B(72, 45);  // A2 held
-    B(80, 40); B(88, 43);  // E2 → G2
-
-    // ── SECTION D: bars 7-8 (steps 96-127) — Return ──────────
-    // Hook comes back; resolves cleanly to C5 so the loop feels musical.
-    P(96,  Cmaj);
-    P(112, Gmaj);
-
-    B(96, 36);  B(104, 43);  // C2 → G2
-    B(112, 43); B(120, 36);  // G2 → C2
-
-    return pattern;
-  }
-
-  _scheduleStep(step, time) {
-    if (gameState.isMuted) return;
+  prepare() {
+    this._ensure();
     const c = ctx();
-    const p = this._pattern[step % 128];
-
-    // ── Kick — soft sine thud, no heavy punch ──────────────
-    if (p.kick) {
-      const osc  = c.createOscillator();
-      const gain = c.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(62, time);
-      osc.frequency.exponentialRampToValueAtTime(30, time + 0.20);
-      gain.gain.setValueAtTime(0.42, time);
-      gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.24);
-      osc.connect(gain); gain.connect(this._gainNode);
-      osc.start(time); osc.stop(time + 0.26);
+    if (this._gainNode) {
+      this._gainNode.gain.cancelScheduledValues(c.currentTime);
+      this._gainNode.gain.setValueAtTime(0.0001, c.currentTime);
     }
-
-    // ── Rim — barely-there ghost hit ───────────────────────
-    if (p.rim) {
-      const bufLen = Math.ceil(c.sampleRate * 0.055);
-      const buf    = c.createBuffer(1, bufLen, c.sampleRate);
-      const data   = buf.getChannelData(0);
-      for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1;
-      const src = c.createBufferSource(); src.buffer = buf;
-      const bp  = c.createBiquadFilter();
-      bp.type = 'bandpass'; bp.frequency.value = 2800; bp.Q.value = 2.5;
-      const ng  = c.createGain();
-      ng.gain.setValueAtTime(0.11, time);
-      ng.gain.exponentialRampToValueAtTime(0.0001, time + 0.05);
-      src.connect(bp); bp.connect(ng); ng.connect(this._gainNode);
-      src.start(time); src.stop(time + 0.06);
-    }
-
-    // ── Hat — faint air sparkle ────────────────────────────
-    if (p.hat) {
-      const bufLen = Math.ceil(c.sampleRate * 0.025);
-      const buf    = c.createBuffer(1, bufLen, c.sampleRate);
-      const data   = buf.getChannelData(0);
-      for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1;
-      const src = c.createBufferSource(); src.buffer = buf;
-      const hp  = c.createBiquadFilter();
-      hp.type = 'highpass'; hp.frequency.value = 9000; hp.Q.value = 0.5;
-      const hg  = c.createGain();
-      hg.gain.setValueAtTime(0.06, time);
-      hg.gain.exponentialRampToValueAtTime(0.0001, time + 0.020);
-      src.connect(hp); hp.connect(hg); hg.connect(this._gainNode);
-      src.start(time); src.stop(time + 0.028);
-    }
-
-    // ── Bass — pure sine, warm and round, breathes slowly ──
-    if (p.bass !== null) {
-      const hz   = this._midiToHz(p.bass);
-      const osc  = c.createOscillator();
-      const gain = c.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(hz, time);
-      gain.gain.setValueAtTime(0.0001, time);
-      gain.gain.linearRampToValueAtTime(0.40, time + 0.05);
-      gain.gain.setValueAtTime(0.40, time + this._stepSec * 5.5);
-      gain.gain.exponentialRampToValueAtTime(0.0001, time + this._stepSec * 8);
-      osc.connect(gain); gain.connect(this._gainNode);
-      osc.start(time); osc.stop(time + this._stepSec * 8.5);
-    }
-
-    // ── Pad — slow triangle swell, the main harmonic texture ─
-    if (p.pad !== null) {
-      for (const midi of p.pad) {
-        const hz   = this._midiToHz(midi);
-        const osc  = c.createOscillator();
-        const filt = c.createBiquadFilter();
-        const gain = c.createGain();
-        osc.type = 'triangle';
-        osc.frequency.value = hz;
-        filt.type = 'lowpass'; filt.frequency.value = 1400; filt.Q.value = 0.5;
-        gain.gain.setValueAtTime(0.0001, time);
-        gain.gain.linearRampToValueAtTime(0.072, time + 0.85);   // floats in slowly
-        gain.gain.setValueAtTime(0.072, time + this._stepSec * 11);
-        gain.gain.exponentialRampToValueAtTime(0.0001, time + this._stepSec * 16);
-        osc.connect(filt); filt.connect(gain); gain.connect(this._gainNode);
-        osc.start(time); osc.stop(time + this._stepSec * 16.5);
-      }
-    }
-
   }
 
-  _tick() {
-    if (!this._running) return;
-    const c   = ctx();
-    const end = c.currentTime + this._lookahead;
-
-    while (this._nextBeat < end) {
-      this._scheduleStep(this._beatIdx, this._nextBeat);
-      this._beatIdx  = (this._beatIdx + 1) % 128;
-      this._nextBeat += this._stepSec;
-    }
-
-    this._timeoutId = setTimeout(() => this._tick(), this._scheduleHz);
-  }
-
-  start() {
-    if (this._running) return;
+  _ensure() {
+    if (this._el) return;
+    const el = document.createElement('audio');
+    el.preload = 'auto';
+    el.loop = true;
+    el.crossOrigin = 'anonymous';
+    el.src = '/audio/cosmic-golf-bgm.mp3';
+    el.style.display = 'none';
+    document.body.appendChild(el);
+    this._el = el;
 
     const c = ctx();
     this._gainNode = c.createGain();
     this._gainNode.gain.value = 0.0001;
+    this._srcNode = c.createMediaElementSource(el);
+    this._srcNode.connect(this._gainNode);
     this._gainNode.connect(master());
 
-    // Fade BGM in over 3 seconds
-    this._gainNode.gain.linearRampToValueAtTime(0.52, c.currentTime + 3);
+    this._unlock = () => {
+      if (this._el && this._el.paused && !gameState.isMuted) {
+        this._el.play().catch(() => {});
+      }
+    };
+    window.addEventListener('pointerdown', this._unlock, { passive: true });
+  }
 
-    this._running  = true;
-    this._nextBeat = c.currentTime + 0.1;
-    this._beatIdx  = 0;
-    this._tick();
+  start() {
+    if (this._running) return;
+    this._running = true;
+    this._ensure();
+    const c = ctx();
+    this._gainNode.gain.cancelScheduledValues(c.currentTime);
+    this._gainNode.gain.setValueAtTime(0.0001, c.currentTime);
+    if (!gameState.isMuted) {
+      this._gainNode.gain.linearRampToValueAtTime(0.52, c.currentTime + 3);
+      this._el.play().catch(() => {});
+    } else {
+      this._gainNode.gain.setValueAtTime(0, c.currentTime);
+      this._el.pause();
+    }
   }
 
   stop() {
     this._running = false;
-    if (this._timeoutId) clearTimeout(this._timeoutId);
-    if (this._gainNode) {
-      this._gainNode.gain.setTargetAtTime(0, ctx().currentTime, 0.5);
-    }
+    if (this._el) this._el.pause();
+    if (this._gainNode) this._gainNode.gain.setTargetAtTime(0, ctx().currentTime, 0.5);
   }
 
   setMuted(muted) {
-    if (!this._gainNode) return;
-    const target = muted ? 0 : 0.52;
-    this._gainNode.gain.setTargetAtTime(target, ctx().currentTime, 0.3);
+    this._ensure();
+    if (!this._gainNode || !this._el) return;
+    const c = ctx();
+    if (muted) {
+      this._gainNode.gain.setTargetAtTime(0, c.currentTime, 0.2);
+      this._el.pause();
+    } else {
+      this._gainNode.gain.setTargetAtTime(0.52, c.currentTime, 0.3);
+      if (this._running) this._el.play().catch(() => {});
+    }
   }
 }
 
@@ -882,12 +816,13 @@ class BGMSequencer {
 
 export class AudioManager {
   constructor() {
-    this._wired        = false;
-    this._lastAimTick  = 0;
-    this._bhDrone      = new BlackHoleDrone();
-    this._pwrDrone     = new PowerDrone();
-    this._flightDrone  = new FlightDrone();
-    this._bgm          = new BGMSequencer();
+    this._wired             = false;
+    this._lastAimTick       = 0;
+    this._bhDrone           = new BlackHoleDrone();
+    this._pwrDrone          = new PowerDrone();
+    this._flightDrone       = new FlightDrone();
+    this._bgm               = new FileBGM();
+    this._stopCinematicSwish = null;
   }
 
   /**
@@ -901,8 +836,21 @@ export class AudioManager {
     const c = ctx();
     if (c.state === 'suspended') c.resume();
 
-    // Start background music
-    this._bgm.start();
+    // Apply saved volume preference
+    const savedVol = parseFloat(localStorage.getItem('masterVolume') ?? '1');
+    if (!isNaN(savedVol)) {
+      const v = Math.min(1, Math.max(0, savedVol));
+      master().gain.value = v * 0.7;
+      gameState.isMuted = v === 0;
+    }
+
+    this._bgm.prepare();
+
+    // BGM starts only when player presses "Launch into Space"
+    eventBus.once(Events.GAME_LAUNCHED, () => {
+      this._bgm.start();
+      this._bgm.setMuted(!!gameState.isMuted);
+    });
 
     // ── Event wiring ──────────────────────────────────────
 
@@ -947,6 +895,10 @@ export class AudioManager {
     eventBus.on(Events.BALL_OUT_OF_BOUNDS, silenceFlight);
     eventBus.on(Events.AIM_START,          silenceFlight);
     eventBus.on(Events.BALL_RESET_TO_TEE,  silenceFlight);
+    eventBus.on(Events.BALL_STOPPED,       silenceFlight);
+
+    // Stop cinematic swish when cinematic ends (natural finish or skip)
+    eventBus.on(Events.CINEMATIC_COMPLETE, () => this.stopCinematicSwish());
 
     // Mute toggle — flip gameState flag, update BGM gain
     eventBus.on(Events.AUDIO_MUTE_TOGGLE, () => {
@@ -954,6 +906,34 @@ export class AudioManager {
       this._bgm.setMuted(gameState.isMuted);
       if (gameState.isMuted) this._bhDrone.silence();
     });
+
+    // Volume slider
+    eventBus.on(Events.AUDIO_VOLUME_CHANGE, ({ volume }) => this.setVolume(volume));
+  }
+
+  /** Set master volume (0–1). Persists to localStorage. Safe to call before init(). */
+  setVolume(v) {
+    const clamped = Math.min(1, Math.max(0, v));
+    gameState.isMuted = clamped === 0;
+    localStorage.setItem('masterVolume', String(clamped));
+    if (!this._wired) return;
+    master().gain.value = clamped * 0.7;
+    this._bgm.setMuted(clamped === 0);
+    if (clamped === 0) this._bhDrone.silence();
+  }
+
+  /** Play the 5-second cosmic travel sound for the hole-intro cinematic. */
+  playCinematicSwish() {
+    this._stopCinematicSwish?.();
+    this._stopCinematicSwish = sfx.cinematicSwish();
+  }
+
+  /** Fade out and stop the cinematic swish (called on skip or completion). */
+  stopCinematicSwish() {
+    if (this._stopCinematicSwish) {
+      this._stopCinematicSwish();
+      this._stopCinematicSwish = null;
+    }
   }
 
   /**

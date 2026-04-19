@@ -415,8 +415,8 @@ export class HoleScene {
       this._loadNextHole();
     });
 
-    // Remote ball state — buffer for interpolation (100 ms render delay)
-    eventBus.on(Events.MP_BALL_STATE, ({ playerId, pos, vel, holeIndex, ts, bounce, planetIdx, normal, reset }) => {
+    // Remote ball state — dead reckoning correction
+    eventBus.on(Events.MP_BALL_STATE, ({ playerId, pos, vel, holeIndex, bounce, planetIdx, normal, reset }) => {
       if (holeIndex !== undefined && holeIndex !== gameState.currentHole) return;
       let remote = this._remoteBalls.get(playerId);
       if (!remote && this._holeData) {
@@ -427,27 +427,41 @@ export class HoleScene {
       }
       if (!remote || remote.holed) return;
 
-      const recvTs = ts ?? Date.now();
       const authPos = new Vector3(pos.x, pos.y, pos.z);
       const authVel = new Vector3(vel.x, vel.y, vel.z);
 
-      // Reset flag: teleport — clear stale buffer, snap immediately
       if (reset) {
+        // Teleport: clear buffer, snap immediately
         remote._stateBuffer = [];
+        remote._accumDt = 0;
         remote.inFlight = false;
         if (remote.ball.trail) remote.ball.trail.setActive(false);
         remote.ball.setPosition(authPos);
         remote.ball.setVelocity(authVel);
-        remote._stateBuffer.push({ ts: recvTs, pos: authPos.clone(), vel: authVel.clone() });
       } else {
-        remote._stateBuffer.push({ ts: recvTs, pos: authPos, vel: authVel });
-        if (remote._stateBuffer.length > 30) remote._stateBuffer.shift();
+        // Keep last 5 states for rest detection
+        remote._stateBuffer.push({ ts: Date.now(), pos: authPos.clone(), vel: authVel.clone() });
+        if (remote._stateBuffer.length > 5) remote._stateBuffer.shift();
+
+        // Correct dead-reckoned position toward authority
+        const posErr = remote.ball.position.distanceTo(authPos);
+        if (bounce || posErr > 150) {
+          // Discontinuous change (bounce) or large drift — snap
+          remote.ball.setPosition(authPos);
+          remote.ball.setVelocity(authVel);
+          remote._accumDt = 0;
+        } else if (posErr > 5) {
+          // Gentle blend toward authoritative state
+          remote.ball.position.lerp(authPos, 0.35);
+          remote.ball.velocity.lerp(authVel, 0.5);
+        }
+        // posErr < 5 — dead reckoning is accurate, trust it
       }
 
       // Activate trail when ball starts moving
       if (!remote.inFlight && authVel.length() > PHYSICS.REST_VELOCITY) {
         remote.inFlight = true;
-        remote._attachedPlanetIdx = -1; // detach on launch
+        remote._attachedPlanetIdx = -1;
         if (remote.ball.trail) remote.ball.trail.setActive(true);
       }
 
@@ -464,7 +478,8 @@ export class HoleScene {
       const remote = this._remoteBalls.get(playerId);
       if (!remote || remote.holed) return;
       remote.inFlight = false;
-      remote._stateBuffer = []; // clear interpolation buffer
+      remote._stateBuffer = [];
+      remote._accumDt = 0;
       if (pos) remote.ball.setPosition(new Vector3(pos.x, pos.y, pos.z));
       remote.ball.setVelocity(new Vector3());
       if (remote.ball.trail) remote.ball.trail.setActive(false);
@@ -603,6 +618,7 @@ export class HoleScene {
       cup.clone(), tee.clone(), this._facingDir.clone(),
       CAMERA.FOLLOW_DISTANCE, CAMERA.FOLLOW_HEIGHT,
     );
+    audioManager.playCinematicSwish();
 
     // Reset ball trail for this hole
     if (this.ball?.trail) this.ball.trail.setActive(false);
@@ -903,9 +919,11 @@ export class HoleScene {
         const flightVel = this.ball.velocity.clone();
         if (flightVel.length() > 1.0) {
           if (this._trajNeedsRecompute) {
-            // Recompute trajectory from current ball state (shot fired or bounce)
+            // Recompute trajectory from current ball state (shot fired or bounce).
+            // Pass remaining grace/freeze so simulation matches actual physics exactly.
             this._trajNeedsRecompute = false;
-            trajOptions.graceFrames = 0;
+            trajOptions.graceFrames    = this._launchGraceFrames;
+            trajOptions.hitFreezeFrames = this._hitFreezeFrames;
             this.trajectoryPreview.update(
               this.ball.position.clone(), flightVel, trajPlanets, this.planets,
               combinedGravity, trajOrbitPlanet, trajOptions,
@@ -1817,10 +1835,11 @@ export class HoleScene {
     ball.addToScene(this.scene);
     this._remoteBalls.set(playerId, {
       ball, inFlight: false, holed: false,
-      _stateBuffer: [],          // { ts, pos, vel }[] — sorted oldest→newest
+      _stateBuffer: [],
       _lastValidPos: teePos.clone(),
-      _attachedPlanetIdx: -1,    // planet the remote ball is resting on
+      _attachedPlanetIdx: -1,
       _attachedNormal: new Vector3(),
+      _accumDt: 0,
     });
   }
 
@@ -1836,64 +1855,37 @@ export class HoleScene {
     const vel = new Vector3(direction.x, direction.y, direction.z).normalize().multiplyScalar(power);
     remote.ball.setVelocity(vel);
     remote.inFlight = true;
-    remote._stateBuffer = []; // clear stale states on new shot
+    remote._stateBuffer = [];
+    remote._accumDt = 0;
     if (remote.ball.trail) remote.ball.trail.setActive(true);
   }
-
-  // Interpolation render delay — remote balls are shown this many ms in the past.
-  // Must be larger than send interval (33 ms at 30 Hz) + typical network jitter.
-  static INTERP_DELAY_MS = 100;
 
   _updateRemoteBalls(dt) {
     if (this._remoteBalls.size === 0 || !this._holeData) return;
 
-    const renderTs = Date.now() - HoleScene.INTERP_DELAY_MS;
+    const planets = this._holeData.planets;
+    const gs = this.serverEvents?.gravityScale ?? 1.0;
 
     for (const [playerId, remote] of this._remoteBalls) {
       if (remote.holed) continue;
 
-      const buf = remote._stateBuffer;
-
-      if (remote.inFlight && buf.length >= 1) {
-        // ── Interpolation between buffered authoritative states ───────────
-        // Find the two states that bracket the render timestamp.
-        let before = null;
-        let after  = null;
-        for (let i = buf.length - 1; i >= 0; i--) {
-          if (buf[i].ts <= renderTs) { before = buf[i]; break; }
-        }
-        for (let i = 0; i < buf.length; i++) {
-          if (buf[i].ts >= renderTs) { after = buf[i]; break; }
+      if (remote.inFlight) {
+        // Dead reckoning: advance ghost physics at fixed timestep
+        remote._accumDt += Math.min(dt, 0.1);
+        while (remote._accumDt >= AIM.TRAJECTORY_DT) {
+          stepBall(remote.ball, planets, AIM.TRAJECTORY_DT, gs, null);
+          remote._accumDt -= AIM.TRAJECTORY_DT;
         }
 
-        if (before && after && before !== after) {
-          // Normal case: smooth lerp between two known states
-          const deltaTs = after.ts - before.ts;
-          const t = deltaTs > 0 ? Math.max(0, Math.min(1, (renderTs - before.ts) / deltaTs)) : 0;
-          remote.ball.position.lerpVectors(before.pos, after.pos, t);
-          remote.ball.velocity.lerpVectors(before.vel, after.vel, t);
-        } else if (before) {
-          // Render timestamp is ahead of all buffered states — extrapolate briefly
-          const ageS = (renderTs - before.ts) / 1000;
-          if (ageS < 0.25) {
-            remote.ball.position.copy(before.pos).addScaledVector(before.vel, ageS);
-          }
-          remote.ball.velocity.copy(before.vel);
-        } else if (after) {
-          // Not enough history yet — snap to earliest available state
-          remote.ball.position.copy(after.pos);
-          remote.ball.velocity.copy(after.vel);
-        }
-
-        // Track last valid in-bounds position
         if (remote.ball.position.length() < HOLE.OUT_OF_BOUNDS_DISTANCE) {
           remote._lastValidPos.copy(remote.ball.position);
         }
 
-        // Detect ball stopped: newest state has near-zero velocity
-        const newest = buf[buf.length - 1];
+        // Detect rest from the latest authoritative state
+        const newest = remote._stateBuffer[remote._stateBuffer.length - 1];
         if (newest && newest.vel.length() < PHYSICS.REST_VELOCITY) {
           remote.inFlight = false;
+          remote._accumDt = 0;
           if (remote.ball.trail) remote.ball.trail.setActive(false);
         }
       }
@@ -1909,14 +1901,14 @@ export class HoleScene {
       }
 
       remote.ball.syncMesh();
-      remote.ball.update(dt); // spin + trail
+      remote.ball.update(dt);
 
       // Check hole-cup
       if (this.cup && remote.ball.position.distanceTo(this.cup.position) < HOLE.CUP_RADIUS) {
         this._playersHoled.add(playerId);
         remote.ball.removeFromScene(this.scene);
         this._remoteBalls.delete(playerId);
-        break; // map mutated — exit loop
+        break;
       }
     }
   }

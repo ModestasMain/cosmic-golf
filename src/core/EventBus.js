@@ -86,6 +86,7 @@ export const Events = {
 
   // Audio
   AUDIO_MUTE_TOGGLE:      'audio:mute_toggle',
+  AUDIO_VOLUME_CHANGE:    'audio:volume_change',        // { volume: 0-1 }
   BLACK_HOLE_PROXIMITY:   'audio:black_hole_proximity', // { proximity: 0-1 }
   AIM_POWER_LOCKED:       'aim:power_locked',           // { power: 0-1 }
 
@@ -117,6 +118,9 @@ export const Events = {
 
   // Ball style
   BALL_STYLE_CHANGED: 'ball:style_changed', // { styleId: string }
+
+  // Player launched into the game (pressed "Launch into Space")
+  GAME_LAUNCHED: 'game:launched',
 
   // Orbital Capture
   ORBIT_ENTER:         'orbit:enter',

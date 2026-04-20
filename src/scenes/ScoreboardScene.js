@@ -18,6 +18,7 @@ export class ScoreboardScene {
     eventBus.on(Events.GAME_COMPLETE, () => {
       this._isGameOver = true;
       this._saveScore();
+      this._submitGlobal();
       this.ui.show(true);
     });
 
@@ -35,6 +36,10 @@ export class ScoreboardScene {
 
     eventBus.on(Events.LEADERBOARD_UPDATE, ({ entries }) => {
       this.ui.setServerLeaderboard(entries);
+    });
+
+    eventBus.on(Events.GLOBAL_LEADERBOARD_UPDATE, ({ entries }) => {
+      this.ui.setGlobalLeaderboard(entries);
     });
   }
 
@@ -63,6 +68,25 @@ export class ScoreboardScene {
         totalStrokes: strokes.reduce((s, v) => s + (v || 0), 0),
         totalTime: holeTimes.reduce((s, v) => s + (v || 0), 0),
         sessionId: gameState.leaderboardSessionId,
+      });
+    }
+  }
+
+  _submitGlobal() {
+    const player = gameState.players[0];
+    if (!player) return;
+    const holesCompleted = player.strokes.filter(v => v != null).length;
+    if (holesCompleted < gameState.totalHoles) return;
+
+    // Solo mode: submit via HTTP (no WebSocket available)
+    // Multiplayer: room.js handles global KV update when it receives leaderboard_submit
+    if (gameState.isSoloMode && this._mp) {
+      this._mp.submitGlobalHTTP({
+        sessionId:    gameState.leaderboardSessionId,
+        name:         player.name,
+        totalStrokes: gameState.totalStrokes(player.id),
+        totalTime:    gameState.totalTime(player.id),
+        holesCompleted,
       });
     }
   }

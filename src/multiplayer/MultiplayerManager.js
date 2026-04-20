@@ -238,6 +238,10 @@ export class MultiplayerManager {
       case 'leaderboard':
         eventBus.emit(Events.LEADERBOARD_UPDATE, { entries: msg.entries });
         break;
+
+      case 'global_leaderboard':
+        eventBus.emit(Events.GLOBAL_LEADERBOARD_UPDATE, { entries: msg.entries ?? [] });
+        break;
     }
   }
 
@@ -333,6 +337,40 @@ export class MultiplayerManager {
   submitLeaderboardEntry(entry) {
     if (!this._isConnected || this._isSolo) return;
     this._send({ type: 'leaderboard_submit', entry });
+  }
+
+  async submitGlobalHTTP(entry) {
+    try {
+      const res = await fetch(`https://${MULTIPLAYER.MP_HOST}/global-leaderboard`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entry }),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (Array.isArray(data.entries)) {
+        eventBus.emit(Events.GLOBAL_LEADERBOARD_UPDATE, { entries: data.entries });
+      }
+      return data.entries ?? null;
+    } catch (err) {
+      console.warn('[MP] Global leaderboard submit failed', err);
+      return null;
+    }
+  }
+
+  async fetchGlobalHTTP() {
+    try {
+      const res = await fetch(`https://${MULTIPLAYER.MP_HOST}/global-leaderboard`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (Array.isArray(data.entries)) {
+        eventBus.emit(Events.GLOBAL_LEADERBOARD_UPDATE, { entries: data.entries });
+      }
+      return data.entries ?? null;
+    } catch (err) {
+      console.warn('[MP] Global leaderboard fetch failed', err);
+      return null;
+    }
   }
 
   requestLeaderboard() {

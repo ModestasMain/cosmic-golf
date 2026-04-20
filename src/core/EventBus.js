@@ -107,7 +107,8 @@ export const Events = {
   COLLECTIBLE_SPAWNED:   'collectible:spawned',   // { id, holeIndex }
 
   // Leaderboard
-  LEADERBOARD_UPDATE: 'leaderboard:update', // { entries: [] }
+  LEADERBOARD_UPDATE:        'leaderboard:update',         // { entries: [] }
+  GLOBAL_LEADERBOARD_UPDATE: 'global_leaderboard:update',  // { entries: [] }
 
   // Remote reset
   MP_BALL_RESET:    'mp:ball_reset',     // { playerId, holeIndex }

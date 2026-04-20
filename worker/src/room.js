@@ -3,10 +3,13 @@
 // Pure relay + persistent leaderboard per room.
 // ============================================================
 
+import { upsertGlobalEntry } from './globalLb.js';
+
 const MAX_PLAYERS = 24;
 const MAX_LEADERBOARD = 10;
 const MAX_MSG_BYTES = 2048;
 const LB_KEY = 'leaderboard';
+const GLOBAL_KV_KEY = 'top10';
 
 // ── Validation helpers ────────────────────────────────────────
 
@@ -40,6 +43,7 @@ function sanitizeColor(color) {
 export class CosmicGolfRoom {
   constructor(state, env) {
     this.state = state;
+    this.env = env;
     this._leaderboard = [];
     // Rate limiting: ws → last message timestamp (in-memory, resets on hibernation — acceptable)
     this._msgLastTs = new Map();
@@ -54,6 +58,13 @@ export class CosmicGolfRoom {
 
   async _saveLeaderboard() {
     await this.state.storage.put(LB_KEY, this._leaderboard);
+  }
+
+  async _updateGlobalKV(entry) {
+    const stored = (await this.env.GLOBAL_LB.get(GLOBAL_KV_KEY, { type: 'json' })) ?? [];
+    const top10 = upsertGlobalEntry(stored, entry);
+    await this.env.GLOBAL_LB.put(GLOBAL_KV_KEY, JSON.stringify(top10));
+    return top10; // return already-built array — don't re-fetch (KV reads can be stale ~60s)
   }
 
   async fetch(request) {
@@ -104,6 +115,8 @@ export class CosmicGolfRoom {
       this._broadcastExcept(ws, JSON.stringify({ type: 'join', playerId: data.playerId, name, color }));
 
       ws.send(JSON.stringify({ type: 'leaderboard', entries: this._leaderboard }));
+      const globalEntries = (await this.env.GLOBAL_LB.get(GLOBAL_KV_KEY, { type: 'json' })) ?? [];
+      ws.send(JSON.stringify({ type: 'global_leaderboard', entries: globalEntries }));
       return;
     }
 
@@ -128,6 +141,18 @@ export class CosmicGolfRoom {
       this._leaderboard = this._leaderboard.slice(0, MAX_LEADERBOARD);
       await this._saveLeaderboard();
       this._broadcast(JSON.stringify({ type: 'leaderboard', entries: this._leaderboard }));
+
+      if (safeEntry.holesCompleted === 10) {
+        const globalEntry = {
+          sessionId:    safeEntry.sessionId,
+          name:         safeEntry.name,
+          totalStrokes: safeEntry.totalStrokes,
+          totalTime:    safeEntry.totalTime,
+          holesCompleted: 10,
+        };
+        const top10 = await this._updateGlobalKV(globalEntry);
+        this._broadcast(JSON.stringify({ type: 'global_leaderboard', entries: top10 }));
+      }
       return;
     }
 

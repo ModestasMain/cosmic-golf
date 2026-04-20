@@ -26,6 +26,9 @@ export class ScoreboardUI {
     this._btnNext   = document.getElementById('btn-next-hole');
     this.sessionId  = null;
     this._serverEntries = null;
+    this._globalEntries = null;
+    this._isGameOver = false;
+    this._globalSection = null;
 
     this._btnNext.addEventListener('click', () => {
       eventBus.emit(Events.NEXT_HOLE);
@@ -36,17 +39,105 @@ export class ScoreboardUI {
     this._serverEntries = Array.isArray(entries) ? entries : null;
   }
 
+  setGlobalLeaderboard(entries) {
+    this._globalEntries = Array.isArray(entries) ? entries : null;
+    if (this._isGameOver && this._overlay?.style.display !== 'none') {
+      this._renderGlobalSection(this._globalEntries);
+    }
+  }
+
   show(isGameOver = false) {
     if (!this._overlay) return;
+    this._isGameOver = isGameOver;
     this._title.textContent = isGameOver ? 'GAME OVER' : 'HOLE COMPLETE';
     this._btnNext.textContent = isGameOver ? 'PLAY AGAIN' : 'NEXT HOLE →';
     this._renderTable(isGameOver);
+    if (isGameOver) {
+      this._renderGlobalSection(this._globalEntries);
+    } else {
+      this._clearGlobalSection();
+    }
     this._overlay.style.display = 'flex';
   }
 
   hide() {
     if (!this._overlay) return;
+    this._isGameOver = false;
+    this._clearGlobalSection();
     this._overlay.style.display = 'none';
+  }
+
+  _renderGlobalSection(entries) {
+    this._clearGlobalSection();
+
+    const section = document.createElement('div');
+    section.id = 'global-lb-section';
+    section.style.cssText = [
+      'margin-top:16px',
+      'padding-top:14px',
+      'border-top:1px solid rgba(100,180,255,0.2)',
+      'width:100%',
+      'max-height:260px',
+      'overflow-y:auto',
+    ].join(';');
+
+    const heading = document.createElement('div');
+    heading.style.cssText = 'text-align:center;letter-spacing:3px;font-size:11px;color:rgba(255,220,100,0.85);margin-bottom:10px;';
+    heading.textContent = '✦ GLOBAL TOP 10 ✦';
+    section.appendChild(heading);
+
+    if (!entries || entries.length === 0) {
+      const msg = document.createElement('div');
+      msg.style.cssText = 'text-align:center;color:rgba(255,255,255,0.4);font-size:11px;padding:8px 0;';
+      msg.textContent = entries === null ? 'Loading...' : "No entries yet — you're first!";
+      section.appendChild(msg);
+    } else {
+      const table = document.createElement('table');
+      table.style.cssText = 'width:100%;border-collapse:collapse;font-size:12px;';
+
+      const thead = document.createElement('thead');
+      thead.innerHTML = `<tr>
+        <th style="text-align:left;color:rgba(160,210,255,0.55);padding:2px 6px;font-weight:normal;font-size:10px;">RANK</th>
+        <th style="text-align:left;color:rgba(160,210,255,0.55);padding:2px 6px;font-weight:normal;font-size:10px;">PLAYER</th>
+        <th style="text-align:right;color:rgba(160,210,255,0.55);padding:2px 6px;font-weight:normal;font-size:10px;">STROKES</th>
+        <th style="text-align:right;color:rgba(160,210,255,0.55);padding:2px 6px;font-weight:normal;font-size:10px;">TIME</th>
+      </tr>`;
+      table.appendChild(thead);
+
+      const tbody = document.createElement('tbody');
+      const medals = ['🥇', '🥈', '🥉'];
+      entries.forEach((e, i) => {
+        const isMe = this.sessionId && e.sessionId === this.sessionId;
+        const tr = document.createElement('tr');
+        tr.style.cssText = isMe
+          ? 'background:rgba(100,180,255,0.12);border:1px solid rgba(100,180,255,0.25);'
+          : (i % 2 === 1 ? 'background:rgba(255,255,255,0.03);' : '');
+
+        const rankColors = ['rgba(255,210,0,0.9)', 'rgba(200,200,200,0.8)', 'rgba(200,140,80,0.8)'];
+        const rankColor = rankColors[i] ?? 'rgba(160,210,255,0.6)';
+        const rankText  = medals[i] ?? `${i + 1}`;
+
+        tr.innerHTML = `
+          <td style="padding:4px 6px;color:${rankColor};">${rankText}</td>
+          <td style="padding:4px 6px;">${isMe ? e.name + ' <span style="font-size:9px;opacity:0.7">(YOU)</span>' : e.name}</td>
+          <td style="padding:4px 6px;text-align:right;font-weight:bold;">${e.totalStrokes ?? '—'}</td>
+          <td style="padding:4px 6px;text-align:right;color:rgba(160,210,255,0.8);">${leaderboardStore.formatTime(e.totalTime)}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      section.appendChild(table);
+    }
+
+    this._overlay.insertBefore(section, this._btnNext);
+    this._globalSection = section;
+  }
+
+  _clearGlobalSection() {
+    if (this._globalSection) {
+      this._globalSection.remove();
+      this._globalSection = null;
+    }
   }
 
   _renderTable(isGameOver) {

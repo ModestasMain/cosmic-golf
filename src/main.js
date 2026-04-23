@@ -22,7 +22,12 @@ import { EventHUD } from './ui/EventHUD.js';
 import { LobbyPanel } from './ui/LobbyPanel.js';
 import { BallStylePicker } from './ui/BallStylePicker.js';
 import { audioManager } from './audio/AudioManager.js';
-import { DevPanel } from './debug/DevPanel.js';
+
+const LOCAL_DEV_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
+
+function isLocalDevHost() {
+  return import.meta.env.DEV && LOCAL_DEV_HOSTS.has(window.location.hostname);
+}
 
 const QUALITY_PROFILES = {
   high: {
@@ -81,6 +86,7 @@ class Game {
     this._qualityMode = localStorage.getItem('cosmic_quality_mode') || 'auto';
     this._qualityKey = null;
     this._quality = null;
+    this.devPanel = null;
     this._init();
   }
 
@@ -153,20 +159,31 @@ class Game {
     this.blurPass = new EffectPass(camera, this.dof, this.tiltShift);
     this._blurPassAdded = false; // added to composer on first use
     this._rebuildComposer();
+    this._setupDevPanelIfLocal();
+  }
 
-    // Dev panel — toggle with backtick key
-    this.devPanel = new DevPanel({
-      spaceBg:    this.holeScene.spaceBg,
-      starField:  this.holeScene.starField,
-      blurPass:   this.blurPass,
-      composer:   this.composer,
-      holeScene:  this.holeScene,
-      bloom:      this.bloom,
-      vignette:   this.vignette,
-      chromAb:    this.chromAb,
-      dof:        this.dof,
-      tiltShift:  this.tiltShift,
-    });
+  _setupDevPanelIfLocal() {
+    if (this.devPanel || !isLocalDevHost()) return;
+
+    import(/* @vite-ignore */ './debug/DevPanel.js')
+      .then(({ DevPanel }) => {
+        if (this.devPanel || !isLocalDevHost()) return;
+        this.devPanel = new DevPanel({
+          spaceBg:    this.holeScene.spaceBg,
+          starField:  this.holeScene.starField,
+          blurPass:   this.blurPass,
+          composer:   this.composer,
+          holeScene:  this.holeScene,
+          bloom:      this.bloom,
+          vignette:   this.vignette,
+          chromAb:    this.chromAb,
+          dof:        this.dof,
+          tiltShift:  this.tiltShift,
+        });
+      })
+      .catch((err) => {
+        console.warn('[DevPanel] Local dev panel failed to load:', err);
+      });
   }
 
   _setupState() {

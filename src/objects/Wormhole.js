@@ -36,6 +36,7 @@ export class Wormhole {
     this._debris    = [];
     this._rings     = [];
     this._funnelRings = [];
+    this._visualScale = 1;
 
     this._build();
 
@@ -44,6 +45,12 @@ export class Wormhole {
       const toTee = new Vector3().subVectors(teePos, position).normalize();
       this._group.quaternion.setFromUnitVectors(new Vector3(0, 0, 1), toTee);
     }
+  }
+
+  setVisualScale(scale = 1) {
+    this._visualScale = Math.max(0.01, scale);
+    this._group.scale.setScalar(this._visualScale);
+    for (const d of this._debris) d.mesh.scale.setScalar(this._visualScale);
   }
 
   _build() {
@@ -251,8 +258,8 @@ export class Wormhole {
     // Meshes live at scene root so positions are world-space directly.
     for (const d of this._debris) {
       d.angle += d.speed * dt;
-      const wx = Math.cos(d.angle) * d.orbitR;
-      const wz = Math.sin(d.angle) * d.orbitR;
+      const wx = Math.cos(d.angle) * d.orbitR * this._visualScale;
+      const wz = Math.sin(d.angle) * d.orbitR * this._visualScale;
       d.mesh.position.set(
         this.position.x + wx,
         this.position.y + wz * d.tiltSin,

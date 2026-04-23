@@ -7,7 +7,8 @@
 // ============================================================
 
 import GUI from 'lil-gui';
-import { MeshBasicMaterial } from 'three';
+import { MeshBasicMaterial, Vector3 } from 'three';
+import { WORLDEATER } from '../core/Constants.js';
 import { textureManager } from '../core/TextureManager.js';
 import { eventBus, Events } from '../core/EventBus.js';
 import { Planet } from '../objects/Planet.js';
@@ -573,6 +574,25 @@ export class DevPanel {
       broodScaleY: 1,
       broodScaleZ: 1,
     };
+    const introP = {
+      duration: WORLDEATER.INTRO_DURATION,
+      approachEnd: WORLDEATER.INTRO_APPROACH_END,
+      sealBlendStart: WORLDEATER.INTRO_SEAL_BLEND_START,
+      closeCameraEnd: WORLDEATER.INTRO_CAMERA_CLOSE_END,
+      returnCameraStart: WORLDEATER.INTRO_CAMERA_RETURN_START,
+      orbitRadius: WORLDEATER.INTRO_ORBIT_RADIUS,
+      reverseOrbit: WORLDEATER.INTRO_ORBIT_DIRECTION < 0,
+      entryAngleOffset: WORLDEATER.INTRO_ENTRY_ANGLE_OFFSET,
+      curveLift: WORLDEATER.INTRO_CURVE_LIFT,
+      segmentSpacing: WORLDEATER.INTRO_SEGMENT_SPACING,
+      wormholeX: WORLDEATER.INTRO_WORMHOLE_POS[0],
+      wormholeY: WORLDEATER.INTRO_WORMHOLE_POS[1],
+      wormholeZ: WORLDEATER.INTRO_WORMHOLE_POS[2],
+      wormholeScale: WORLDEATER.INTRO_WORMHOLE_SCALE,
+      showPath: false,
+      previewHold: false,
+      previewProgress: 0.34,
+    };
 
     const getBoss = () => holeScene.worldEater ?? null;
     const syncFromBoss = () => {
@@ -604,6 +624,71 @@ export class DevPanel {
       boss.resetDebugState();
       syncFromBoss();
     };
+    const applyIntro = () => {
+      WORLDEATER.INTRO_DURATION = introP.duration;
+      WORLDEATER.INTRO_APPROACH_END = introP.approachEnd;
+      WORLDEATER.INTRO_SEAL_BLEND_START = introP.sealBlendStart;
+      WORLDEATER.INTRO_CAMERA_CLOSE_END = introP.closeCameraEnd;
+      WORLDEATER.INTRO_CAMERA_RETURN_START = introP.returnCameraStart;
+      WORLDEATER.INTRO_ORBIT_RADIUS = introP.orbitRadius;
+      WORLDEATER.INTRO_ORBIT_DIRECTION = introP.reverseOrbit ? -1 : 1;
+      WORLDEATER.INTRO_ENTRY_ANGLE_OFFSET = introP.entryAngleOffset;
+      WORLDEATER.INTRO_CURVE_LIFT = introP.curveLift;
+      WORLDEATER.INTRO_SEGMENT_SPACING = introP.segmentSpacing;
+      WORLDEATER.INTRO_WORMHOLE_POS = [introP.wormholeX, introP.wormholeY, introP.wormholeZ];
+      WORLDEATER.INTRO_WORMHOLE_SCALE = introP.wormholeScale;
+
+      const boss = getBoss();
+      if (boss?.config) {
+        Object.assign(boss.config, {
+          INTRO_DURATION: introP.duration,
+          INTRO_APPROACH_END: introP.approachEnd,
+          INTRO_SEAL_BLEND_START: introP.sealBlendStart,
+          INTRO_CAMERA_CLOSE_END: introP.closeCameraEnd,
+          INTRO_CAMERA_RETURN_START: introP.returnCameraStart,
+          INTRO_ORBIT_RADIUS: introP.orbitRadius,
+          INTRO_ORBIT_DIRECTION: introP.reverseOrbit ? -1 : 1,
+          INTRO_ENTRY_ANGLE_OFFSET: introP.entryAngleOffset,
+          INTRO_CURVE_LIFT: introP.curveLift,
+          INTRO_SEGMENT_SPACING: introP.segmentSpacing,
+          INTRO_WORMHOLE_POS: WORLDEATER.INTRO_WORMHOLE_POS,
+          INTRO_WORMHOLE_SCALE: introP.wormholeScale,
+        });
+      }
+      if (holeScene._holeData?.boss?.kind === 'WORLDEATER') {
+        holeScene._holeData.boss.introWormholePos = new Vector3(
+          introP.wormholeX,
+          introP.wormholeY,
+          introP.wormholeZ,
+        );
+      }
+      holeScene.setWorldEaterIntroPathVisible?.(introP.showPath);
+      if (introP.previewHold) {
+        holeScene.previewWorldEaterIntro?.(introP.previewProgress);
+      } else {
+        holeScene.clearWorldEaterIntroPreview?.();
+      }
+    };
+    const replayIntro = () => {
+      introP.previewHold = false;
+      applyIntro();
+      f.controllersRecursive().forEach((c) => c.updateDisplay());
+      holeScene.replayWorldEaterIntro?.();
+    };
+    const copyIntro = () => this._copy('WorldEaterIntro', {
+      INTRO_DURATION: introP.duration,
+      INTRO_APPROACH_END: introP.approachEnd,
+      INTRO_SEAL_BLEND_START: introP.sealBlendStart,
+      INTRO_CAMERA_CLOSE_END: introP.closeCameraEnd,
+      INTRO_CAMERA_RETURN_START: introP.returnCameraStart,
+      INTRO_ORBIT_RADIUS: introP.orbitRadius,
+      INTRO_ORBIT_DIRECTION: introP.reverseOrbit ? -1 : 1,
+      INTRO_ENTRY_ANGLE_OFFSET: introP.entryAngleOffset,
+      INTRO_CURVE_LIFT: introP.curveLift,
+      INTRO_SEGMENT_SPACING: introP.segmentSpacing,
+      INTRO_WORMHOLE_POS: [introP.wormholeX, introP.wormholeY, introP.wormholeZ],
+      INTRO_WORMHOLE_SCALE: introP.wormholeScale,
+    });
 
     eventBus.on(Events.HOLE_LOADED, () => {
       setTimeout(() => {
@@ -614,6 +699,27 @@ export class DevPanel {
 
     const f = gui.addFolder('🐉 WorldEater');
     f.close();
+
+    const introF = f.addFolder('Intro Cinematic');
+    introF.add(introP, 'duration', 4, 14, 0.1).name('Duration').onChange(applyIntro);
+    introF.add(introP, 'approachEnd', 0.1, 0.65, 0.01).name('Fly-in ends').onChange(applyIntro);
+    introF.add(introP, 'sealBlendStart', 0.35, 0.98, 0.01).name('Blend to gameplay').onChange(applyIntro);
+    introF.add(introP, 'orbitRadius', 120, 700, 5).name('Intro orbit radius').onChange(applyIntro);
+    introF.add(introP, 'reverseOrbit').name('Reverse orbit').onChange(applyIntro);
+    introF.add(introP, 'entryAngleOffset', -Math.PI, Math.PI, 0.01).name('Orbit entry angle').onChange(applyIntro);
+    introF.add(introP, 'curveLift', -300, 400, 5).name('Fly-in arc lift').onChange(applyIntro);
+    introF.add(introP, 'segmentSpacing', 50, 160, 2).name('Body spacing').onChange(applyIntro);
+    introF.add(introP, 'wormholeX', -1800, 1800, 10).name('Wormhole X').onChange(applyIntro);
+    introF.add(introP, 'wormholeY', -700, 900, 10).name('Wormhole Y').onChange(applyIntro);
+    introF.add(introP, 'wormholeZ', -1800, 1800, 10).name('Wormhole Z').onChange(applyIntro);
+    introF.add(introP, 'wormholeScale', 2, 28, 0.5).name('Wormhole size').onChange(applyIntro);
+    introF.add(introP, 'closeCameraEnd', 0.05, 0.35, 0.01).name('Close cam ends').onChange(applyIntro);
+    introF.add(introP, 'returnCameraStart', 0.55, 0.96, 0.01).name('Return cam starts').onChange(applyIntro);
+    introF.add(introP, 'showPath').name('Show path arrows').onChange(applyIntro);
+    introF.add(introP, 'previewHold').name('Hold preview pose').onChange(applyIntro);
+    introF.add(introP, 'previewProgress', 0, 1, 0.01).name('Preview progress').onChange(applyIntro);
+    introF.add({ replayIntro }, 'replayIntro').name('▶ Replay Intro');
+    introF.add({ copyIntro }, 'copyIntro').name('📋 Copy Intro JSON');
 
     const headF = f.addFolder('Head Shape');
     headF.add(p, 'headScaleX', 20, 120, 1).name('Width').onChange(apply);

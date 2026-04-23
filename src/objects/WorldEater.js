@@ -40,12 +40,10 @@ const _broodAhead = new Vector3();
 const _weakSpotWorld = new Vector3();
 const _bridgeMid = new Vector3();
 const _bridgeLook = new Vector3();
-const _introPos = new Vector3();
 const _introPrev = new Vector3();
-const _introSealed = new Vector3();
-const _introTailDir = new Vector3();
 const _introHeadPos = new Vector3();
 const _introFallback = new Vector3();
+const _sealResumePos = new Vector3();
 const _frameAxis = new Vector3();
 const _frameNormal = new Vector3();
 const _frameBinormal = new Vector3();
@@ -554,28 +552,26 @@ export class WorldEater {
     this._sealResumeBlend = 1;
     this._sealResumeTime = 0;
     this._sealResumeDuration = 1.15;
+    this._sealResumeStartTime = 0;
     this._weakSpots = [];
     this._weakSpotsRemaining = this.config.WEAK_SPOT_COUNT;
     this._sealPulse = 0;
     this._intro = {
       active: false,
       time: 0,
-      duration: 8.2,
-      approachEnd: 0.34,
-      sealFadeStart: 0.08,
+      duration: this.config.INTRO_DURATION,
+      approachEnd: this.config.INTRO_APPROACH_END,
+      sealFadeStart: this.config.INTRO_SEAL_FADE_START,
       wormholePos: new Vector3(),
       controlA: new Vector3(),
       controlB: new Vector3(),
       entry: new Vector3(),
-      target: new Vector3(),
-      end: new Vector3(),
       exitDir: new Vector3(1, 0, 0),
+      entryAngle: 0,
+      orbitDirection: this.config.INTRO_ORBIT_DIRECTION < 0 ? -1 : 1,
+      approachLength: 1,
       orbitTime: 0,
       coilBlend: 0,
-      trail: [],
-      trailSpacing: Math.max(16, this.config.BODY_RADIUS * 0.68),
-      trailStride: 2,
-      trailMaxPoints: Math.max(36, this.config.SEGMENTS * 6),
     };
     this._debugTuning = {
       bodyRadiusMul: 1,
@@ -752,50 +748,71 @@ export class WorldEater {
     this._debugDefaults = this.getDebugState();
   }
 
-  startCinematicIntro({ wormholePos, targetPos } = {}) {
+  _configureCinematicIntro({ wormholePos, targetPos } = {}) {
     const center = targetPos?.clone?.() ?? this.config.center.clone();
-    const wormhole = wormholePos?.clone?.() ?? center.clone().add(new Vector3(900, 220, -900));
-    const toCenter = center.clone().sub(wormhole).normalize();
-    const side = new Vector3(-toCenter.z, 0, toCenter.x).normalize();
-    const entry = this._getSealedPosAt(0, 0, new Vector3());
+    const fallback = new Vector3(...(this.config.INTRO_WORMHOLE_POS ?? [900, 220, -900]));
+    const wormhole = wormholePos?.clone?.() ?? center.clone().add(fallback);
+    const toCenter = center.clone().sub(wormhole);
+    if (toCenter.lengthSq() < 0.001) toCenter.set(1, 0, 0);
+    toCenter.normalize();
+    const radial = wormhole.clone().sub(center);
+    if (radial.lengthSq() < 0.001) radial.set(1, 0, 0);
+    const entryAngle = Math.atan2(radial.z, radial.x) + (this.config.INTRO_ENTRY_ANGLE_OFFSET ?? 0);
+    const introRadius = this.config.INTRO_ORBIT_RADIUS ?? this.config.ORBIT_RADIUS;
+    const entry = this._getOrbitPos(entryAngle, new Vector3(), introRadius);
+    const approachDist = Math.max(1, wormhole.distanceTo(entry));
+    const lift = this.config.INTRO_CURVE_LIFT ?? 120;
+    const orbitDirection = this.config.INTRO_ORBIT_DIRECTION < 0 ? -1 : 1;
+    this._getOrbitPos(entryAngle + orbitDirection * 0.025, _posA, introRadius);
+    _delta.subVectors(_posA, entry);
+    if (_delta.lengthSq() < 0.001) _delta.copy(toCenter);
+    _delta.normalize();
+
+    this._intro.wormholePos.copy(wormhole);
+    this._intro.exitDir.copy(toCenter);
+    this._intro.controlA.copy(wormhole)
+      .addScaledVector(toCenter, approachDist * 0.34)
+      .add(new Vector3(0, lift, 0));
+    this._intro.controlB.copy(entry)
+      .addScaledVector(_delta, -approachDist * 0.24);
+    this._intro.entry.copy(entry);
+    this._intro.entryAngle = entryAngle;
+    this._intro.orbitDirection = orbitDirection;
+    this._intro.approachLength = this._measureIntroApproachLength();
+  }
+
+  startCinematicIntro({ wormholePos, targetPos } = {}) {
+    this._configureCinematicIntro({ wormholePos, targetPos });
 
     this._intro.active = true;
     this._intro.time = 0;
     this._intro.coilBlend = 0;
     this._intro.orbitTime = 0;
-    this._intro.wormholePos.copy(wormhole);
-    this._intro.exitDir.copy(toCenter);
-    this._intro.controlA.copy(wormhole)
-      .addScaledVector(toCenter, 320)
-      .addScaledVector(side, 240)
-      .add(new Vector3(0, 120, 0));
-    this._intro.controlB.copy(entry)
-      .addScaledVector(side, 70)
-      .addScaledVector(toCenter, -120)
-      .add(new Vector3(0, 85, 0));
-    this._intro.entry.copy(entry);
-    this._intro.target.copy(entry);
-    this._intro.end.copy(entry);
-    this._seedIntroTrail(wormhole, toCenter.clone().negate());
     this._sealResumeBlend = 1;
     this._sealResumeTime = this._sealResumeDuration;
     for (const spot of this._weakSpots) {
       this._restoreWeakSpotMaterials(spot);
       if (spot.sleeve) spot.sleeve.visible = false;
     }
+    for (const brood of this._brood) brood.group.visible = false;
     this._time = 0;
   }
 
+  previewCinematicIntro({ wormholePos, targetPos } = {}) {
+    this._configureCinematicIntro({ wormholePos, targetPos });
+  }
+
   finishCinematicIntro() {
+    if (!this._intro) return;
     this._intro.active = false;
     this._intro.coilBlend = 1;
-    this._intro.trail.length = 0;
     this._sealResumeBlend = 1;
     this._sealResumeTime = this._sealResumeDuration;
-    this._time = this._intro.orbitTime;
+    this._time = this._intro.orbitTime || this._time;
     for (const spot of this._weakSpots) {
       if (!spot.broken) this._applyWeakSpotMaterials(spot);
     }
+    for (const brood of this._brood) brood.group.visible = true;
     this.update(0);
   }
 
@@ -807,10 +824,28 @@ export class WorldEater {
   getCinematicIntroState() {
     return {
       active: this._intro.active,
-      progress: clamp01(this._intro.time / this._intro.duration),
+      progress: clamp01(this._intro.time / Math.max(0.001, this._intro.duration)),
       coilBlend: this._intro.coilBlend,
       wormholePos: this._intro.wormholePos.clone(),
     };
+  }
+
+  getCinematicIntroPathPoints(samples = 96) {
+    const count = Math.max(8, samples | 0);
+    const points = [];
+    for (let i = 0; i <= count; i++) {
+      points.push(this._sampleIntroHeadAtRaw(i / count, new Vector3()));
+    }
+    return points;
+  }
+
+  setCinematicIntroProgress(progress = 0) {
+    const wasActive = this._intro.active;
+    this._intro.active = true;
+    this._intro.time = clamp01(progress) * Math.max(0.001, this._intro.duration);
+    this._intro.orbitTime = this._intro.time;
+    this._updateIntroPose(0);
+    this._intro.active = wasActive;
   }
 
   getDebugState() {
@@ -1142,6 +1177,9 @@ export class WorldEater {
 
     const tubularSegments = this._bodyTubeSegments;
     const radialSegments = this._bodyTubeRadialSegments;
+    const safeRadius = Number.isFinite(radius) && radius > 0
+      ? radius
+      : this.config.BODY_RADIUS;
     const positions = this._bodyTubeGeo.attributes.position.array;
     const normals = this._bodyTubeGeo.attributes.normal.array;
     const ringCount = tubularSegments + 1;
@@ -1160,10 +1198,13 @@ export class WorldEater {
 
       const point = _posA.copy(points[base]).lerp(points[next], alpha);
       if (!isFiniteVec3(point)) {
-        point.copy(points[Math.max(0, Math.min(lastPoint, base))] ?? this.config.center);
+        const fallbackPoint = points[Math.max(0, Math.min(lastPoint, base))];
+        point.copy(isFiniteVec3(fallbackPoint) ? fallbackPoint : this.config.center);
       }
-      const prev = _posB.copy(points[Math.max(0, base - 1)]);
-      const ahead = _posC.copy(points[Math.min(lastPoint, next + 1)]);
+      const prevPoint = points[Math.max(0, base - 1)];
+      const aheadPoint = points[Math.min(lastPoint, next + 1)];
+      const prev = _posB.copy(isFiniteVec3(prevPoint) ? prevPoint : point);
+      const ahead = _posC.copy(isFiniteVec3(aheadPoint) ? aheadPoint : point);
       _frameTangent.subVectors(ahead, prev);
       if (_frameTangent.lengthSq() < 1e-6) {
         _frameTangent.subVectors(points[next], points[base]);
@@ -1178,6 +1219,7 @@ export class WorldEater {
         _frameNormal.copy(_up).cross(_frameTangent);
         if (_frameNormal.lengthSq() < 1e-6) _frameNormal.set(1, 0, 0).cross(_frameTangent);
         _frameNormal.normalize();
+        if (!isFiniteVec3(_frameNormal) || _frameNormal.lengthSq() < 1e-6) _frameNormal.set(1, 0, 0);
       } else {
         _frameNormal.copy(this._tubeFrameNormals[i - 1]);
         const prevTangent = this._tubeFrameTangents[i - 1];
@@ -1193,9 +1235,14 @@ export class WorldEater {
           if (_frameNormal.lengthSq() < 1e-6) _frameNormal.set(1, 0, 0).cross(_frameTangent);
         }
         _frameNormal.normalize();
+        if (!isFiniteVec3(_frameNormal) || _frameNormal.lengthSq() < 1e-6) _frameNormal.set(1, 0, 0);
       }
 
       _frameBinormal.crossVectors(_frameTangent, _frameNormal).normalize();
+      if (!isFiniteVec3(_frameBinormal) || _frameBinormal.lengthSq() < 1e-6) {
+        _frameBinormal.set(0, 1, 0).cross(_frameTangent).normalize();
+      }
+      if (!isFiniteVec3(_frameBinormal) || _frameBinormal.lengthSq() < 1e-6) _frameBinormal.set(0, 1, 0);
 
       if (!this._tubeFrameNormals[i]) this._tubeFrameNormals[i] = new Vector3();
       if (!this._tubeFrameBinormals[i]) this._tubeFrameBinormals[i] = new Vector3();
@@ -1209,8 +1256,8 @@ export class WorldEater {
         const cos = Math.cos(angle);
         const sin = Math.sin(angle);
         _ringVertex.copy(point)
-          .addScaledVector(this._tubeFrameNormals[i], cos * radius)
-          .addScaledVector(this._tubeFrameBinormals[i], sin * radius);
+          .addScaledVector(this._tubeFrameNormals[i], cos * safeRadius)
+          .addScaledVector(this._tubeFrameBinormals[i], sin * safeRadius);
         if (!isFiniteVec3(_ringVertex)) {
           _ringVertex.copy(point);
         }
@@ -1450,7 +1497,7 @@ export class WorldEater {
     this._openBlend = 0;
     this._mouthOpen = 0;
     this._resetTimer = this.config.RESET_WINDOW_SECONDS;
-    this._intro.sealedTime = this._time;
+    this._sealResumeStartTime = this._time;
     this._sealResumeBlend = 0;
     this._sealResumeTime = 0;
     this._resetWeakSpots();
@@ -1577,101 +1624,79 @@ export class WorldEater {
     return this._getSealedPosAt(index, this._time, out);
   }
 
-  _seedIntroTrail(headPos, tailDir) {
-    const trail = this._intro.trail;
-    const spacing = this._intro.trailSpacing;
-    const max = this._intro.trailMaxPoints;
-    trail.length = 0;
-
-    _introTailDir.copy(tailDir);
-    if (_introTailDir.lengthSq() < 1e-6) _introTailDir.copy(this._intro.exitDir).negate();
-    if (_introTailDir.lengthSq() < 1e-6) _introTailDir.set(-1, 0, 0);
-    _introTailDir.normalize();
-
-    for (let i = 0; i < max; i++) {
-      trail.push(headPos.clone().addScaledVector(_introTailDir, spacing * i));
-    }
-  }
-
-  _pushIntroTrail(headPos, tailDir) {
-    const trail = this._intro.trail;
-    const spacing = this._intro.trailSpacing;
-    const max = this._intro.trailMaxPoints;
-
-    if (!trail.length) {
-      this._seedIntroTrail(headPos, tailDir);
-      return;
-    }
-
-    if (!isFiniteVec3(trail[0])) {
-      this._seedIntroTrail(headPos, tailDir);
-      return;
-    }
-
-    const first = trail[0];
-    if (first.distanceToSquared(headPos) > (spacing * 0.55) ** 2) {
-      trail.unshift(headPos.clone());
-    } else {
-      first.copy(headPos);
-    }
-
-    while (trail.length > max) trail.pop();
-
-    while (trail.length < max) {
-      const last = trail[trail.length - 1];
-      const prev = trail[trail.length - 2] ?? last;
-      _introTailDir.subVectors(last, prev);
-      if (_introTailDir.lengthSq() < 1e-6) {
-        _introTailDir.copy(tailDir);
-      }
-      if (_introTailDir.lengthSq() < 1e-6) {
-        _introTailDir.copy(this._intro.exitDir).negate();
-      }
-      if (_introTailDir.lengthSq() < 1e-6) {
-        _introTailDir.set(-1, 0, 0);
-      }
-      _introTailDir.normalize();
-      trail.push(last.clone().addScaledVector(_introTailDir, spacing));
-    }
-  }
-
-  _applyIntroTrailToSegments(tailDir) {
-    const trail = this._intro.trail;
-    const spacing = this._intro.trailSpacing;
-    const stride = this._intro.trailStride;
-
-    if (!trail.length) {
-      this._seedIntroTrail(this._intro.wormholePos, tailDir);
-    }
-
-    for (let i = 0; i < this.config.SEGMENTS; i++) {
-      const idx = i * stride;
-      if (idx < trail.length && isFiniteVec3(trail[idx])) {
-        this._segmentPositions[i].copy(trail[idx]);
-        continue;
-      }
-
-      const last = trail[trail.length - 1];
-      const prev = trail[trail.length - 2] ?? last;
-      _introTailDir.subVectors(last, prev);
-      if (_introTailDir.lengthSq() < 1e-6) _introTailDir.copy(tailDir);
-      if (_introTailDir.lengthSq() < 1e-6) _introTailDir.copy(this._intro.exitDir).negate();
-      if (_introTailDir.lengthSq() < 1e-6) _introTailDir.set(-1, 0, 0);
-      _introTailDir.normalize();
-
-      const extra = idx - (trail.length - 1);
-      this._segmentPositions[i]
-        .copy(last)
-        .addScaledVector(_introTailDir, extra * spacing);
-    }
-  }
-
   _sampleIntroHead(t, out) {
     const mt = 1 - t;
     out.copy(this._intro.wormholePos).multiplyScalar(mt * mt * mt);
     out.addScaledVector(this._intro.controlA, 3 * mt * mt * t);
     out.addScaledVector(this._intro.controlB, 3 * mt * t * t);
     out.addScaledVector(this._intro.entry, t * t * t);
+    return out;
+  }
+
+  _measureIntroApproachLength(samples = 28) {
+    let length = 0;
+    this._sampleIntroHead(0, _introPrev);
+    for (let i = 1; i <= samples; i++) {
+      this._sampleIntroHead(i / samples, _introHeadPos);
+      length += _introHeadPos.distanceTo(_introPrev);
+      _introPrev.copy(_introHeadPos);
+    }
+    return Math.max(1, length);
+  }
+
+  _getIntroOrbitBlendRange() {
+    const start = Math.max(0.02, this._intro.approachEnd - 0.08);
+    const endLimit = Math.max(start + 0.08, (this.config.INTRO_SEAL_BLEND_START ?? 0.9) - 0.04);
+    const end = Math.min(endLimit, this._intro.approachEnd + 0.08);
+    return { start, end: Math.max(start + 0.08, end) };
+  }
+
+  _sampleIntroOrbitHead(progress, out) {
+    const { start } = this._getIntroOrbitBlendRange();
+    const orbitSeconds = Math.max(0, progress - start) * this._intro.duration;
+    const phase = this._intro.entryAngle
+      + this._intro.orbitDirection * orbitSeconds * (Math.PI * 2 / this.config.CYCLE_SECONDS);
+    const introRadius = this.config.INTRO_ORBIT_RADIUS ?? this.config.ORBIT_RADIUS;
+    return this._getOrbitPos(phase, out, introRadius);
+  }
+
+  _sampleIntroMotionHeadAtRaw(raw, out) {
+    const progress = clamp01(raw);
+    const approachEnd = Math.max(0.0001, this._intro.approachEnd);
+    const { start, end } = this._getIntroOrbitBlendRange();
+    if (progress <= 0) return out.copy(this._intro.wormholePos);
+
+    if (progress < approachEnd) {
+      this._sampleIntroHead(progress / approachEnd, out);
+    } else {
+      this._sampleIntroHead(1, out);
+    }
+
+    const orbitBlend = smoothstep(start, end, progress);
+    if (orbitBlend > 0) {
+      this._sampleIntroOrbitHead(progress, _posA);
+      out.lerp(_posA, orbitBlend);
+    }
+    return out;
+  }
+
+  _sampleIntroBodyAtRaw(raw, out) {
+    if (raw >= 0) return this._sampleIntroMotionHeadAtRaw(raw, out);
+
+    const approachSpeedPerRaw = this._intro.approachLength / Math.max(0.0001, this._intro.approachEnd);
+    const backtrack = Math.abs(raw) * Math.max(approachSpeedPerRaw, 1);
+    return out.copy(this._intro.wormholePos).addScaledVector(this._intro.exitDir, -backtrack);
+  }
+
+  _sampleIntroHeadAtRaw(raw, out) {
+    const progress = clamp01(raw);
+    this._sampleIntroMotionHeadAtRaw(progress, out);
+    const sealBlendStart = this.config.INTRO_SEAL_BLEND_START ?? 0.68;
+    const sealBlend = smoothstep(sealBlendStart, 1, progress);
+    if (sealBlend > 0) {
+      this._getSealedPosAt(0, this._time, _posB);
+      out.lerp(_posB, sealBlend);
+    }
     return out;
   }
 
@@ -1870,9 +1895,9 @@ export class WorldEater {
     this.dispose();
   }
 
-  _getOrbitPos(phase, out) {
+  _getOrbitPos(phase, out, radiusOverride = null) {
     const center = this.config.center;
-    const radius = this.config.ORBIT_RADIUS;
+    const radius = radiusOverride ?? this.config.ORBIT_RADIUS;
     const zRadius = radius * this.config.ELLIPSE_Z;
     const wobble = 1 + Math.sin(phase * 2.0) * 0.08;
     const x = center.x + Math.cos(phase) * radius * wobble;
@@ -1972,8 +1997,8 @@ export class WorldEater {
       this._getOrbitPos(phase, _posA);
       this._getSealedPos(i, _posB);
       if (this._phase === 'sealed' && this._sealResumeBlend < 1) {
-        this._getSealedPosAt(i, this._intro.sealedTime, _introSealed);
-        _posB.lerp(_introSealed, 1 - this._sealResumeBlend);
+        this._getSealedPosAt(i, this._sealResumeStartTime, _sealResumePos);
+        _posB.lerp(_sealResumePos, 1 - this._sealResumeBlend);
       }
       this._segmentPositions[i].copy(_posB).lerp(_posA, this._openBlend);
 
@@ -2146,10 +2171,14 @@ export class WorldEater {
 
   _updateIntroPose(dt) {
     this._intro.time += dt;
-    const raw = clamp01(this._intro.time / this._intro.duration);
-    const approachBlend = clamp01(raw / Math.max(0.0001, this._intro.approachEnd));
+    this._intro.orbitTime += dt;
+    this._time = this._intro.orbitTime;
+    const raw = clamp01(this._intro.time / Math.max(0.001, this._intro.duration));
     const orbitBlend = clamp01((raw - this._intro.approachEnd) / Math.max(0.0001, 1 - this._intro.approachEnd));
-    const sealFade = smoothstep(0, this._intro.sealFadeStart, orbitBlend);
+    const sealBlendStart = this.config.INTRO_SEAL_BLEND_START ?? 0.68;
+    const sealBlend = smoothstep(sealBlendStart, 1, raw);
+    const sealFade = sealBlend;
+    const introRadius = this.config.INTRO_ORBIT_RADIUS ?? this.config.ORBIT_RADIUS;
     this._intro.coilBlend = orbitBlend;
     this._openBlend = 0;
     this._mouthOpen = 0;
@@ -2158,43 +2187,41 @@ export class WorldEater {
       this._prevSegmentPositions[i].copy(this._segmentPositions[i]);
     }
 
-    if (raw < this._intro.approachEnd) {
-      this._sampleIntroHead(approachBlend, _introHeadPos);
-      this._sampleIntroHead(Math.max(0, approachBlend - 0.02), _introPrev);
-      _delta.subVectors(_introHeadPos, _introPrev);
-      if (_delta.lengthSq() < 0.001) _delta.copy(this._intro.exitDir);
-      if (_delta.lengthSq() < 0.001) _delta.set(1, 0, 0);
-      _delta.normalize();
+    const segmentSpacing = this.config.INTRO_SEGMENT_SPACING
+      ?? this.config.ORBIT_RADIUS * this.config.SEGMENT_PHASE * 0.88;
+    const { start: orbitBlendStart, end: orbitBlendEnd } = this._getIntroOrbitBlendRange();
+    const orbitSettle = smoothstep(orbitBlendStart, orbitBlendEnd, raw);
+    const approachSpeedPerRaw = this._intro.approachLength / Math.max(0.0001, this._intro.approachEnd);
+    const orbitSpeedPerRaw = introRadius * this._intro.duration * (Math.PI * 2 / this.config.CYCLE_SECONDS);
+    const speedPerRaw = Math.max(
+      1,
+      approachSpeedPerRaw * (1 - orbitSettle) + orbitSpeedPerRaw * orbitSettle,
+    );
+    const rawSpacing = segmentSpacing / speedPerRaw;
+    for (let i = 0; i < this.config.SEGMENTS; i++) {
+      this._sampleIntroBodyAtRaw(raw - i * rawSpacing, this._segmentPositions[i]);
+    }
 
-      _introFallback.crossVectors(_delta, _up);
-      if (_introFallback.lengthSq() < 1e-6) {
-        _introFallback.set(1, 0, 0).cross(_delta);
+    _delta.subVectors(this._segmentPositions[0], this._segmentPositions[1]);
+    if (_delta.lengthSq() < 0.001) _delta.copy(this._intro.exitDir);
+    _delta.normalize();
+    _side.copy(_delta).cross(_up);
+    if (_side.lengthSq() < 0.01) _side.set(1, 0, 0);
+    _side.normalize();
+
+    for (let i = 1; i < this.config.SEGMENTS; i++) {
+      const swayPhase = this._time * 2.4 + i * 0.55;
+      const sideSway = Math.sin(swayPhase * 1.35) * 8 * Math.max(0, 1 - i * 0.08);
+      const upSway = Math.cos(swayPhase) * 5 * Math.max(0, 1 - i * 0.06);
+      this._segmentPositions[i].addScaledVector(_side, sideSway);
+      this._segmentPositions[i].y += upSway;
+    }
+
+    if (sealBlend > 0) {
+      for (let i = 0; i < this.config.SEGMENTS; i++) {
+        this._getSealedPosAt(i, this._time, _posB);
+        this._segmentPositions[i].lerp(_posB, sealBlend);
       }
-      if (_introFallback.lengthSq() < 1e-6) {
-        _introFallback.set(0, 0, 1);
-      }
-      _introFallback.normalize();
-
-      const headLift = Math.sin(this._time * 4.2) * 10 * (1 - approachBlend * 0.4);
-      const headSway = Math.cos(this._time * 3.1) * 16 * (1 - approachBlend * 0.55);
-      _introHeadPos.addScaledVector(_introFallback, headSway);
-      _introHeadPos.y += headLift;
-
-      _introFallback.copy(_delta).negate();
-      this._pushIntroTrail(_introHeadPos, _introFallback);
-      this._applyIntroTrailToSegments(_introFallback);
-    } else {
-      this._intro.orbitTime += dt;
-      this._time = this._intro.orbitTime;
-      this._getSealedPosAt(0, this._intro.orbitTime, _introHeadPos);
-      this._getSealedPosAt(0, Math.max(0, this._intro.orbitTime - 0.05), _introPrev);
-      _delta.subVectors(_introHeadPos, _introPrev);
-      if (_delta.lengthSq() < 0.001) _delta.copy(this._intro.exitDir);
-      if (_delta.lengthSq() < 0.001) _delta.set(1, 0, 0);
-      _delta.normalize();
-      _introFallback.copy(_delta).negate();
-      this._pushIntroTrail(_introHeadPos, _introFallback);
-      this._applyIntroTrailToSegments(_introFallback);
     }
 
     this._headDir.subVectors(this._segmentPositions[0], this._segmentPositions[1]);
@@ -2326,9 +2353,7 @@ export class WorldEater {
     }
     if (sealFade > 0.72) this._updateBrood(dt);
 
-    if (raw >= 1) {
-      this.finishCinematicIntro();
-    }
+    if (raw >= 1) this.finishCinematicIntro();
   }
 
   interactWithBall(ball, dt, allowBounce = true) {

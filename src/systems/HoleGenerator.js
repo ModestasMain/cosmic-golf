@@ -15,7 +15,7 @@
 // ============================================================
 
 import { Vector3 } from 'three';
-import { PLANET, HOLE, WORLD, COLOR_PALETTES } from '../core/Constants.js';
+import { PLANET, HOLE, WORLD, COLOR_PALETTES, WORLDEATER } from '../core/Constants.js';
 
 // ── RNG ────────────────────────────────────────────────────────
 function mulberry32(seed) {
@@ -1235,7 +1235,7 @@ function genBOSS_WORLDEATER() {
       kind: 'WORLDEATER',
       center,
       spitTarget: new Vector3(-190, 40, 130),
-      introWormholePos: new Vector3(980, 240, -920),
+      introWormholePos: new Vector3(...WORLDEATER.INTRO_WORMHOLE_POS),
     },
   };
 }

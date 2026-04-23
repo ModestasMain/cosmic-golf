@@ -6,12 +6,13 @@
 import {
   Scene, PerspectiveCamera, AmbientLight, DirectionalLight, HemisphereLight,
   Vector3, Quaternion, ArrowHelper, CanvasTexture,
-  Sprite, SpriteMaterial, AdditiveBlending,
+  Sprite, SpriteMaterial, AdditiveBlending, Group,
+  BufferGeometry, Line, LineBasicMaterial,
 } from 'three';
 import { update as tweenUpdate } from '@tweenjs/tween.js';
 import { eventBus, Events } from '../core/EventBus.js';
 import { gameState } from '../core/GameState.js';
-import { CAMERA, HOLE, AIM, PHYSICS, BALL, ORBIT, COLOR_PALETTES, WORLDEATER } from '../core/Constants.js';
+import { CAMERA, HOLE, AIM, PHYSICS, BALL, ORBIT, WORLDEATER } from '../core/Constants.js';
 import { generateHole } from '../systems/HoleGenerator.js';
 import { stepBall } from '../systems/GravitySystem.js';
 import { TrajectoryPreview } from '../systems/TrajectoryPreview.js';
@@ -63,6 +64,10 @@ export class HoleScene {
     this.wormholes = [];
     this.worldEater = null;
     this._bossIntroWormhole = null;
+    this._bossIntroPathDebug = null;
+    this._bossIntroPathVisible = false;
+    this._bossIntroPreviewHold = false;
+    this._bossIntroPreviewProgress = 0;
 
     // State
     this._state = 'IDLE'; // IDLE | AIMING | BALL_IN_FLIGHT | HOLE_COMPLETE
@@ -168,10 +173,10 @@ export class HoleScene {
         this.inputSystem.showBar();
         this.trajectoryPreview.show();
       }
-      if (this._bossIntroPending) {
-        this._bossIntroPending = false;
-        eventBus.emit(Events.WORLDEATER_WARNING);
+      if (this.worldEater?.getCinematicIntroState?.()?.active) {
+        this.worldEater.finishCinematicIntro();
       }
+      if (this._bossIntroPending) this._emitWorldEaterWarning();
       if (this._bossIntroWormhole) {
         this._bossIntroWormhole.removeFromScene(this.scene);
         this._bossIntroWormhole = null;
@@ -604,7 +609,7 @@ export class HoleScene {
     this._bossIntroPending = this._holeData.boss?.kind === 'WORLDEATER';
     this._bossWarningShown = false;
     this._worldEaterBounceCooldown = 0;
-    this.serverEvents.setEnabled(!this._bossIntroPending);
+    this.serverEvents.setEnabled(true);
 
     // Background is the void.png equirectangular sphere — no color clear needed
     this.scene.background = null;
@@ -661,13 +666,7 @@ export class HoleScene {
     if (this._holeData.boss?.kind === 'WORLDEATER') {
       this.worldEater = new WorldEater(this._holeData.boss);
       this.worldEater.addToScene(this.scene);
-      const introPos = this._holeData.boss.introWormholePos?.clone?.() ?? new Vector3(980, 240, -920);
-      this._bossIntroWormhole = new Wormhole(introPos, this._holeData.boss.center.clone());
-      this._bossIntroWormhole.addToScene(this.scene);
-      this.worldEater.startCinematicIntro({
-        wormholePos: introPos,
-        targetPos: this._holeData.boss.center,
-      });
+      this._beginWorldEaterIntroPose();
     }
 
     // Camera: start pointing at tee
@@ -780,6 +779,8 @@ export class HoleScene {
       this._bossIntroWormhole.removeFromScene(this.scene);
       this._bossIntroWormhole = null;
     }
+    this._disposeWorldEaterIntroPathDebug();
+    this._bossIntroPreviewHold = false;
 
     if (this.worldEater) {
       this.worldEater.removeFromScene(this.scene);
@@ -805,8 +806,156 @@ export class HoleScene {
     this._bossWarningShown = false;
   }
 
+  _emitWorldEaterWarning() {
+    if (this._bossWarningShown) return;
+    this._bossWarningShown = true;
+    this._bossIntroPending = false;
+    eventBus.emit(Events.WORLDEATER_WARNING);
+  }
+
+  _syncWorldEaterIntroConfig() {
+    if (!this.worldEater?.config) return;
+    Object.assign(this.worldEater.config, {
+      INTRO_DURATION: WORLDEATER.INTRO_DURATION,
+      INTRO_APPROACH_END: WORLDEATER.INTRO_APPROACH_END,
+      INTRO_SEAL_FADE_START: WORLDEATER.INTRO_SEAL_FADE_START,
+      INTRO_SEAL_BLEND_START: WORLDEATER.INTRO_SEAL_BLEND_START,
+      INTRO_CAMERA_CLOSE_END: WORLDEATER.INTRO_CAMERA_CLOSE_END,
+      INTRO_CAMERA_RETURN_START: WORLDEATER.INTRO_CAMERA_RETURN_START,
+      INTRO_WORMHOLE_POS: WORLDEATER.INTRO_WORMHOLE_POS,
+      INTRO_WORMHOLE_SCALE: WORLDEATER.INTRO_WORMHOLE_SCALE,
+      INTRO_ORBIT_RADIUS: WORLDEATER.INTRO_ORBIT_RADIUS,
+      INTRO_ORBIT_DIRECTION: WORLDEATER.INTRO_ORBIT_DIRECTION,
+      INTRO_ENTRY_ANGLE_OFFSET: WORLDEATER.INTRO_ENTRY_ANGLE_OFFSET,
+      INTRO_CURVE_LIFT: WORLDEATER.INTRO_CURVE_LIFT,
+      INTRO_SEGMENT_SPACING: WORLDEATER.INTRO_SEGMENT_SPACING,
+    });
+  }
+
+  _getWorldEaterIntroPos() {
+    return this._holeData?.boss?.introWormholePos?.clone?.()
+      ?? new Vector3(...WORLDEATER.INTRO_WORMHOLE_POS);
+  }
+
+  _disposeWorldEaterIntroPathDebug() {
+    if (!this._bossIntroPathDebug) return;
+    this.scene.remove(this._bossIntroPathDebug);
+    this._bossIntroPathDebug.traverse?.((obj) => {
+      obj.geometry?.dispose?.();
+      obj.material?.dispose?.();
+      obj.line?.geometry?.dispose?.();
+      obj.line?.material?.dispose?.();
+      obj.cone?.geometry?.dispose?.();
+      obj.cone?.material?.dispose?.();
+    });
+    this._bossIntroPathDebug = null;
+  }
+
+  setWorldEaterIntroPathVisible(visible) {
+    this._bossIntroPathVisible = Boolean(visible);
+    this.refreshWorldEaterIntroPath();
+  }
+
+  refreshWorldEaterIntroPath() {
+    this._disposeWorldEaterIntroPathDebug();
+    if (!this._bossIntroPathVisible || !this.worldEater || this._holeData?.boss?.kind !== 'WORLDEATER') {
+      return;
+    }
+
+    this._syncWorldEaterIntroConfig();
+    const introPos = this._getWorldEaterIntroPos();
+    this.worldEater.previewCinematicIntro({
+      wormholePos: introPos,
+      targetPos: this._holeData.boss.center,
+    });
+    const points = this.worldEater.getCinematicIntroPathPoints(120);
+    if (points.length < 2) return;
+
+    const group = new Group();
+    const pathGeo = new BufferGeometry().setFromPoints(points);
+    const pathMat = new LineBasicMaterial({
+      color: 0xff4fd8,
+      transparent: true,
+      opacity: 0.9,
+      depthTest: false,
+    });
+    const line = new Line(pathGeo, pathMat);
+    line.renderOrder = 2000;
+    group.add(line);
+
+    const arrowStep = Math.max(10, Math.floor(points.length / 7));
+    for (let i = arrowStep; i < points.length - 2; i += arrowStep) {
+      const dir = points[i + 1].clone().sub(points[i - 1]);
+      if (dir.lengthSq() < 0.001) continue;
+      dir.normalize();
+      const arrow = new ArrowHelper(dir, points[i], 70, 0x8ff7ff, 24, 11);
+      arrow.renderOrder = 2001;
+      group.add(arrow);
+    }
+
+    this._bossIntroPathDebug = group;
+    this.scene.add(group);
+  }
+
+  previewWorldEaterIntro(progress = this._bossIntroPreviewProgress, refreshPath = true) {
+    if (!this.worldEater || this._holeData?.boss?.kind !== 'WORLDEATER') return false;
+    this._bossIntroPreviewHold = true;
+    this._bossIntroPreviewProgress = Math.max(0, Math.min(1, progress));
+    this._syncWorldEaterIntroConfig();
+    const introPos = this._getWorldEaterIntroPos();
+    this.worldEater.previewCinematicIntro({
+      wormholePos: introPos,
+      targetPos: this._holeData.boss.center,
+    });
+    this.worldEater.setCinematicIntroProgress(this._bossIntroPreviewProgress);
+    if (refreshPath) this.refreshWorldEaterIntroPath();
+    return true;
+  }
+
+  clearWorldEaterIntroPreview() {
+    if (!this._bossIntroPreviewHold) return;
+    this._bossIntroPreviewHold = false;
+    if (this.worldEater && this._state !== 'CINEMATIC') this.worldEater.update(0);
+  }
+
+  _beginWorldEaterIntroPose() {
+    if (!this.worldEater || this._holeData?.boss?.kind !== 'WORLDEATER') return null;
+    this._bossIntroPreviewHold = false;
+    this._syncWorldEaterIntroConfig();
+    if (this._bossIntroWormhole) {
+      this._bossIntroWormhole.removeFromScene(this.scene);
+      this._bossIntroWormhole = null;
+    }
+    const introPos = this._getWorldEaterIntroPos();
+    this._bossIntroWormhole = new Wormhole(introPos, this._holeData.boss.center.clone());
+    this._bossIntroWormhole.setVisualScale(WORLDEATER.INTRO_WORMHOLE_SCALE);
+    this._bossIntroWormhole.addToScene(this.scene);
+    this.worldEater.startCinematicIntro({
+      wormholePos: introPos,
+      targetPos: this._holeData.boss.center,
+    });
+    this.refreshWorldEaterIntroPath();
+    return introPos;
+  }
+
+  replayWorldEaterIntro() {
+    if (!this.worldEater || this._holeData?.boss?.kind !== 'WORLDEATER') return false;
+    this._bossIntroPreviewHold = false;
+    this._bossIntroPending = true;
+    this._bossWarningShown = false;
+    this._beginWorldEaterIntroPose();
+    this.inputSystem.enabled = false;
+    this._state = 'CINEMATIC';
+    gameState.aimState = 'CINEMATIC';
+    this.inputSystem.hideBar();
+    this.trajectoryPreview.hide();
+    this._startBossIntroCinematic(this._holeData.tee.clone(), this._holeData.cup.clone());
+    audioManager.playCinematicSwish();
+    return true;
+  }
+
   _startBossIntroCinematic(teePos, cupPos) {
-    const introPos = this._holeData.boss.introWormholePos?.clone?.() ?? new Vector3(980, 240, -920);
+    const introPos = this._getWorldEaterIntroPos();
     const center = this._holeData.boss.center.clone();
     const facing = this._facingDir.clone().normalize();
     const behind = facing.clone().negate();
@@ -819,19 +968,16 @@ export class HoleScene {
     const finalLook = teePos.clone().addScaledVector(facing, 8);
 
     this.cinematic.startScript({
-      duration: 8.2,
+      duration: WORLDEATER.INTRO_DURATION,
       onUpdate: ({ raw, eased, camera }) => {
-        if (this._bossIntroPending && !this._bossWarningShown && raw > 0.1) {
-          this._bossWarningShown = true;
-          this._bossIntroPending = false;
-          eventBus.emit(Events.WORLDEATER_WARNING);
-        }
+        if (this._bossIntroPending && raw > 0.1) this._emitWorldEaterWarning();
 
         const headPos = this.worldEater?.getHeadPosition(new Vector3()) ?? introPos.clone();
-        const coilState = this.worldEater?.getCinematicIntroState?.() ?? { coilBlend: 0, wormholePos: introPos.clone() };
+        const coilState = this.worldEater?.getCinematicIntroState?.()
+          ?? { coilBlend: 0, wormholePos: introPos.clone() };
         const wormholePos = coilState.wormholePos ?? introPos;
-        const stage1 = 0.16;
-        const stage2 = 0.84;
+        const stage1 = WORLDEATER.INTRO_CAMERA_CLOSE_END;
+        const stage2 = WORLDEATER.INTRO_CAMERA_RETURN_START;
 
         if (raw < stage1) {
           const t = raw / stage1;
@@ -865,13 +1011,7 @@ export class HoleScene {
           this._bossIntroWormhole.removeFromScene(this.scene);
           this._bossIntroWormhole = null;
         }
-        if (this._bossIntroPending) {
-          this._bossIntroPending = false;
-          if (!this._bossWarningShown) {
-            this._bossWarningShown = true;
-            eventBus.emit(Events.WORLDEATER_WARNING);
-          }
-        }
+        if (this._bossIntroPending) this._emitWorldEaterWarning();
         this.camera.position.copy(finalPos);
         this.camera.lookAt(finalLook);
       },
@@ -1036,7 +1176,9 @@ export class HoleScene {
     // Planet occlusion: fade planets between camera and ball
     this._updatePlanetOcclusion();
 
-    if (this.worldEater) {
+    if (this._bossIntroPreviewHold && this.worldEater) {
+      this.previewWorldEaterIntro(this._bossIntroPreviewProgress, false);
+    } else if (this.worldEater) {
       this.worldEater.update(simDt);
       this._worldEaterBounceCooldown = Math.max(0, this._worldEaterBounceCooldown - simDt);
     }

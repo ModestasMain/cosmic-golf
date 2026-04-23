@@ -1,9 +1,14 @@
 // ============================================================
 // HoleGenerator.js — 15 distinct hole archetypes
 //
-// Each room/session picks 10 unique archetypes in a shuffled
-// order determined by the room code. No progressive difficulty —
-// archetypes vary wildly in layout regardless of hole number.
+// Holes 1–9 now follow a deterministic progression curve instead
+// of a fully shuffled order. Each slot draws from a curated
+// archetype pool, then rerolls until the generated layout fits a
+// target band for:
+//   • brute-force resistance
+//   • shot planning complexity
+//   • punishment / recovery
+//   • clarity
 //
 // Determinism guarantee: generateHole(i, roomCode) returns the
 // same layout on every client in the same room.
@@ -61,13 +66,82 @@ const ARCHETYPE_LIST = [
   'SCATTER',       // classic random but 10-13 planets
 ];
 
-/** Return 10 unique archetypes for a room, in shuffled order */
-function getRoomArchetypes(roomHashSeed) {
-  const rng  = mulberry32(roomHashSeed ^ 0xdeadbeef);
-  const list = [...ARCHETYPE_LIST];
-  shuffle(list, rng);
-  return list.slice(0, HOLE.COUNT); // exactly 10, all unique
-}
+const PRE_BOSS_HOLE_COUNT = HOLE.COUNT - 1;
+
+const ARCHETYPE_PROFILES = {
+  GAUNTLET:      { bruteForceResistance: 14, stagingRequirement: 7,  approachDependency: 6,  speedSensitivity: 8,  punishment: 8,  clarity: 80 },
+  ASTEROID_BELT: { bruteForceResistance:  8, stagingRequirement: 4,  approachDependency: 4,  speedSensitivity: 5,  punishment: 4,  clarity: 88 },
+  TWIN_GIANTS:   { bruteForceResistance: 14, stagingRequirement: 9,  approachDependency: 7,  speedSensitivity: 9,  punishment: 8,  clarity: 82 },
+  LABYRINTH:     { bruteForceResistance: 18, stagingRequirement: 10, approachDependency: 8,  speedSensitivity: 10, punishment: 11, clarity: 68 },
+  SPIRAL:        { bruteForceResistance: 11, stagingRequirement: 6,  approachDependency: 7,  speedSensitivity: 8,  punishment: 6,  clarity: 82 },
+  ORBIT_TRAP:    { bruteForceResistance: 14, stagingRequirement: 5,  approachDependency: 12, speedSensitivity: 10, punishment: 9,  clarity: 84 },
+  PINBALL:       { bruteForceResistance: 18, stagingRequirement: 9,  approachDependency: 7,  speedSensitivity: 11, punishment: 12, clarity: 64 },
+  SLINGSHOT:     { bruteForceResistance: 15, stagingRequirement: 10, approachDependency: 8,  speedSensitivity: 10, punishment: 8,  clarity: 82 },
+  VOID_CROSSING: { bruteForceResistance:  7, stagingRequirement: 4,  approachDependency: 5,  speedSensitivity: 4,  punishment: 6,  clarity: 92 },
+  GRAVITY_RING:  { bruteForceResistance: 15, stagingRequirement: 8,  approachDependency: 10, speedSensitivity: 10, punishment: 9,  clarity: 74 },
+  CANYON:        { bruteForceResistance: 11, stagingRequirement: 5,  approachDependency: 6,  speedSensitivity: 8,  punishment: 6,  clarity: 88 },
+  CLUSTER_BOMB:  { bruteForceResistance: 18, stagingRequirement: 9,  approachDependency: 8,  speedSensitivity: 10, punishment: 12, clarity: 66 },
+  CROSSROADS:    { bruteForceResistance: 10, stagingRequirement: 5,  approachDependency: 6,  speedSensitivity: 6,  punishment: 5,  clarity: 90 },
+  HELIX:         { bruteForceResistance: 14, stagingRequirement: 7,  approachDependency: 8,  speedSensitivity: 9,  punishment: 7,  clarity: 78 },
+  SCATTER:       { bruteForceResistance: 16, stagingRequirement: 8,  approachDependency: 8,  speedSensitivity: 8,  punishment: 9,  clarity: 72 },
+};
+
+const PROGRESSION_SLOTS = [
+  {
+    label: 'Opening Line',
+    archetypes: ['VOID_CROSSING', 'CROSSROADS', 'CANYON', 'ASTEROID_BELT'],
+    wormholeChance: 0,
+    target: { complexityMin: 18, complexityMax: 30, clarityMin: 84, bruteMin: 6,  bruteMax: 12, stagingMax: 6,  approachMax: 8,  speedMax: 8 },
+  },
+  {
+    label: 'Power Read',
+    archetypes: ['CANYON', 'ASTEROID_BELT', 'CROSSROADS', 'SPIRAL', 'GAUNTLET'],
+    wormholeChance: 0,
+    target: { complexityMin: 24, complexityMax: 36, clarityMin: 82, bruteMin: 8,  bruteMax: 14, stagingMax: 8,  approachMax: 9,  speedMax: 9 },
+  },
+  {
+    label: 'First Setup',
+    archetypes: ['GAUNTLET', 'SPIRAL', 'TWIN_GIANTS', 'CANYON', 'ASTEROID_BELT'],
+    wormholeChance: 0.15,
+    target: { complexityMin: 30, complexityMax: 42, clarityMin: 80, bruteMin: 10, bruteMax: 16, stagingMin: 4,  approachMax: 10, speedMin: 5 },
+  },
+  {
+    label: 'Stage and Swing',
+    archetypes: ['GAUNTLET', 'TWIN_GIANTS', 'SPIRAL', 'SLINGSHOT', 'HELIX', 'CROSSROADS'],
+    wormholeChance: 0.25,
+    target: { complexityMin: 36, complexityMax: 48, clarityMin: 78, bruteMin: 12, bruteMax: 18, stagingMin: 5,  approachMin: 5,  speedMin: 6 },
+  },
+  {
+    label: 'Route Choice',
+    archetypes: ['TWIN_GIANTS', 'SLINGSHOT', 'GRAVITY_RING', 'ORBIT_TRAP', 'HELIX', 'GAUNTLET'],
+    wormholeChance: 0.45,
+    target: { complexityMin: 44, complexityMax: 56, clarityMin: 76, bruteMin: 13, bruteMax: 20, stagingMin: 6,  approachMin: 6,  speedMin: 6 },
+  },
+  {
+    label: 'Gravity Exam',
+    archetypes: ['SLINGSHOT', 'GRAVITY_RING', 'ORBIT_TRAP', 'HELIX', 'SPIRAL', 'SCATTER'],
+    wormholeChance: 0.55,
+    target: { complexityMin: 50, complexityMax: 62, clarityMin: 74, bruteMin: 14, bruteMax: 22, stagingMin: 6,  approachMin: 7,  speedMin: 7 },
+  },
+  {
+    label: 'No Brute Force',
+    archetypes: ['GRAVITY_RING', 'ORBIT_TRAP', 'HELIX', 'LABYRINTH', 'SCATTER', 'SLINGSHOT'],
+    wormholeChance: 0.65,
+    target: { complexityMin: 58, complexityMax: 70, clarityMin: 70, bruteMin: 15, bruteMax: 24, stagingMin: 7,  approachMin: 8,  speedMin: 7 },
+  },
+  {
+    label: 'Tight Approach',
+    archetypes: ['LABYRINTH', 'PINBALL', 'CLUSTER_BOMB', 'SCATTER', 'GRAVITY_RING', 'HELIX'],
+    wormholeChance: 0.75,
+    target: { complexityMin: 64, complexityMax: 78, clarityMin: 68, bruteMin: 16, bruteMax: 26, stagingMin: 7,  approachMin: 9,  speedMin: 8 },
+  },
+  {
+    label: 'Pre-Boss Exam',
+    archetypes: ['LABYRINTH', 'PINBALL', 'CLUSTER_BOMB', 'SCATTER', 'SLINGSHOT', 'GRAVITY_RING', 'ORBIT_TRAP'],
+    wormholeChance: 0.85,
+    target: { complexityMin: 70, complexityMax: 86, clarityMin: 66, bruteMin: 17, bruteMax: 28, stagingMin: 8,  approachMin: 10, speedMin: 8, punishmentMin: 9 },
+  },
+];
 
 // ── Shared geometry helpers ────────────────────────────────────
 
@@ -128,6 +202,208 @@ function finalizeCup(cup, planets) {
 // ── Utility: perp vector in XZ plane ─────────────────────────
 function perpXZ(dir) {
   return new Vector3(-dir.z, 0, dir.x);
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function rangePenalty(value, min, max) {
+  if (min != null && value < min) return min - value;
+  if (max != null && value > max) return value - max;
+  return 0;
+}
+
+function projectToSegment(point, start, seg, segLenSq) {
+  const toPoint = new Vector3().subVectors(point, start);
+  return clamp(segLenSq > 0 ? toPoint.dot(seg) / segLenSq : 0, 0, 1);
+}
+
+function analyzeHoleLayout(tee, cup, planets, wormholes, archetype) {
+  const profile = ARCHETYPE_PROFILES[archetype] ?? {
+    bruteForceResistance: 12,
+    stagingRequirement: 6,
+    approachDependency: 6,
+    speedSensitivity: 6,
+    punishment: 6,
+    clarity: 80,
+  };
+
+  const seg = new Vector3().subVectors(cup, tee);
+  const segLen = seg.length();
+  const segLenSq = seg.lengthSq();
+  const corridorBands = new Set();
+
+  let directBlockers = 0;
+  let corridorInfluencers = 0;
+  let cupGuards = 0;
+  let teeClutter = 0;
+  let stagingAnchors = 0;
+  let giantPlanets = 0;
+  let densePairs = 0;
+
+  for (const planet of planets) {
+    const t = projectToSegment(planet.position, tee, seg, segLenSq);
+    const closest = tee.clone().addScaledVector(seg, t);
+    const centerDist = planet.position.distanceTo(closest);
+    const surfaceDist = centerDist - planet.radius;
+
+    if (planet.radius >= 46) giantPlanets += 1;
+
+    if (surfaceDist < 220 && t > 0.06 && t < 0.94) {
+      corridorInfluencers += 1;
+      corridorBands.add(Math.min(2, Math.floor(t * 3)));
+    }
+
+    if (surfaceDist < 120 && t > 0.08 && t < 0.92) {
+      directBlockers += planet.radius >= 40 ? 2 : 1;
+    }
+
+    if (surfaceDist >= 150 && surfaceDist <= 390 && t > 0.18 && t < 0.74) {
+      stagingAnchors += 1;
+    }
+
+    if (planet.position.distanceTo(cup) - planet.radius < 320) {
+      cupGuards += 1;
+    }
+
+    if (planet.position.distanceTo(tee) - planet.radius < 250) {
+      teeClutter += 1;
+    }
+  }
+
+  for (let i = 0; i < planets.length; i++) {
+    for (let j = i + 1; j < planets.length; j++) {
+      const a = planets[i];
+      const b = planets[j];
+      const gap = a.position.distanceTo(b.position) - (a.radius + b.radius);
+      if (gap < 135) densePairs += 1;
+    }
+  }
+
+  const wormholeBonus = wormholes.length > 0 ? 1 : 0;
+  const corridorCoverage = corridorBands.size;
+
+  const bruteForceResistance = clamp(Math.round(
+    profile.bruteForceResistance
+    + directBlockers * 2.0
+    + Math.min(3, cupGuards) * 1.5
+    + Math.max(0, corridorCoverage - 1) * 2
+    + (segLen > 2350 ? 1 : 0)
+  ), 0, 30);
+
+  const stagingRequirement = clamp(Math.round(
+    profile.stagingRequirement
+    + Math.min(4, stagingAnchors) * 1.25
+    + Math.max(0, corridorCoverage - 1) * 1.5
+    + (directBlockers >= 4 ? 2 : 0)
+    + wormholeBonus
+  ), 0, 15);
+
+  const approachDependency = clamp(Math.round(
+    profile.approachDependency
+    + Math.min(4, cupGuards) * 2
+    + (directBlockers >= 5 ? 1 : 0)
+  ), 0, 15);
+
+  const speedSensitivity = clamp(Math.round(
+    profile.speedSensitivity
+    + corridorInfluencers * 0.55
+    + corridorCoverage * 1.8
+    + (segLen > 2350 ? 1 : 0)
+    + wormholeBonus
+  ), 0, 15);
+
+  const punishment = clamp(Math.round(
+    profile.punishment
+    + Math.max(0, directBlockers - 3) * 1.6
+    + Math.max(0, giantPlanets - 2) * 0.8
+    + wormholeBonus
+    + Math.max(0, planets.length - 13) * 0.4
+  ), 0, 25);
+
+  const clarity = clamp(Math.round(
+    profile.clarity
+    - teeClutter * 3.5
+    - densePairs * 2.2
+    - Math.max(0, planets.length - 12) * 1.1
+    - (wormholes.length > 0 && profile.clarity < 80 ? 2 : 0)
+    + Math.max(0, 3 - Math.min(3, directBlockers)) * 1.5
+  ), 0, 100);
+
+  const complexity = clamp(
+    bruteForceResistance + stagingRequirement + approachDependency + speedSensitivity + punishment,
+    0,
+    100,
+  );
+
+  return {
+    complexity,
+    clarity,
+    bruteForceResistance,
+    shotPlanning: stagingRequirement + approachDependency + speedSensitivity,
+    stagingRequirement,
+    approachDependency,
+    speedSensitivity,
+    punishment,
+    diagnostics: {
+      directBlockers,
+      corridorInfluencers,
+      corridorCoverage,
+      cupGuards,
+      teeClutter,
+      stagingAnchors,
+      giantPlanets,
+      densePairs,
+      wormholes: wormholes.length,
+    },
+  };
+}
+
+function fitsProgressionTarget(analysis, target) {
+  return (
+    analysis.complexity >= target.complexityMin &&
+    analysis.complexity <= target.complexityMax &&
+    analysis.clarity >= target.clarityMin &&
+    (target.bruteMin == null || analysis.bruteForceResistance >= target.bruteMin) &&
+    (target.bruteMax == null || analysis.bruteForceResistance <= target.bruteMax) &&
+    (target.stagingMin == null || analysis.stagingRequirement >= target.stagingMin) &&
+    (target.stagingMax == null || analysis.stagingRequirement <= target.stagingMax) &&
+    (target.approachMin == null || analysis.approachDependency >= target.approachMin) &&
+    (target.approachMax == null || analysis.approachDependency <= target.approachMax) &&
+    (target.speedMin == null || analysis.speedSensitivity >= target.speedMin) &&
+    (target.speedMax == null || analysis.speedSensitivity <= target.speedMax) &&
+    (target.punishmentMin == null || analysis.punishment >= target.punishmentMin) &&
+    (target.punishmentMax == null || analysis.punishment <= target.punishmentMax)
+  );
+}
+
+function progressionPenalty(analysis, target) {
+  return (
+    rangePenalty(analysis.complexity, target.complexityMin, target.complexityMax) * 3 +
+    rangePenalty(analysis.clarity, target.clarityMin, null) * 4 +
+    rangePenalty(analysis.bruteForceResistance, target.bruteMin, target.bruteMax) * 3 +
+    rangePenalty(analysis.stagingRequirement, target.stagingMin, target.stagingMax) * 2 +
+    rangePenalty(analysis.approachDependency, target.approachMin, target.approachMax) * 2 +
+    rangePenalty(analysis.speedSensitivity, target.speedMin, target.speedMax) * 2 +
+    rangePenalty(analysis.punishment, target.punishmentMin, target.punishmentMax) * 2
+  );
+}
+
+function getRunArchetypePlan(roomHashSeed) {
+  const used = new Set();
+  const plan = [];
+
+  for (let holeIndex = 0; holeIndex < PRE_BOSS_HOLE_COUNT; holeIndex++) {
+    const slot = PROGRESSION_SLOTS[holeIndex];
+    const rng = mulberry32((roomHashSeed ^ Math.imul(holeIndex + 1, 0x7feb352d) ^ 0x68bc21eb) >>> 0);
+    const order = shuffle([...slot.archetypes], rng);
+    const primary = order.find(name => !used.has(name)) ?? order[0];
+    used.add(primary);
+    plan.push([primary, ...order.filter(name => name !== primary)]);
+  }
+
+  return plan;
 }
 
 /**
@@ -896,6 +1172,12 @@ function placeWormholes(rng, tee, cup, planets) {
   return [fallback];
 }
 
+function placeProgressionWormholes(rng, holeIndex, tee, cup, planets) {
+  const slot = PROGRESSION_SLOTS[holeIndex];
+  if (!slot || slot.wormholeChance <= 0) return [];
+  return rng() < slot.wormholeChance ? placeWormholes(rng, tee, cup, planets) : [];
+}
+
 function makeBossPlanet(position, radius, color, seed) {
   return {
     position: position.clone(),
@@ -981,23 +1263,89 @@ export function generateHole(holeIndex, roomCode = 0) {
 
   const roomHashSeed =
     typeof roomCode === 'string' ? hashRoomCode(roomCode) : (roomCode >>> 0);
-
-  // Select this room's 10 archetypes (unique, shuffled)
-  const archetypes = getRoomArchetypes(roomHashSeed);
-  const archetype  = archetypes[holeIndex % archetypes.length];
-
-  // Per-hole seed: XOR room seed with a hole-specific constant
-  const holeSeed =
+  const palette = COLOR_PALETTES[holeIndex % COLOR_PALETTES.length];
+  const colors = palette.planets;
+  const slot = PROGRESSION_SLOTS[holeIndex];
+  const archetypePlan = getRunArchetypePlan(roomHashSeed);
+  const archetypeOrder = archetypePlan[holeIndex] ?? ARCHETYPE_LIST;
+  const baseSeed =
     (roomHashSeed ^ (Math.imul(holeIndex + 1, 0x9e3779b9) + 0x6d2b79f5)) >>> 0;
 
-  const rng     = mulberry32(holeSeed);
-  const palette = COLOR_PALETTES[holeIndex % COLOR_PALETTES.length];
-  const colors  = palette.planets;
+  let bestCandidate = null;
+  let bestPenalty = Number.POSITIVE_INFINITY;
 
-  const { planets, tee, cup } = ARCHETYPE_FNS[archetype](rng, colors);
+  for (const archetype of archetypeOrder) {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const holeSeed = (
+        baseSeed ^
+        hashRoomCode(`${archetype}:${attempt}`) ^
+        Math.imul(attempt + 1, 0x85ebca6b)
+      ) >>> 0;
 
-  // Place wormholes after planet layout is finalized (rng advances past planets)
-  const wormholes = placeWormholes(rng, tee, cup, planets);
+      const rng = mulberry32(holeSeed);
+      const { planets, tee, cup } = ARCHETYPE_FNS[archetype](rng, colors);
+      const wormholes = placeProgressionWormholes(rng, holeIndex, tee, cup, planets);
+      const analysis = analyzeHoleLayout(tee, cup, planets, wormholes, archetype);
+      const penalty = progressionPenalty(analysis, slot.target);
 
-  return { planets, tee, cup, wormholes, palette, holeIndex, archetype };
+      if (penalty < bestPenalty) {
+        bestPenalty = penalty;
+        bestCandidate = {
+          planets,
+          tee,
+          cup,
+          wormholes,
+          palette,
+          holeIndex,
+          archetype,
+          difficulty: analysis,
+          progression: {
+            slot: slot.label,
+            target: slot.target,
+          },
+        };
+      }
+
+      if (fitsProgressionTarget(analysis, slot.target)) {
+        return {
+          planets,
+          tee,
+          cup,
+          wormholes,
+          palette,
+          holeIndex,
+          archetype,
+          difficulty: analysis,
+          progression: {
+            slot: slot.label,
+            target: slot.target,
+          },
+        };
+      }
+    }
+  }
+
+  if (bestCandidate) return bestCandidate;
+
+  const fallbackArchetype = archetypeOrder[0] ?? 'VOID_CROSSING';
+  const fallbackSeed = (baseSeed ^ hashRoomCode(`${fallbackArchetype}:fallback`)) >>> 0;
+  const fallbackRng = mulberry32(fallbackSeed);
+  const { planets, tee, cup } = ARCHETYPE_FNS[fallbackArchetype](fallbackRng, colors);
+  const wormholes = placeProgressionWormholes(fallbackRng, holeIndex, tee, cup, planets);
+  const analysis = analyzeHoleLayout(tee, cup, planets, wormholes, fallbackArchetype);
+
+  return {
+    planets,
+    tee,
+    cup,
+    wormholes,
+    palette,
+    holeIndex,
+    archetype: fallbackArchetype,
+    difficulty: analysis,
+    progression: {
+      slot: slot.label,
+      target: slot.target,
+    },
+  };
 }

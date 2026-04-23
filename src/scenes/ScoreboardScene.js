@@ -75,6 +75,7 @@ export class ScoreboardScene {
   _submitGlobal() {
     const player = gameState.players[0];
     if (!player) return;
+    if (gameState.isBossRoom) return;
     const holesCompleted = player.strokes.filter(v => v != null).length;
     if (holesCompleted < gameState.totalHoles) return;
 

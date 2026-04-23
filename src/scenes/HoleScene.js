@@ -11,7 +11,7 @@ import {
 import { update as tweenUpdate } from '@tweenjs/tween.js';
 import { eventBus, Events } from '../core/EventBus.js';
 import { gameState } from '../core/GameState.js';
-import { CAMERA, HOLE, AIM, PHYSICS, BALL, ORBIT, COLOR_PALETTES } from '../core/Constants.js';
+import { CAMERA, HOLE, AIM, PHYSICS, BALL, ORBIT, COLOR_PALETTES, WORLDEATER } from '../core/Constants.js';
 import { generateHole } from '../systems/HoleGenerator.js';
 import { stepBall } from '../systems/GravitySystem.js';
 import { TrajectoryPreview } from '../systems/TrajectoryPreview.js';
@@ -30,6 +30,7 @@ import { LaunchBurst } from '../effects/LaunchBurst.js';
 import { GhostBall } from '../objects/GhostBall.js';
 import { LaunchWarp } from '../effects/LaunchWarp.js';
 import { Wormhole, WORMHOLE_CAPTURE_RADIUS } from '../objects/Wormhole.js';
+import { WorldEater } from '../objects/WorldEater.js';
 import { audioManager } from '../audio/AudioManager.js';
 import { CometSystem } from '../effects/CometSystem.js';
 import { CinematicController } from './CinematicController.js';
@@ -60,12 +61,22 @@ export class HoleScene {
     this.tee = null;
     this.starField = null;
     this.wormholes = [];
+    this.worldEater = null;
+    this._bossIntroWormhole = null;
 
     // State
     this._state = 'IDLE'; // IDLE | AIMING | BALL_IN_FLIGHT | HOLE_COMPLETE
     this._holeData = null;
     this._cameraTarget = new Vector3();
     this._cameraPos = new Vector3(0, CAMERA.FOLLOW_HEIGHT, CAMERA.FOLLOW_DISTANCE);
+    this._devFreezeAll = false;
+    this._freecamActive = false;
+    this._freecamPos = new Vector3();
+    this._freecamMove = new Vector3();
+    this._freecamForward = new Vector3(0, 0, -1);
+    this._freecamRight = new Vector3(1, 0, 0);
+    this._freecamYaw = Math.PI;
+    this._freecamPitch = -0.18;
 
     // Aiming state
     this._aimDrag = null;
@@ -73,6 +84,7 @@ export class HoleScene {
 
     // Bounce cooldown + stuck detection
     this._lastBounceTime = 0;
+    this._worldEaterBounceCooldown = 0;
     this._stuckFrames = 0;
     this._launchGraceFrames = 0;  // counts down after shot — gravity ramps up
     this._bounceGraceFrames = 0;  // counts down after bounce — suppresses drift-OOB
@@ -81,6 +93,8 @@ export class HoleScene {
     // Trajectory freeze: compute once on shot/bounce, advance head each frame
     this._trajNeedsRecompute = false;
     this._accumDt = 0; // physics time accumulator for fixed-step substepping
+    this._planetPhysicsTimeMs = Date.now();
+    this._planetPhysicsTimeMs = Date.now();
 
     // Camera facing direction — rotated by aim drag, trails velocity in flight
     this._facingDir  = new Vector3(0, 0, -1);
@@ -98,6 +112,8 @@ export class HoleScene {
 
     // Hole time tracking (wall-clock ms from first shot to holing)
     this._holeStartTime = null;
+    this._bossIntroPending = false;
+    this._bossWarningShown = false;
 
     // Spectator mode — active after local player holes in MP
 
@@ -150,6 +166,14 @@ export class HoleScene {
         gameState.aimState = 'IDLE';
         this.inputSystem.showBar();
         this.trajectoryPreview.show();
+      }
+      if (this._bossIntroPending) {
+        this._bossIntroPending = false;
+        eventBus.emit(Events.WORLDEATER_WARNING);
+      }
+      if (this._bossIntroWormhole) {
+        this._bossIntroWormhole.removeFromScene(this.scene);
+        this._bossIntroWormhole = null;
       }
       eventBus.emit(Events.CINEMATIC_COMPLETE);
     });
@@ -355,9 +379,40 @@ export class HoleScene {
     });
 
     eventBus.on(Events.SHOT_TAKEN, (data) => {
+      if (this._freecamActive) return;
       if (this.ball) this.ball.setPower(0);
       if (this._state === 'BALL_IN_FLIGHT' || this._state === 'HOLE_COMPLETE') return;
       this._fireShot(data);
+    });
+
+    eventBus.on(Events.FREECAM_TOGGLE, () => {
+      if (this._state === 'CINEMATIC') return;
+      this._setFreecamActive(!this._freecamActive);
+    });
+
+    eventBus.on(Events.FREECAM_MOVE, ({ x = 0, y = 0, z = 0, boost = false }) => {
+      if (!this._freecamActive) return;
+      this._freecamMove.set(x, y, z);
+      this._freecamBoost = !!boost;
+    });
+
+    eventBus.on(Events.FREECAM_DRAG, ({ dx = 0, dy = 0, mode = 'look', pointerType = 'mouse' }) => {
+      if (!this._freecamActive) return;
+      if (mode === 'move' && pointerType === 'touch') {
+        const moveSpeed = 1.25;
+        this._freecamPos.addScaledVector(this._freecamRight, dx * moveSpeed);
+        this._freecamPos.addScaledVector(this._freecamForward, -dy * moveSpeed);
+        return;
+      }
+
+      const yawSens = pointerType === 'touch' ? 0.008 : 0.005;
+      const pitchSens = pointerType === 'touch' ? 0.008 : 0.005;
+      this._freecamYaw -= dx * yawSens;
+      this._freecamPitch = Math.max(-1.2, Math.min(1.2, this._freecamPitch - dy * pitchSens));
+    });
+
+    eventBus.on(Events.DEV_FREEZE_ALL, ({ frozen } = {}) => {
+      this._devFreezeAll = !!frozen;
     });
 
     eventBus.on(Events.SHOT_RECEIVED, (data) => {
@@ -545,6 +600,10 @@ export class HoleScene {
     const holeSeed = gameState.roomCode ?? gameState.sessionSeed;
     this._holeData = generateHole(holeIndex, holeSeed);
     const { planets, tee, cup, palette } = this._holeData;
+    this._bossIntroPending = this._holeData.boss?.kind === 'WORLDEATER';
+    this._bossWarningShown = false;
+    this._worldEaterBounceCooldown = 0;
+    this.serverEvents.setEnabled(!this._bossIntroPending);
 
     // Background is the void.png equirectangular sphere — no color clear needed
     this.scene.background = null;
@@ -596,6 +655,18 @@ export class HoleScene {
       this.wormholes.push(wormhole);
     }
 
+    if (this._holeData.boss?.kind === 'WORLDEATER') {
+      this.worldEater = new WorldEater(this._holeData.boss);
+      this.worldEater.addToScene(this.scene);
+      const introPos = this._holeData.boss.introWormholePos?.clone?.() ?? new Vector3(980, 240, -920);
+      this._bossIntroWormhole = new Wormhole(introPos, this._holeData.boss.center.clone());
+      this._bossIntroWormhole.addToScene(this.scene);
+      this.worldEater.startCinematicIntro({
+        wormholePos: introPos,
+        targetPos: this._holeData.boss.center,
+      });
+    }
+
     // Camera: start pointing at tee
     this._cameraTarget.copy(tee);
     this._cameraPos.set(
@@ -614,10 +685,14 @@ export class HoleScene {
     this.inputSystem.enabled = false;
     this._state = 'CINEMATIC';
     gameState.aimState = 'CINEMATIC';
-    this.cinematic.start(
-      cup.clone(), tee.clone(), this._facingDir.clone(),
-      CAMERA.FOLLOW_DISTANCE, CAMERA.FOLLOW_HEIGHT,
-    );
+    if (this._holeData.boss?.kind === 'WORLDEATER' && this.worldEater) {
+      this._startBossIntroCinematic(tee.clone(), cup.clone());
+    } else {
+      this.cinematic.start(
+        cup.clone(), tee.clone(), this._facingDir.clone(),
+        CAMERA.FOLLOW_DISTANCE, CAMERA.FOLLOW_HEIGHT,
+      );
+    }
     audioManager.playCinematicSwish();
 
     // Reset ball trail for this hole
@@ -641,12 +716,18 @@ export class HoleScene {
       : holeSeed;
     this.collectibles.spawnForHole(this._holeData, Math.abs(holeSeedNum) + holeIndex * 997);
 
-    eventBus.emit(Events.HOLE_LOADED, { holeIndex, archetype: this._holeData.archetype });
+    this._planetPhysicsTimeMs = Date.now();
+
+    eventBus.emit(Events.HOLE_LOADED, {
+      holeIndex,
+      archetype: this._holeData.archetype,
+      bossKind: this._holeData.boss?.kind ?? null,
+    });
   }
 
   _loadNextHole() {
     const next = gameState.currentHole + 1;
-    if (next >= HOLE.COUNT) {
+    if (next >= gameState.totalHoles) {
       gameState.gameComplete = true;
       eventBus.emit(Events.GAME_COMPLETE, { players: gameState.players });
 
@@ -692,6 +773,16 @@ export class HoleScene {
     for (const w of this.wormholes) w.removeFromScene(this.scene);
     this.wormholes = [];
 
+    if (this._bossIntroWormhole) {
+      this._bossIntroWormhole.removeFromScene(this.scene);
+      this._bossIntroWormhole = null;
+    }
+
+    if (this.worldEater) {
+      this.worldEater.removeFromScene(this.scene);
+      this.worldEater = null;
+    }
+
     this.trajectoryPreview.hide();
 
     // Clear remote ghost balls (trail disposed inside removeFromScene)
@@ -707,6 +798,81 @@ export class HoleScene {
     this._holeCompleteEmitted = false;
     this._holeStartTime       = null;
     this._playersHoled.clear();
+    this._bossIntroPending = false;
+    this._bossWarningShown = false;
+  }
+
+  _startBossIntroCinematic(teePos, cupPos) {
+    const introPos = this._holeData.boss.introWormholePos?.clone?.() ?? new Vector3(980, 240, -920);
+    const center = this._holeData.boss.center.clone();
+    const facing = this._facingDir.clone().normalize();
+    const behind = facing.clone().negate();
+    const worldUp = Math.abs(facing.y) < 0.95 ? new Vector3(0, 1, 0) : new Vector3(0, 0, -1);
+    const camRight = new Vector3().crossVectors(facing, worldUp).normalize();
+    const camUp = new Vector3().crossVectors(camRight, facing).normalize();
+    const finalPos = teePos.clone()
+      .addScaledVector(behind, CAMERA.FOLLOW_DISTANCE)
+      .addScaledVector(camUp, CAMERA.FOLLOW_HEIGHT);
+    const finalLook = teePos.clone().addScaledVector(facing, 8);
+
+    this.cinematic.startScript({
+      duration: 8.2,
+      onUpdate: ({ raw, eased, camera }) => {
+        if (this._bossIntroPending && !this._bossWarningShown && raw > 0.1) {
+          this._bossWarningShown = true;
+          this._bossIntroPending = false;
+          eventBus.emit(Events.WORLDEATER_WARNING);
+        }
+
+        const headPos = this.worldEater?.getHeadPosition(new Vector3()) ?? introPos.clone();
+        const coilState = this.worldEater?.getCinematicIntroState?.() ?? { coilBlend: 0, wormholePos: introPos.clone() };
+        const wormholePos = coilState.wormholePos ?? introPos;
+        const stage1 = 0.16;
+        const stage2 = 0.84;
+
+        if (raw < stage1) {
+          const t = raw / stage1;
+          const posA = wormholePos.clone().add(new Vector3(-120, 40, 150));
+          const posB = wormholePos.clone().add(new Vector3(-42, 20, 92));
+          camera.position.copy(posA.lerp(posB, t));
+          camera.lookAt(headPos.clone().lerp(wormholePos, 0.3));
+          return;
+        }
+
+        if (raw < stage2) {
+          const t = (raw - stage1) / (stage2 - stage1);
+          const posA = center.clone().add(new Vector3(520, 210, 430));
+          const posB = center.clone().add(new Vector3(-240, 168, 340));
+          const lookA = headPos.clone().lerp(center, 0.22);
+          const lookB = center.clone().add(new Vector3(0, 12, 0));
+          camera.position.copy(posA.lerp(posB, eased * t));
+          camera.lookAt(lookA.lerp(lookB, coilState.coilBlend));
+          return;
+        }
+
+        const t = (raw - stage2) / (1 - stage2);
+        const posA = center.clone().add(new Vector3(-240, 168, 340));
+        const lookA = center.clone().add(new Vector3(0, 12, 0));
+        camera.position.copy(posA.lerp(finalPos, t));
+        camera.lookAt(lookA.lerp(finalLook, t));
+      },
+      onSkip: () => {
+        this.worldEater?.finishCinematicIntro?.();
+        if (this._bossIntroWormhole) {
+          this._bossIntroWormhole.removeFromScene(this.scene);
+          this._bossIntroWormhole = null;
+        }
+        if (this._bossIntroPending) {
+          this._bossIntroPending = false;
+          if (!this._bossWarningShown) {
+            this._bossWarningShown = true;
+            eventBus.emit(Events.WORLDEATER_WARNING);
+          }
+        }
+        this.camera.position.copy(finalPos);
+        this.camera.lookAt(finalLook);
+      },
+    });
   }
 
   /**
@@ -823,26 +989,26 @@ export class HoleScene {
    */
   update(dt) {
     if (!this._holeData || !this.ball) return;
+    const simDt = this._devFreezeAll ? 0 : dt;
 
     // Always accumulate world time for default planet sway
-    this._worldT += dt;
+    this._worldT += simDt;
 
     // Cinematic intro — world animates but gameplay is fully locked
     if (this._state === 'CINEMATIC') {
-      for (const p of this.planetObjects) p.update(dt, this.serverEvents.isStatic);
-      if (this.cup) this.cup.update(dt);
-      if (this.starField)   this.starField.update(dt);
-      if (this.cometSystem) this.cometSystem.update(dt);
-      this.cinematic.update(dt);
+      for (const p of this.planetObjects) p.update(simDt, this.serverEvents.isStatic);
+      if (this.cup) this.cup.update(simDt);
+      if (this._bossIntroWormhole) this._bossIntroWormhole.update(simDt);
+      if (this.worldEater) this.worldEater.update(simDt);
+      if (this.starField)   this.starField.update(simDt);
+      if (this.cometSystem) this.cometSystem.update(simDt);
+      this.cinematic.update(simDt);
       tweenUpdate();
       return;
     }
 
     // Remote balls — always simulate regardless of local state
-    if (this._state !== 'HOLE_COMPLETE') this._updateRemoteBalls(dt);
-
-    // Planet occlusion: fade planets between camera and ball
-    this._updatePlanetOcclusion();
+    if (this._state !== 'HOLE_COMPLETE') this._updateRemoteBalls(simDt);
 
     // Direction arrow — show in IDLE/AIMING, hide in flight
     if (this._aimArrow && this.ball) {
@@ -855,10 +1021,22 @@ export class HoleScene {
     }
 
     // Server events (deterministic wall-clock events)
-    this.serverEvents.update(dt);
+    this.serverEvents.update(simDt);
 
     // Apply server event effects to planet positions (MAP_FLIP + default sway)
-    this._applyPlanetEventEffects();
+    const frameNowMs = Date.now();
+    this._applyPlanetEventEffects(frameNowMs);
+    if (this._state !== 'BALL_IN_FLIGHT') {
+      this._planetPhysicsTimeMs = frameNowMs;
+    }
+
+    // Planet occlusion: fade planets between camera and ball
+    this._updatePlanetOcclusion();
+
+    if (this.worldEater) {
+      this.worldEater.update(simDt);
+      this._worldEaterBounceCooldown = Math.max(0, this._worldEaterBounceCooldown - simDt);
+    }
 
     // Ball follows its attached planet while resting (IDLE / AIMING)
     if (this._attachedPlanetIdx >= 0 && this._state !== 'BALL_IN_FLIGHT') {
@@ -873,14 +1051,14 @@ export class HoleScene {
 
     // ── Orbital Capture update (visuals only, ball follows normal physics) ──
     if (this._orbitalCapture.isActive) {
-      this._orbitalCapture.update(dt);
+      this._orbitalCapture.update(simDt);
     }
 
     // Collectibles
     if (this._state === 'BALL_IN_FLIGHT') {
-      this.collectibles.update(dt, this.ball);
+      this.collectibles.update(simDt, this.ball);
     } else {
-      this.collectibles.update(dt, null); // still animate gems, skip collect check
+      this.collectibles.update(simDt, null); // still animate gems, skip collect check
     }
 
     // Trajectory: computed after planet positions + collectibles are updated
@@ -896,7 +1074,8 @@ export class HoleScene {
         : this.planets;
       const trajOrbitPlanet = this._orbitalCapture.isOrbiting ? trajPlanets[0] : null;
 
-      const blackHole = this.cup ? {
+      const previewCupUnlocked = !this.worldEater || this.worldEater.canHoleBall();
+      const blackHole = this.cup && previewCupUnlocked ? {
         position: this.cup.position,
         pullRadius: HOLE.BLACK_HOLE_PULL_RADIUS,
         gravity: HOLE.BLACK_HOLE_GRAVITY,
@@ -913,7 +1092,14 @@ export class HoleScene {
         tee: this._holeData.tee,
         cup: this._holeData.cup,
         wormholes: wormholePositions,
+        bossPreview: this.worldEater ?? null,
+        startTimeMs: this._state === 'BALL_IN_FLIGHT' ? this._planetPhysicsTimeMs : frameNowMs,
       };
+      if (this._hasDynamicPlanetMotion()) {
+        trajOptions.planetMotion = {
+          samplePositions: (timeMs, planetsForTime) => this._applyPlanetEventEffects(timeMs, false, planetsForTime),
+        };
+      }
 
       if (this._state === 'BALL_IN_FLIGHT') {
         const flightVel = this.ball.velocity.clone();
@@ -957,34 +1143,34 @@ export class HoleScene {
     }
 
     // Update background ambiance
-    if (this.spaceBg)    this.spaceBg.update(dt);
-    if (this.starField)  this.starField.update(dt);
-    if (this.cometSystem) this.cometSystem.update(dt);
+    if (this.spaceBg)    this.spaceBg.update(simDt);
+    if (this.starField)  this.starField.update(simDt);
+    if (this.cometSystem) this.cometSystem.update(simDt);
 
     // Update planet gravity fields
-    for (const p of this.planetObjects) p.update(dt, this.serverEvents.isStatic);
+    for (const p of this.planetObjects) p.update(simDt, this.serverEvents.isStatic);
 
     // Update cup pulsing
-    if (this.cup) this.cup.update(dt);
+    if (this.cup) this.cup.update(simDt);
 
     // Update wormholes
-    for (const w of this.wormholes) w.update(dt);
+    for (const w of this.wormholes) w.update(simDt);
 
     // Update portal
-    this.portalSystem.update(dt, this.camera);
+    this.portalSystem.update(simDt, this.camera);
 
     // Update effects (always, even during freeze)
-    this.launchBurst.update(dt);
-    this.screenShake.update(dt);
-    this.launchWarp.update(dt, this.ball?.position);
-    if (this.ball) this.ball.update(dt);
+    this.launchBurst.update(simDt);
+    this.screenShake.update(simDt);
+    this.launchWarp.update(simDt, this.ball?.position);
+    if (this.ball) this.ball.update(simDt);
 
     // Update tween animations (palette background fade etc.)
     tweenUpdate();
 
     // Hit-freeze: skip physics briefly on shot
     if (this._hitFreezeFrames > 0) {
-      this._hitFreezeFrames--;
+      if (!this._devFreezeAll) this._hitFreezeFrames--;
       this._updateCamera(dt);
       return;
     }
@@ -1029,7 +1215,13 @@ export class HoleScene {
       // chunks so Euler integration matches the trajectory simulation step-for-step.
       this._accumDt += Math.min(dt, 0.1);
       let result = { bounced: false, bouncePlanet: null };
+      let advancedPlanetTime = false;
       while (this._accumDt >= AIM.TRAJECTORY_DT) {
+        if (this._hasDynamicPlanetMotion()) {
+          this._planetPhysicsTimeMs += AIM.TRAJECTORY_DT * 1000;
+          this._applyPlanetEventEffects(this._planetPhysicsTimeMs, false, this.planets);
+          advancedPlanetTime = true;
+        }
         result = stepBall(this.ball, physicsPlanets, AIM.TRAJECTORY_DT, combinedGravityScale, orbitPlanet);
         this._accumDt -= AIM.TRAJECTORY_DT;
         if (result.bounced) {
@@ -1037,6 +1229,12 @@ export class HoleScene {
           this._trajNeedsRecompute = true; // recompute trajectory post-bounce
           break;
         }
+      }
+      if (this._hasDynamicPlanetMotion()) {
+        if (!advancedPlanetTime) this._planetPhysicsTimeMs = frameNowMs;
+        this._applyPlanetEventEffects(this._planetPhysicsTimeMs);
+      } else {
+        this._planetPhysicsTimeMs = frameNowMs;
       }
 
       // ZERO_GRAVITY sticky: ball touches a planet → kill velocity, stay on surface
@@ -1161,6 +1359,8 @@ export class HoleScene {
         }
       }
 
+      const cupUnlocked = !this.worldEater || this.worldEater.canHoleBall();
+
       // Black hole: proximity shake + gravitational pull within radius
       if (this.cup) {
         const cupDist = this.ball.position.distanceTo(this.cup.position);
@@ -1173,7 +1373,7 @@ export class HoleScene {
         }
 
         // Emit proximity for audio drone effect (0 = far, 1 = at edge)
-        if (cupDist < HOLE.BLACK_HOLE_PULL_RADIUS) {
+        if (cupUnlocked && cupDist < HOLE.BLACK_HOLE_PULL_RADIUS) {
           const proximity = 1 - Math.min(cupDist / HOLE.BLACK_HOLE_PULL_RADIUS, 1);
           eventBus.emit(Events.BLACK_HOLE_PROXIMITY, { proximity });
         } else {
@@ -1181,12 +1381,42 @@ export class HoleScene {
         }
 
         // Gravity pull — hard cutoff at BLACK_HOLE_PULL_RADIUS, smooth falloff inside
-        if (cupDist < HOLE.BLACK_HOLE_PULL_RADIUS && cupDist > HOLE.CUP_RADIUS) {
+        if (cupUnlocked && cupDist < HOLE.BLACK_HOLE_PULL_RADIUS && cupDist > HOLE.CUP_RADIUS) {
           const t = 1 - cupDist / HOLE.BLACK_HOLE_PULL_RADIUS; // 0 at edge, 1 at cup
           const distSq = Math.max(cupDist * cupDist, HOLE.CUP_RADIUS * HOLE.CUP_RADIUS);
           const strength = HOLE.BLACK_HOLE_GRAVITY * t * t / distSq;
           const toCup = new Vector3().subVectors(this.cup.position, this.ball.position).normalize();
           this.ball.velocity.addScaledVector(toCup, strength * dt * 60);
+        }
+      }
+
+      if (this.worldEater) {
+        const interaction = this.worldEater.interactWithBall(
+          this.ball,
+          dt,
+          this._worldEaterBounceCooldown <= 0,
+        );
+        if (interaction?.type === 'body-bounce') {
+          this._worldEaterBounceCooldown = 0.18;
+          this.ball.syncMesh();
+          this._trajNeedsRecompute = true;
+          this.screenShake.trigger(0.5, 0.18);
+        } else if (interaction?.type === 'shield-block') {
+          this._worldEaterBounceCooldown = 0.18;
+          this.ball.syncMesh();
+          this._trajNeedsRecompute = true;
+          this.screenShake.trigger(0.75, 0.26);
+        } else if (interaction?.type === 'weakspot-hit') {
+          this._worldEaterBounceCooldown = 0.18;
+          this.ball.syncMesh();
+          this._trajNeedsRecompute = true;
+          this.screenShake.trigger(interaction.opened ? 1.4 : 0.9, interaction.opened ? 0.45 : 0.28);
+        } else if (interaction?.type === 'chomp') {
+          this._onWorldEaterChomp();
+          return;
+        } else if (interaction?.type === 'boost') {
+          this._onWorldEaterBoost(interaction.position, interaction.velocity);
+          return;
         }
       }
 
@@ -1221,7 +1451,7 @@ export class HoleScene {
       }
 
       // Check cup
-      if (this.cup && this.cup.checkBallHoled(this.ball)) {
+      if (this.cup && cupUnlocked && this.cup.checkBallHoled(this.ball)) {
         this._onBallHoled();
         return;
       }
@@ -1423,6 +1653,10 @@ export class HoleScene {
   _updateCamera(dt) {
     if (!this.ball) return;
     if (this._state === 'CINEMATIC') return; // cinematic owns the camera
+    if (this._freecamActive) {
+      this._updateFreecam(dt);
+      return;
+    }
 
     const ballPos = this.ball.position;
 
@@ -1463,6 +1697,57 @@ export class HoleScene {
     const lookAt = ballPos.clone().addScaledVector(facing, 8);
     this._cameraTarget.lerp(lookAt, CAMERA.AIM_LERP);
     this.camera.lookAt(this._cameraTarget);
+  }
+
+  _setFreecamActive(active) {
+    this._freecamActive = active;
+    this._freecamMove.set(0, 0, 0);
+    this._freecamBoost = false;
+    this.inputSystem.setFreecamActive(active);
+
+    if (active) {
+      this._freecamPos.copy(this.camera.position);
+      this.camera.getWorldDirection(this._freecamForward);
+      this._freecamYaw = Math.atan2(this._freecamForward.x, this._freecamForward.z);
+      this._freecamPitch = Math.asin(Math.max(-0.98, Math.min(0.98, this._freecamForward.y)));
+      this.inputSystem.hideBar();
+      this.trajectoryPreview.hide();
+      return;
+    }
+
+    this._cameraPos.copy(this.camera.position);
+    this._cameraTarget.copy(this.camera.position).add(this._freecamForward);
+    if (this._state !== 'HOLE_COMPLETE' && this._state !== 'BALL_IN_FLIGHT') {
+      this.inputSystem.showBar();
+      this.trajectoryPreview.show();
+    }
+  }
+
+  _updateFreecam(dt) {
+    const cosPitch = Math.cos(this._freecamPitch);
+    this._freecamForward.set(
+      Math.sin(this._freecamYaw) * cosPitch,
+      Math.sin(this._freecamPitch),
+      Math.cos(this._freecamYaw) * cosPitch,
+    ).normalize();
+
+    this._freecamRight.crossVectors(this._freecamForward, new Vector3(0, 1, 0)).normalize();
+    if (this._freecamRight.lengthSq() < 0.001) {
+      this._freecamRight.set(1, 0, 0);
+    }
+    const up = new Vector3().crossVectors(this._freecamRight, this._freecamForward).normalize();
+
+    const move = this._freecamMove.clone();
+    if (move.lengthSq() > 0) {
+      move.normalize();
+      const speed = (this._freecamBoost ? 420 : 220) * dt;
+      this._freecamPos.addScaledVector(this._freecamRight, move.x * speed);
+      this._freecamPos.addScaledVector(up, move.y * speed);
+      this._freecamPos.addScaledVector(this._freecamForward, move.z * speed);
+    }
+
+    this.camera.position.copy(this._freecamPos);
+    this.camera.lookAt(this._freecamPos.clone().add(this._freecamForward));
   }
 
   _onBallHoled() {
@@ -1547,6 +1832,11 @@ export class HoleScene {
       this.screenShake.trigger(2.0, 1.0);
     }
 
+    if (this._holeData?.boss?.kind === 'WORLDEATER') {
+      this.screenShake.trigger(2.4, 1.15);
+      eventBus.emit(Events.WORLDEATER_DEFEATED);
+    }
+
     // Record strokes + time for current player
     const player = gameState.currentPlayer;
     if (player) {
@@ -1563,6 +1853,40 @@ export class HoleScene {
       strokes,
       players: gameState.players,
     });
+  }
+
+  _onWorldEaterBoost(position, velocity) {
+    if (!this.ball) return;
+
+    this.ball.setPosition(position);
+    this.ball.setVelocity(velocity);
+    this._launchGraceFrames = 0;
+    this._hitFreezeFrames = 0;
+    this._worldEaterBounceCooldown = 0.24;
+    this._trajNeedsRecompute = true;
+    this.screenShake.trigger(0.9, 0.28);
+    eventBus.emit(Events.WORLDEATER_BOOST);
+  }
+
+  _onWorldEaterChomp() {
+    if (!this.ball) return;
+
+    if (this.ball?.trail) this.ball.trail.setActive(false);
+    const resetPos = this._resolveLastValidPos();
+    gameState.currentStrokes += WORLDEATER.CHOMP_PENALTY;
+    this.ball.setPosition(resetPos);
+    this.ball.setVelocity(new Vector3());
+    this._restoreLastValidAttachment();
+    this._state = 'IDLE';
+    gameState.ballInFlight = false;
+    gameState.aimState = 'IDLE';
+    this.inputSystem.setAiming(false);
+    this.inputSystem.showBar();
+    this.trajectoryPreview.show();
+    this._trajNeedsRecompute = true;
+    this.screenShake.trigger(1.1, 0.34);
+    eventBus.emit(Events.WORLDEATER_CHOMP);
+    this._broadcastBallReset(resetPos);
   }
 
   _onWormholeEnter(wormhole) {
@@ -1640,35 +1964,38 @@ export class HoleScene {
 
   // ── Server event planet effects ───────────────────────────────
 
-  _applyPlanetEventEffects() {
-    if (!this._planetBasePos || this._planetBasePos.length === 0) return;
+  _applyPlanetEventEffects(timeMs = Date.now(), applyVisuals = true, targetPlanets = this.planets) {
+    if (!this._planetBasePos || this._planetBasePos.length === 0 || !targetPlanets || targetPlanets.length === 0) return;
 
     const flip   = this.serverEvents.mapFlipProgress;
     const frozen = this.serverEvents.isStatic;
-    // Use wall-clock seconds so all clients have identical planet positions
-    // regardless of frame rate or when they joined.
-    const t = Date.now() / 1000;
+    const t = timeMs / 1000;
 
-    for (let i = 0; i < this.planetObjects.length; i++) {
+    for (let i = 0; i < targetPlanets.length; i++) {
       const base = this._planetBasePos[i];
+      if (!base || !targetPlanets[i]) continue;
 
-      // MAP_FLIP: lerp Y from baseY → -baseY as flip goes 0→1
       let x = base.x;
       let y = base.y * (1 - 2 * flip);
       let z = base.z;
 
-      // Default sway — always on unless STATIC event is active
       if (!frozen) {
-        const phase = i * 1.618; // golden ratio offset per planet
+        const phase = i * 1.618;
         x += Math.sin(t * 0.38 + phase)       * 38;
         y += Math.cos(t * 0.31 + phase * 1.4) * 28;
         z += Math.sin(t * 0.42 + phase * 0.8) * 34;
       }
 
-      // Update physics data and visual mesh
-      this.planets[i].position.set(x, y, z);
-      this.planetObjects[i].group.position.set(x, y, z);
+      targetPlanets[i].position.set(x, y, z);
+      if (applyVisuals && targetPlanets === this.planets && this.planetObjects[i]) {
+        this.planetObjects[i].group.position.set(x, y, z);
+      }
     }
+  }
+
+  _hasDynamicPlanetMotion() {
+    return this.serverEvents.planetsMoving
+      || (this.serverEvents.mapFlipProgress > 0.001 && this.serverEvents.mapFlipProgress < 0.999);
   }
 
   // ── Billiard ball-ball collision ──────────────────────────────

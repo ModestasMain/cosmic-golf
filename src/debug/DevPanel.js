@@ -29,6 +29,7 @@ export class DevPanel {
     this._refs    = refs;
     this._visible = false;
     this._gui     = null;
+    this._dev     = { freezeAll: false };
     this._build();
     this._setupToggle();
   }
@@ -40,6 +41,10 @@ export class DevPanel {
     gui.hide();
     this._gui = gui;
 
+    gui.add(this._dev, 'freezeAll')
+      .name('⏸ Freeze All')
+      .onChange((v) => eventBus.emit(Events.DEV_FREEZE_ALL, { frozen: v }));
+
     this._buildVoid(gui);
     this._buildStars(gui);
     this._buildLighting(gui);
@@ -47,6 +52,8 @@ export class DevPanel {
     this._buildPlanets(gui);
     this._buildBallFeel(gui);
     this._buildTrajectory(gui);
+    this._buildWorldEater(gui);
+    this._collapseFolders(gui);
   }
 
   // ── VOID ────────────────────────────────────────────────────
@@ -91,7 +98,6 @@ export class DevPanel {
 
     f.add({ load }, 'load').name('📥 Load JSON');
     f.add({ copy: () => this._copy('Void', p) }, 'copy').name('📋 Copy JSON');
-    f.open();
   }
 
   // ── STARS ───────────────────────────────────────────────────
@@ -516,11 +522,182 @@ export class DevPanel {
     f.add({ copy: () => this._copy('Trajectory', TRAJ_CONFIG) }, 'copy').name('📋 Copy JSON');
   }
 
+  // ── WORLDEATER ──────────────────────────────────────────────
+  _buildWorldEater(gui) {
+    const { holeScene } = this._refs;
+    const p = {
+      headScaleX: 50,
+      headScaleY: 60,
+      headScaleZ: 78,
+      headOffsetX: 0,
+      headOffsetY: 0,
+      headOffsetZ: 0,
+      headRotateY: -Math.PI / 2,
+      neckScaleX: 62,
+      neckScaleY: 36,
+      neckScaleZ: 76,
+      neckPosX: -12,
+      neckPosY: 0,
+      neckPosZ: -18,
+      bodyRadiusMul: 1,
+      bodyTexRepeatX: 1.8,
+      bodyTexRepeatY: 1.1,
+      headTexRepeatX: 1,
+      headTexRepeatY: 1,
+      headTexOffsetX: 0,
+      headTexOffsetY: 0,
+      bodyColor: '#f0fff6',
+      bodyEmissive: '#08150f',
+      bodyEmissiveIntensity: 0.18,
+      bodyRoughness: 0.82,
+      bodyMetalness: 0.04,
+      neckColor: '#f0fff6',
+      neckEmissive: '#08150f',
+      neckEmissiveIntensity: 0.18,
+      neckRoughness: 0.82,
+      neckMetalness: 0.04,
+      tailRadiusMul: 0.82,
+      tailScaleY: 0.82,
+      tailScaleZ: 1.0,
+      headEmissive: '#4d1020',
+      headEmissiveIntensity: 1.05,
+      headRoughness: 0.52,
+      headMetalness: 0.1,
+      weakSpotScaleMul: 1,
+      weakSpotHitMul: 1,
+      weakSpotColor: '#ffe4a0',
+      weakSpotEmissive: '#ffa947',
+      weakSpotEmissiveIntensity: 0.68,
+      weakSpotOpacity: 0.96,
+      broodScaleX: 1,
+      broodScaleY: 1,
+      broodScaleZ: 1,
+    };
+
+    const getBoss = () => holeScene.worldEater ?? null;
+    const syncFromBoss = () => {
+      const boss = getBoss();
+      if (!boss?.getDebugState) return;
+      Object.assign(p, boss.getDebugState());
+      f.controllersRecursive().forEach((c) => c.updateDisplay());
+    };
+    const apply = () => {
+      const boss = getBoss();
+      if (!boss?.applyDebugState) return;
+      boss.applyDebugState(p);
+    };
+    const load = () => {
+      const text = window.prompt('Paste WorldEater JSON');
+      if (!text) return;
+      try {
+        const obj = JSON.parse(text);
+        Object.assign(p, obj);
+        apply();
+        f.controllersRecursive().forEach((c) => c.updateDisplay());
+      } catch {
+        console.warn('[DevPanel] Invalid WorldEater JSON');
+      }
+    };
+    const reset = () => {
+      const boss = getBoss();
+      if (!boss?.resetDebugState) return;
+      boss.resetDebugState();
+      syncFromBoss();
+    };
+
+    eventBus.on(Events.HOLE_LOADED, () => {
+      setTimeout(() => {
+        syncFromBoss();
+        apply();
+      }, 0);
+    });
+
+    const f = gui.addFolder('🐉 WorldEater');
+    f.close();
+
+    const headF = f.addFolder('Head Shape');
+    headF.add(p, 'headScaleX', 20, 120, 1).name('Width').onChange(apply);
+    headF.add(p, 'headScaleY', 20, 120, 1).name('Height').onChange(apply);
+    headF.add(p, 'headScaleZ', 20, 140, 1).name('Length').onChange(apply);
+    headF.add(p, 'headOffsetX', -30, 30, 1).name('Offset X').onChange(apply);
+    headF.add(p, 'headOffsetY', -30, 30, 1).name('Offset Y').onChange(apply);
+    headF.add(p, 'headOffsetZ', -30, 30, 1).name('Offset Z').onChange(apply);
+    headF.add(p, 'headRotateY', -Math.PI, Math.PI, 0.01).name('Face Y rot').onChange(apply);
+
+    const neckF = f.addFolder('Neck Blend');
+    neckF.add(p, 'neckScaleX', 20, 120, 1).name('Scale X').onChange(apply);
+    neckF.add(p, 'neckScaleY', 10, 100, 1).name('Scale Y').onChange(apply);
+    neckF.add(p, 'neckScaleZ', 20, 140, 1).name('Scale Z').onChange(apply);
+    neckF.add(p, 'neckPosX', -50, 50, 1).name('Pos X').onChange(apply);
+    neckF.add(p, 'neckPosY', -50, 50, 1).name('Pos Y').onChange(apply);
+    neckF.add(p, 'neckPosZ', -80, 40, 1).name('Pos Z').onChange(apply);
+
+    const bodyF = f.addFolder('Body');
+    bodyF.add(p, 'bodyRadiusMul', 0.6, 1.8, 0.01).name('Thickness').onChange(apply);
+    bodyF.addColor(p, 'bodyColor').name('Body color').onChange(apply);
+    bodyF.addColor(p, 'bodyEmissive').name('Body emissive').onChange(apply);
+    bodyF.add(p, 'bodyEmissiveIntensity', 0, 2, 0.01).name('Body glow').onChange(apply);
+    bodyF.add(p, 'bodyRoughness', 0, 1, 0.01).name('Roughness').onChange(apply);
+    bodyF.add(p, 'bodyMetalness', 0, 1, 0.01).name('Metalness').onChange(apply);
+    bodyF.add(p, 'bodyTexRepeatX', 0.2, 6, 0.05).name('Tex repeat X').onChange(apply);
+    bodyF.add(p, 'bodyTexRepeatY', 0.2, 6, 0.05).name('Tex repeat Y').onChange(apply);
+
+    const neckMatF = f.addFolder('Neck Material');
+    neckMatF.addColor(p, 'neckColor').name('Neck color').onChange(apply);
+    neckMatF.addColor(p, 'neckEmissive').name('Neck emissive').onChange(apply);
+    neckMatF.add(p, 'neckEmissiveIntensity', 0, 2, 0.01).name('Neck glow').onChange(apply);
+    neckMatF.add(p, 'neckRoughness', 0, 1, 0.01).name('Neck roughness').onChange(apply);
+    neckMatF.add(p, 'neckMetalness', 0, 1, 0.01).name('Neck metalness').onChange(apply);
+
+    const tailF = f.addFolder('Tail');
+    tailF.add(p, 'tailRadiusMul', 0.2, 2, 0.01).name('Tail size').onChange(apply);
+    tailF.add(p, 'tailScaleY', 0.2, 2, 0.01).name('Tail squash Y').onChange(apply);
+    tailF.add(p, 'tailScaleZ', 0.2, 2, 0.01).name('Tail length Z').onChange(apply);
+
+    const broodF = f.addFolder('Brood');
+    broodF.add(p, 'broodScaleX', 0.2, 3, 0.01).name('Scale X').onChange(apply);
+    broodF.add(p, 'broodScaleY', 0.2, 3, 0.01).name('Scale Y').onChange(apply);
+    broodF.add(p, 'broodScaleZ', 0.2, 3, 0.01).name('Scale Z').onChange(apply);
+
+    const faceF = f.addFolder('Face Texture');
+    faceF.addColor(p, 'headEmissive').name('Face emissive').onChange(apply);
+    faceF.add(p, 'headEmissiveIntensity', 0, 2, 0.01).name('Face glow').onChange(apply);
+    faceF.add(p, 'headRoughness', 0, 1, 0.01).name('Face roughness').onChange(apply);
+    faceF.add(p, 'headMetalness', 0, 1, 0.01).name('Face metalness').onChange(apply);
+    faceF.add(p, 'headTexRepeatX', 0.25, 3, 0.01).name('Tex repeat X').onChange(apply);
+    faceF.add(p, 'headTexRepeatY', 0.25, 3, 0.01).name('Tex repeat Y').onChange(apply);
+    faceF.add(p, 'headTexOffsetX', -1, 1, 0.01).name('Tex offset X').onChange(apply);
+    faceF.add(p, 'headTexOffsetY', -1, 1, 0.01).name('Tex offset Y').onChange(apply);
+
+    const weakF = f.addFolder('Weak Spots');
+    weakF.add(p, 'weakSpotScaleMul', 0.6, 2.5, 0.01).name('Visual size').onChange(apply);
+    weakF.add(p, 'weakSpotHitMul', 0.6, 2.5, 0.01).name('Hit radius').onChange(apply);
+    weakF.addColor(p, 'weakSpotColor').name('Color').onChange(apply);
+    weakF.addColor(p, 'weakSpotEmissive').name('Emissive').onChange(apply);
+    weakF.add(p, 'weakSpotEmissiveIntensity', 0, 2, 0.01).name('Glow').onChange(apply);
+    weakF.add(p, 'weakSpotOpacity', 0.1, 1, 0.01).name('Opacity').onChange(apply);
+
+    f.add({ syncFromBoss }, 'syncFromBoss').name('↻ Read Current');
+    f.add({ load }, 'load').name('📥 Load JSON');
+    f.add({ copy: () => this._copy('WorldEater', p) }, 'copy').name('📋 Copy JSON');
+    f.add({ reset }, 'reset').name('↺ Reset Boss');
+  }
+
   // ── Helpers ─────────────────────────────────────────────────
   _copy(label, obj) {
     const text = JSON.stringify(obj, null, 2);
     navigator.clipboard?.writeText(text)
       .then(() => console.log(`[DevPanel] ${label} copied:\n`, text));
+  }
+
+  _collapseFolders(folder) {
+    if (folder !== this._gui) folder.close();
+    const children = Array.isArray(folder.folders)
+      ? folder.folders
+      : Object.values(folder.folders ?? {});
+    for (const child of children) {
+      this._collapseFolders(child);
+    }
   }
 
   _setupToggle() {

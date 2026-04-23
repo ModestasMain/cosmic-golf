@@ -215,6 +215,10 @@ class Game {
     });
 
     eventBus.on(Events.MP_PLAYER_LEFT, ({ playerId }) => {
+      gameState.players = gameState.players.filter((p) => p.id !== playerId);
+      if (gameState.players.length <= 1) {
+        gameState.isSoloMode = true;
+      }
       this.playerLabels.removePlayer(playerId);
     });
   }
@@ -240,42 +244,153 @@ class Game {
       this.holeScene.resetBallToTee();
     });
 
-    this._buildResetButton();
+    this._buildSettingsDrawer();
   }
 
-  _buildResetButton() {
-    const btn = document.createElement('button');
-    btn.id = 'reset-btn';
-    btn.textContent = '↩ RESTART';
-    btn.style.cssText = [
+  _buildSettingsDrawer() {
+    const button = document.createElement('button');
+    button.id = 'settings-btn';
+    button.setAttribute('aria-label', 'Open settings');
+    button.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3.2"></circle>
+        <path d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V20a2 2 0 1 1-4 0v-.2a1 1 0 0 0-.7-.9 1 1 0 0 0-1.1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H4a2 2 0 1 1 0-4h.2a1 1 0 0 0 .9-.7 1 1 0 0 0-.2-1.1l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1 1 0 0 0 1.1.2h.1a1 1 0 0 0 .6-.9V4a2 2 0 1 1 4 0v.2a1 1 0 0 0 .6.9 1 1 0 0 0 1.1-.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1 1 0 0 0-.2 1.1v.1a1 1 0 0 0 .9.6H20a2 2 0 1 1 0 4h-.2a1 1 0 0 0-.9.6z"></path>
+      </svg>
+      <span>Settings</span>
+    `;
+    button.style.cssText = [
       'position:fixed',
       'bottom:max(20px, calc(env(safe-area-inset-bottom, 0px) + 12px))',
       'left:max(20px, calc(env(safe-area-inset-left, 0px) + 12px))',
-      'z-index:200',
-      'background:rgba(10,12,30,0.75)',
-      'color:rgba(160,210,255,0.9)',
-      'font-family:monospace',
+      'z-index:204',
+      'display:flex',
+      'align-items:center',
+      'gap:8px',
+      'background:linear-gradient(180deg, rgba(11, 8, 22, 0.9), rgba(8, 5, 18, 0.88))',
+      'color:rgba(231, 226, 255, 0.94)',
+      'font-family:Orbitron, sans-serif',
       'font-size:11px',
-      'letter-spacing:2px',
-      'border:1px solid rgba(100,160,255,0.35)',
-      'border-radius:8px',
-      'padding:8px 14px',
+      'letter-spacing:0.15em',
+      'text-transform:uppercase',
+      'border:1px solid rgba(132, 92, 255, 0.44)',
+      'border-radius:18px',
+      'padding:11px 16px',
       'cursor:pointer',
-      'backdrop-filter:blur(4px)',
-      '-webkit-backdrop-filter:blur(4px)',
+      'box-shadow:0 18px 50px rgba(3,2,10,0.34)',
+      'backdrop-filter:blur(12px)',
+      '-webkit-backdrop-filter:blur(12px)',
       'touch-action:manipulation',
       'user-select:none',
       '-webkit-user-select:none',
     ].join(';');
 
-    btn.addEventListener('pointerdown', (e) => {
+    const panel = document.createElement('div');
+    panel.id = 'settings-panel';
+    panel.style.cssText = [
+      'position:fixed',
+      'left:max(20px, calc(env(safe-area-inset-left, 0px) + 12px))',
+      'bottom:max(74px, calc(env(safe-area-inset-bottom, 0px) + 68px))',
+      'z-index:203',
+      'display:none',
+      'flex-direction:column',
+      'gap:10px',
+      'width:min(280px, calc(100vw - 36px))',
+      'padding:12px',
+      'border-radius:22px',
+      'background:linear-gradient(180deg, rgba(10, 8, 24, 0.92), rgba(7, 5, 18, 0.9))',
+      'border:1px solid rgba(124, 92, 255, 0.32)',
+      'box-shadow:0 24px 64px rgba(3, 2, 10, 0.5)',
+      'backdrop-filter:blur(14px)',
+      '-webkit-backdrop-filter:blur(14px)',
+    ].join(';');
+
+    const header = document.createElement('div');
+    header.textContent = 'SETTINGS';
+    header.style.cssText = [
+      'font-family:Orbitron, sans-serif',
+      'font-size:10px',
+      'letter-spacing:0.22em',
+      'color:rgba(173, 118, 255, 0.95)',
+      'text-transform:uppercase',
+      'padding:0 2px 2px',
+    ].join(';');
+    panel.appendChild(header);
+
+    const volumeControl = document.getElementById('volume-control');
+    if (volumeControl) {
+      volumeControl.style.position = 'static';
+      volumeControl.style.left = 'auto';
+      volumeControl.style.bottom = 'auto';
+      volumeControl.style.zIndex = '1';
+      volumeControl.style.width = '100%';
+      volumeControl.style.padding = '8px 10px';
+      volumeControl.style.borderRadius = '16px';
+      panel.appendChild(volumeControl);
+    }
+
+    const ballStylePicker = document.getElementById('ball-style-picker');
+    if (ballStylePicker) {
+      ballStylePicker.style.position = 'static';
+      ballStylePicker.style.left = 'auto';
+      ballStylePicker.style.bottom = 'auto';
+      ballStylePicker.style.zIndex = '1';
+      ballStylePicker.style.width = '100%';
+      ballStylePicker.style.gap = '6px';
+      panel.appendChild(ballStylePicker);
+    }
+
+    const resetBtn = document.createElement('button');
+    resetBtn.id = 'reset-btn';
+    resetBtn.textContent = '↩ RESTART';
+    resetBtn.style.cssText = [
+      'width:100%',
+      'background:linear-gradient(180deg, rgba(11, 8, 22, 0.86), rgba(8, 5, 18, 0.84))',
+      'color:rgba(231, 226, 255, 0.92)',
+      'font-family:Orbitron, sans-serif',
+      'font-size:12px',
+      'letter-spacing:0.16em',
+      'border:1px solid rgba(132, 92, 255, 0.44)',
+      'border-radius:16px',
+      'padding:12px 14px',
+      'cursor:pointer',
+      'box-shadow:0 16px 42px rgba(3,2,10,0.24)',
+      'backdrop-filter:blur(12px)',
+      '-webkit-backdrop-filter:blur(12px)',
+      'touch-action:manipulation',
+      'user-select:none',
+      '-webkit-user-select:none',
+    ].join(';');
+    resetBtn.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       eventBus.emit(Events.BALL_RESET_TO_TEE);
     });
-    btn.addEventListener('pointerdown', () => { btn.style.background = 'rgba(40,60,120,0.85)'; });
-    btn.addEventListener('pointerup',   () => { btn.style.background = 'rgba(10,12,30,0.75)'; });
+    resetBtn.addEventListener('pointerdown', () => { resetBtn.style.background = 'linear-gradient(180deg, rgba(26, 17, 49, 0.92), rgba(12, 8, 25, 0.92))'; });
+    resetBtn.addEventListener('pointerup',   () => { resetBtn.style.background = 'linear-gradient(180deg, rgba(11, 8, 22, 0.86), rgba(8, 5, 18, 0.84))'; });
+    panel.appendChild(resetBtn);
 
-    document.body.appendChild(btn);
+    const closePanel = () => {
+      panel.style.display = 'none';
+      button.dataset.open = '0';
+    };
+    const openPanel = () => {
+      panel.style.display = 'flex';
+      button.dataset.open = '1';
+    };
+
+    button.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      if (panel.style.display === 'flex') closePanel();
+      else openPanel();
+    });
+
+    document.addEventListener('pointerdown', (e) => {
+      if (!panel.contains(e.target) && !button.contains(e.target)) {
+        closePanel();
+      }
+    });
+
+    document.body.appendChild(panel);
+    document.body.appendChild(button);
   }
 
   _startGame() {
@@ -298,9 +413,18 @@ class Game {
       return;
     }
 
-    this.nameEntry.show().then(({ name }) => {
+    this.nameEntry.show().then(({ name, mode, roomCode }) => {
       gameState.players[0].name = name;
-      this.mp.joinPublic(name); // no color — _colorFromId assigns unique color
+      if (mode === 'create') {
+        const createdCode = this.mp.createPrivateRoom(name, undefined, roomCode);
+        this._syncRoomUrl(createdCode);
+      } else if (mode === 'join' && roomCode) {
+        this.mp.joinRoom(roomCode, name);
+        this._syncRoomUrl(roomCode);
+      } else {
+        this.mp.joinPublic(name); // no color — _colorFromId assigns unique color
+        this._syncRoomUrl(null);
+      }
       const color = this.mp.localColor;
       gameState.players[0].color = color;
 
@@ -310,6 +434,16 @@ class Game {
       setTimeout(() => this.tutorial.show(), 600);
       setTimeout(() => this.mp.updateIdentity(name, color), 2000);
     });
+  }
+
+  _syncRoomUrl(roomCode) {
+    const url = new URL(window.location.href);
+    if (roomCode && roomCode !== 'PUBLIC') {
+      url.searchParams.set('room', roomCode);
+    } else {
+      url.searchParams.delete('room');
+    }
+    window.history.replaceState({}, '', url);
   }
 
   _setupVisibility() {

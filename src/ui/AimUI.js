@@ -22,15 +22,21 @@ export class AimUI {
       aimHint:      document.getElementById('aim-hint'),
       roomCode:     document.getElementById('room-code-display'),
       modeBadge:    document.getElementById('mode-badge'),
+      roomStatus:   document.getElementById('room-status'),
+      roomPlayers:  document.getElementById('room-player-count'),
+      howToCard:    document.getElementById('how-to-card'),
       penaltyMsg:   document.getElementById('penalty-msg'),
     };
 
     this._aimHintVisible = true;
     this._penaltyTimer = null;
+    this._tutorialDismissed = sessionStorage.getItem('cosmic-golf-howto-dismissed') === '1';
 
     this._setupVolumeSlider();
     this._setupCupIndicator();
     this._setupListeners();
+    this._syncRoomPanel();
+    this._syncTutorialCard();
 
     // Room code copy
     const roomUi = document.getElementById('room-code-ui');
@@ -228,11 +234,10 @@ export class AimUI {
       const s = document.createElement('style');
       s.id = 'volume-slider-style';
       s.textContent = `
-        #volume-slider{-webkit-appearance:none;appearance:none;width:72px;height:4px;
-          background:rgba(100,160,255,0.3);border-radius:2px;outline:none;
-          transform:rotate(-90deg);cursor:pointer;}
-        #volume-slider::-webkit-slider-runnable-track{height:4px;background:rgba(100,160,255,0.3);border-radius:2px;}
-        #volume-slider::-moz-range-track{height:4px;background:rgba(100,160,255,0.3);border-radius:2px;}
+        #volume-slider{-webkit-appearance:none;appearance:none;width:104px;height:4px;
+          background:rgba(100,160,255,0.3);border-radius:999px;outline:none;cursor:pointer;}
+        #volume-slider::-webkit-slider-runnable-track{height:4px;background:rgba(100,160,255,0.3);border-radius:999px;}
+        #volume-slider::-moz-range-track{height:4px;background:rgba(100,160,255,0.3);border-radius:999px;}
         #volume-slider::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;
           border-radius:50%;background:rgba(160,200,255,0.9);border:1px solid rgba(100,160,255,0.5);
           cursor:pointer;margin-top:-5px;}
@@ -244,24 +249,41 @@ export class AimUI {
     }
 
     const wrap = document.createElement('div');
+    wrap.id = 'volume-control';
     wrap.style.cssText = [
       'position:fixed',
-      'bottom:max(16px, env(safe-area-inset-bottom, 0px))',
-      'right:max(16px, env(safe-area-inset-right, 0px))',
+      'bottom:max(74px, calc(env(safe-area-inset-bottom, 0px) + 56px))',
+      'left:max(18px, calc(env(safe-area-inset-left, 0px) + 12px))',
       'z-index:200',
       'display:flex',
-      'flex-direction:column',
+      'flex-direction:row',
       'align-items:center',
-      'gap:4px',
+      'gap:10px',
       'touch-action:none',
+      'padding:10px 12px',
+      'border-radius:18px',
+      'background:linear-gradient(180deg, rgba(11,8,22,0.86), rgba(8,5,18,0.84))',
+      'border:1px solid rgba(132,92,255,0.4)',
+      'box-shadow:0 18px 50px rgba(3,2,10,0.34)',
+      'backdrop-filter:blur(12px)',
+      '-webkit-backdrop-filter:blur(12px)',
     ].join(';');
 
     const icon = document.createElement('div');
-    icon.style.cssText = 'font-size:15px;line-height:1;color:rgba(160,200,255,0.8);user-select:none;';
-    icon.textContent = initVol === 0 ? '🔇' : '🔊';
+    icon.style.cssText = [
+      'font-family:Orbitron,sans-serif',
+      'font-size:10px',
+      'letter-spacing:0.18em',
+      'text-transform:uppercase',
+      'line-height:1',
+      'color:rgba(224,216,255,0.88)',
+      'user-select:none',
+    ].join(';');
+    icon.dataset.iconState = initVol === 0 ? 'mute' : 'sound';
+    icon.textContent = initVol === 0 ? 'MUTE' : 'SOUND';
 
     const sliderBox = document.createElement('div');
-    sliderBox.style.cssText = 'width:28px;height:76px;display:flex;align-items:center;justify-content:center;overflow:visible;';
+    sliderBox.style.cssText = 'width:104px;height:20px;display:flex;align-items:center;justify-content:center;overflow:visible;';
 
     const slider = document.createElement('input');
     slider.type = 'range';
@@ -273,7 +295,8 @@ export class AimUI {
 
     slider.addEventListener('input', () => {
       const v = parseFloat(slider.value);
-      icon.textContent = v === 0 ? '🔇' : '🔊';
+      icon.dataset.iconState = v === 0 ? 'mute' : 'sound';
+      icon.textContent = v === 0 ? 'MUTE' : 'SOUND';
       eventBus.emit(Events.AUDIO_VOLUME_CHANGE, { volume: v });
     });
 
@@ -299,6 +322,11 @@ export class AimUI {
 
     eventBus.on(Events.SHOT_TAKEN, () => {
       this._setHint('', 'rgba(255,255,255,0.4)');
+      if (!this._tutorialDismissed) {
+        this._tutorialDismissed = true;
+        sessionStorage.setItem('cosmic-golf-howto-dismissed', '1');
+        this._syncTutorialCard();
+      }
     });
 
     eventBus.on(Events.HOLE_LOADED, ({ archetype }) => {
@@ -320,15 +348,26 @@ export class AimUI {
     });
 
     eventBus.on(Events.MP_SOLO_MODE, () => {
-      if (this._els.modeBadge) this._els.modeBadge.textContent = 'SOLO MODE';
+      if (this._els.modeBadge) this._els.modeBadge.textContent = 'Solo';
+      this._syncRoomPanel();
     });
 
     eventBus.on(Events.MP_PLAYER_JOINED, () => {
-      if (this._els.modeBadge) this._els.modeBadge.textContent = 'MULTIPLAYER';
+      if (this._els.modeBadge) this._els.modeBadge.textContent = 'Multiplayer';
+      this._syncRoomPanel();
+    });
+
+    eventBus.on(Events.MP_PLAYER_LEFT, () => {
+      this._syncRoomPanel();
     });
 
     eventBus.on(Events.MP_ROOM_CREATED, ({ code }) => {
       this._els.roomCode.textContent = code;
+      this._syncRoomPanel();
+    });
+
+    eventBus.on(Events.HOLE_LOADED, () => {
+      this._syncRoomPanel();
     });
   }
 
@@ -349,6 +388,24 @@ export class AimUI {
     this._penaltyTimer = setTimeout(() => {
       this._els.penaltyMsg.style.display = 'none';
     }, 2500);
+  }
+
+  _syncTutorialCard() {
+    if (!this._els.howToCard) return;
+    this._els.howToCard.style.display = this._tutorialDismissed ? 'none' : '';
+  }
+
+  _syncRoomPanel() {
+    if (this._els.roomCode && gameState.roomCode) {
+      this._els.roomCode.textContent = gameState.roomCode;
+    }
+    if (this._els.roomStatus) {
+      this._els.roomStatus.textContent = gameState.isSoloMode ? 'Solo Lobby' : 'Room Lobby';
+    }
+    if (this._els.roomPlayers) {
+      const count = Math.max(1, gameState.players.length || 0);
+      this._els.roomPlayers.textContent = `${count} ${count === 1 ? 'Player' : 'Players'}`;
+    }
   }
 
   /**
@@ -376,6 +433,7 @@ export class AimUI {
     if (this._els.roomCode && gameState.roomCode) {
       this._els.roomCode.textContent = gameState.roomCode;
     }
+    this._syncRoomPanel();
   }
 
   dispose() {

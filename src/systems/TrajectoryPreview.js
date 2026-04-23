@@ -43,6 +43,8 @@ function lerpColor(t) {
 const ENDPOINT_COLORS = {
   cup:          new Color(0x00ffff),
   wormhole:     new Color(0xaa44ff),
+  boss_weakspot:new Color(0xffd56b),
+  boss_block:   new Color(0xff6d52),
   settled:      new Color(0x44ff88),
   pinned:       new Color(0x44ff88),
   zero_g_stuck: new Color(0x44ff88),

@@ -50,13 +50,21 @@ export class InputSystem {
     this._orbitActive = false;
 
     this._trajectoryStatus = null;
+    this._freecamActive = false;
+    this._freecamPtr = null;
+    this._freecamLast = new Vector2();
+    this._freecamMode = 'look';
+    this._keys = new Set();
+    this._freecamTouchMove = new Vector2();
 
     this._buildUI();
+    this._setupEventListeners();
 
     this._onDown   = this._onDown.bind(this);
     this._onMove   = this._onMove.bind(this);
     this._onUp     = this._onUp.bind(this);
     this._onKey    = this._onKey.bind(this);
+    this._onKeyUp  = this._onKeyUp.bind(this);
 
     const c = renderer.domElement;
     c.addEventListener('pointerdown',   this._onDown, { passive: false });
@@ -64,9 +72,16 @@ export class InputSystem {
     c.addEventListener('pointerup',     this._onUp,   { passive: false });
     c.addEventListener('pointercancel', this._onUp,   { passive: false });
     window.addEventListener('keydown',  this._onKey);
+    window.addEventListener('keyup',    this._onKeyUp);
 
     this.ballPosition = null;
     this.planets      = [];
+  }
+
+  _setupEventListeners() {
+    eventBus.on(Events.HOLE_LOADED, () => {
+      this._updateFreecamBtn();
+    });
   }
 
   // ── UI (all pointer-events:none — canvas handles everything) ─
@@ -113,16 +128,18 @@ export class InputSystem {
 
     this._label = document.createElement('div');
     this._label.style.cssText = [
-      'color:rgba(160,210,255,.85)', 'font-family:monospace',
-      'font-size:10px', 'letter-spacing:3px', 'text-align:center',
+      'color:rgba(182,140,255,.92)', 'font-family:Orbitron,sans-serif',
+      'font-size:10px', 'letter-spacing:0.18em', 'text-align:center', 'text-transform:uppercase',
       'animation:label-glow 2s ease-in-out infinite', 'pointer-events:none',
     ].join(';');
 
     // ── Pyramid SVG container ────────────────────────────────
     const pyramidWrap = document.createElement('div');
+    pyramidWrap.id = 'power-pyramid-wrap';
     pyramidWrap.style.cssText = [
       `width:${this._pyW}px`, `height:${this._pyH}px`,
       'position:relative', 'pointer-events:none',
+      'filter:drop-shadow(0 18px 36px rgba(8,5,24,0.46))',
     ].join(';');
     this._pyramidWrap = pyramidWrap;
 
@@ -186,8 +203,8 @@ export class InputSystem {
     // Dark background triangle
     const bgTri = document.createElementNS(NS, 'polygon');
     bgTri.setAttribute('points', `4,4 136,4 ${this._pyTipX},${this._pyTipY}`);
-    bgTri.setAttribute('fill', '#05060f');
-    bgTri.setAttribute('stroke', 'rgba(80,130,220,0.28)');
+    bgTri.setAttribute('fill', '#0b0718');
+    bgTri.setAttribute('stroke', 'rgba(132,92,255,0.4)');
     bgTri.setAttribute('stroke-width', '1.5');
     bgTri.setAttribute('stroke-linejoin', 'round');
     svg.appendChild(bgTri);
@@ -216,7 +233,7 @@ export class InputSystem {
     const outlineTri = document.createElementNS(NS, 'polygon');
     outlineTri.setAttribute('points', `4,4 136,4 ${this._pyTipX},${this._pyTipY}`);
     outlineTri.setAttribute('fill', 'none');
-    outlineTri.setAttribute('stroke', 'rgba(80,130,220,0.5)');
+    outlineTri.setAttribute('stroke', 'rgba(156,92,255,0.7)');
     outlineTri.setAttribute('stroke-width', '1.5');
     outlineTri.setAttribute('stroke-linejoin', 'round');
     this._outlineTri = outlineTri;
@@ -262,7 +279,7 @@ export class InputSystem {
         tick.setAttribute('y1', String(yPos));
         tick.setAttribute('x2', String(edgeX + tickLen));
         tick.setAttribute('y2', String(yPos));
-        tick.setAttribute('stroke', 'rgba(100,160,255,0.35)');
+        tick.setAttribute('stroke', 'rgba(148,102,255,0.3)');
         tick.setAttribute('stroke-width', '1');
         tick.setAttribute('stroke-linecap', 'round');
         svg.appendChild(tick);
@@ -285,22 +302,117 @@ export class InputSystem {
     // ── Orbit toggle button (planet icon below pyramid) ─────
     const orbitBtn = document.createElement('div');
     orbitBtn.style.cssText = [
-      'width:44px', 'height:44px',
+      'width:38px', 'height:38px',
       'border-radius:50%',
       'display:none',
       'align-items:center', 'justify-content:center',
       'cursor:pointer',
       'pointer-events:auto',
-      'background:rgba(10,12,30,0.75)',
-      'border:1px solid rgba(100,160,255,0.35)',
-      'backdrop-filter:blur(4px)',
-      '-webkit-backdrop-filter:blur(4px)',
+      'background:linear-gradient(180deg, rgba(11,8,22,0.88), rgba(8,5,18,0.84))',
+      'border:1px solid rgba(132,92,255,0.38)',
+      'backdrop-filter:blur(12px)',
+      '-webkit-backdrop-filter:blur(12px)',
       'transition:border-color 0.2s,box-shadow 0.2s,background 0.2s',
       'touch-action:manipulation',
       'user-select:none',
       '-webkit-user-select:none',
     ].join(';');
     this._orbitBtn = orbitBtn;
+
+    const freecamBtn = document.createElement('div');
+    freecamBtn.id = 'freecam-btn';
+    freecamBtn.style.cssText = [
+      'min-width:82px', 'height:34px', 'padding:0 12px',
+      'border-radius:999px',
+      'display:none',
+      'align-items:center', 'justify-content:center',
+      'cursor:pointer',
+      'pointer-events:auto',
+      'background:linear-gradient(180deg, rgba(11,8,22,0.88), rgba(8,5,18,0.84))',
+      'border:1px solid rgba(132,92,255,0.38)',
+      'backdrop-filter:blur(12px)',
+      '-webkit-backdrop-filter:blur(12px)',
+      'transition:border-color 0.2s,box-shadow 0.2s,background 0.2s',
+      'touch-action:manipulation',
+      'user-select:none',
+      '-webkit-user-select:none',
+      'color:rgba(239,232,255,0.94)',
+      'font-family:Orbitron,sans-serif',
+      'font-size:9px',
+      'letter-spacing:0.16em',
+      'text-transform:uppercase',
+    ].join(';');
+    freecamBtn.textContent = 'Freecam';
+    this._freecamBtn = freecamBtn;
+
+    const freecamPad = document.createElement('div');
+    freecamPad.style.cssText = [
+      'display:none',
+      'position:fixed',
+      'left:max(18px,calc(env(safe-area-inset-left,0px) + 12px))',
+      'bottom:max(118px,calc(env(safe-area-inset-bottom,0px) + 98px))',
+      'width:132px',
+      'height:132px',
+      'border-radius:50%',
+      'background:radial-gradient(circle, rgba(20,28,42,0.82) 0%, rgba(8,12,20,0.62) 70%, rgba(8,12,20,0.1) 100%)',
+      'border:1px solid rgba(120,255,210,0.2)',
+      'backdrop-filter:blur(4px)',
+      '-webkit-backdrop-filter:blur(4px)',
+      'pointer-events:auto',
+      'touch-action:none',
+      'z-index:101',
+    ].join(';');
+    this._freecamPad = freecamPad;
+
+    const freecamStick = document.createElement('div');
+    freecamStick.style.cssText = [
+      'position:absolute',
+      'left:50%',
+      'top:50%',
+      'width:46px',
+      'height:46px',
+      'margin-left:-23px',
+      'margin-top:-23px',
+      'border-radius:50%',
+      'background:rgba(170,255,230,0.18)',
+      'border:1px solid rgba(180,255,240,0.38)',
+      'box-shadow:0 0 18px rgba(120,255,210,0.12)',
+      'pointer-events:none',
+      'transition:transform 0.06s linear',
+    ].join(';');
+    this._freecamStick = freecamStick;
+    freecamPad.appendChild(freecamStick);
+
+    freecamPad.addEventListener('pointerdown', (e) => {
+      if (!this._freecamActive) return;
+      e.preventDefault();
+      e.stopPropagation();
+      this._updateFreecamPad(e);
+    });
+    freecamPad.addEventListener('pointermove', (e) => {
+      if (!this._freecamActive) return;
+      if ((e.buttons & 1) === 0 && e.pointerType !== 'touch') return;
+      e.preventDefault();
+      e.stopPropagation();
+      this._updateFreecamPad(e);
+    });
+    const resetPad = (e) => {
+      if (!this._freecamActive) return;
+      e.preventDefault();
+      e.stopPropagation();
+      this._freecamTouchMove.set(0, 0);
+      this._updateFreecamStick();
+    };
+    freecamPad.addEventListener('pointerup', resetPad);
+    freecamPad.addEventListener('pointercancel', resetPad);
+
+    document.body.appendChild(freecamPad);
+
+    freecamBtn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      eventBus.emit(Events.FREECAM_TOGGLE);
+    });
 
     // SVG planet/Saturn icon
     const orbNS = 'http://www.w3.org/2000/svg';
@@ -333,6 +445,7 @@ export class InputSystem {
     orbSvg.appendChild(ring);
 
     orbitBtn.appendChild(orbSvg);
+    wrap.appendChild(freecamBtn);
     wrap.appendChild(orbitBtn);
 
     orbitBtn.addEventListener('pointerdown', (e) => {
@@ -350,6 +463,7 @@ export class InputSystem {
   _showLabel(text) {
     this._label.textContent = text;
     this._wrap.style.display = 'flex';
+    this._updateFreecamBtn();
   }
 
   setTrajectoryStatus(outcome) {
@@ -358,6 +472,8 @@ export class InputSystem {
     const labels = {
       cup:          'WILL HOLE',
       wormhole:     'WORMHOLE',
+      boss_weakspot:'HITS WEAK POINT',
+      boss_block:   'BLOCKED BY BOSS',
       settled:      'LANDS ON PLANET',
       pinned:       'LANDS ON PLANET',
       zero_g_stuck: 'LANDS ON PLANET',
@@ -367,7 +483,15 @@ export class InputSystem {
     if (outcome && outcome !== 'limit') {
       this._label.textContent = labels[outcome] ?? 'TAP PYRAMID TO SHOOT';
       const isOob = outcome === 'oob';
-      this._label.style.color = isOob ? 'rgba(255,80,60,.95)' : outcome === 'cup' ? 'rgba(80,255,220,.95)' : 'rgba(160,210,255,.85)';
+      this._label.style.color = isOob
+        ? 'rgba(255,80,60,.95)'
+        : outcome === 'cup'
+        ? 'rgba(80,255,220,.95)'
+        : outcome === 'boss_weakspot'
+        ? 'rgba(255,214,120,.95)'
+        : outcome === 'boss_block'
+        ? 'rgba(255,120,90,.95)'
+        : 'rgba(160,210,255,.85)';
     } else {
       this._label.style.color = 'rgba(160,210,255,.85)';
       // text will be set by _setBarPower
@@ -493,6 +617,16 @@ export class InputSystem {
 
   _onDown(e) {
     if (!this.enabled) return;
+    if (this._freecamActive) {
+      if (this._freecamPad && this._freecamPad.contains(e.target)) return;
+      e.preventDefault();
+      this._freecamPtr = e.pointerId;
+      this._freecamLast.set(e.clientX, e.clientY);
+      this._freecamMode = e.pointerType === 'touch' && e.clientX < window.innerWidth * 0.5
+        ? 'move'
+        : 'look';
+      return;
+    }
     if (gameState.ballInFlight) return;
     e.preventDefault();
 
@@ -515,6 +649,19 @@ export class InputSystem {
   }
 
   _onMove(e) {
+    if (this._freecamActive && e.pointerId === this._freecamPtr) {
+      e.preventDefault();
+      const dx = e.clientX - this._freecamLast.x;
+      const dy = e.clientY - this._freecamLast.y;
+      this._freecamLast.set(e.clientX, e.clientY);
+      eventBus.emit(Events.FREECAM_DRAG, {
+        dx,
+        dy,
+        mode: this._freecamMode,
+        pointerType: e.pointerType,
+      });
+      return;
+    }
     if (gameState.ballInFlight) return;
     e.preventDefault();
 
@@ -552,6 +699,11 @@ export class InputSystem {
   }
 
   _onUp(e) {
+    if (this._freecamActive && e.pointerId === this._freecamPtr) {
+      e.preventDefault();
+      this._freecamPtr = null;
+      return;
+    }
     e.preventDefault();
 
     // Pyramid pointer released
@@ -589,14 +741,48 @@ export class InputSystem {
   }
 
   _onKey(e) {
-    if (e.key === 'Escape') { this._reset(); eventBus.emit(Events.AIM_CANCEL); }
+    this._keys.add(e.code);
+    if (e.code === 'KeyC') {
+      eventBus.emit(Events.FREECAM_TOGGLE);
+      return;
+    }
+    if (e.key === 'Escape') {
+      if (this._freecamActive) {
+        eventBus.emit(Events.FREECAM_TOGGLE);
+      } else {
+        this._reset(); eventBus.emit(Events.AIM_CANCEL);
+      }
+    }
     if (e.key === 'r' || e.key === 'R') { this._reset(); eventBus.emit(Events.BALL_RESET_TO_TEE); }
     if (e.key === 'm' || e.key === 'M') eventBus.emit(Events.AUDIO_MUTE_TOGGLE);
+  }
+
+  _onKeyUp(e) {
+    this._keys.delete(e.code);
+    if (this._freecamActive && this._keys.size === 0) {
+      eventBus.emit(Events.FREECAM_MOVE, { x: 0, y: 0, z: 0, boost: false, dt: 0 });
+    }
   }
 
   // ── Per-frame ─────────────────────────────────────────────
 
   update(dt) {
+    if (this._freecamActive) {
+      let x = this._freecamTouchMove.x;
+      let y = 0;
+      let z = -this._freecamTouchMove.y;
+      if (this._keys.has('KeyA') || this._keys.has('ArrowLeft')) x -= 1;
+      if (this._keys.has('KeyD') || this._keys.has('ArrowRight')) x += 1;
+      if (this._keys.has('Space') || this._keys.has('KeyE')) y += 1;
+      if (this._keys.has('ShiftLeft') || this._keys.has('ShiftRight') || this._keys.has('KeyQ')) y -= 1;
+      if (this._keys.has('KeyW') || this._keys.has('ArrowUp')) z += 1;
+      if (this._keys.has('KeyS') || this._keys.has('ArrowDown')) z -= 1;
+      eventBus.emit(Events.FREECAM_MOVE, {
+        x, y, z,
+        boost: this._keys.has('AltLeft') || this._keys.has('AltRight'),
+        dt,
+      });
+    }
   }
 
   // ── Helpers ───────────────────────────────────────────────
@@ -653,6 +839,17 @@ export class InputSystem {
   setBallPosition(pos) { this.ballPosition = pos; }
   setPlanets(planets)  { this.planets = planets; }
   setAiming(v)         {}
+  setFreecamActive(v) {
+    this._freecamActive = v;
+    this._freecamPtr = null;
+    this._freecamTouchMove.set(0, 0);
+    this._updateFreecamStick();
+    this._updateFreecamBtn();
+    if (v) {
+      this._wrap.style.display = 'flex';
+      this._label.textContent = 'FREECAM: WASD QE, DRAG TO LOOK';
+    }
+  }
   isInPowerPhase()     { return this._power > 0.02; }
   setOrbitToggleAllowed(v) {
     this._orbitToggleAllowed = v;
@@ -670,12 +867,67 @@ export class InputSystem {
     if (this._orbitBtn) this._orbitBtn.style.display = 'none';
   }
 
+  _updateFreecamBtn() {
+    if (!this._freecamBtn) return;
+    const mobile = window.matchMedia('(pointer: coarse)').matches;
+    const showFreecam = mobile;
+    this._freecamBtn.style.display = showFreecam ? 'flex' : 'none';
+    if (this._freecamPad) this._freecamPad.style.display = mobile && this._freecamActive ? 'block' : 'none';
+    this._freecamBtn.textContent = this._freecamActive ? 'Return' : 'Freecam';
+    this._freecamBtn.style.borderColor = this._freecamActive
+      ? 'rgba(255,190,120,0.55)'
+      : 'rgba(120,255,210,0.35)';
+    this._freecamBtn.style.boxShadow = this._freecamActive
+      ? '0 0 18px rgba(255,190,120,0.22)'
+      : 'none';
+
+    if (this._wrap) {
+      if (mobile) {
+        this._wrap.style.bottom = showFreecam
+          ? 'max(102px, calc(env(safe-area-inset-bottom,0px) + 88px))'
+          : 'max(102px, calc(env(safe-area-inset-bottom,0px) + 120px))';
+        this._wrap.style.gap = showFreecam ? '8px' : '4px';
+      } else {
+        this._wrap.style.bottom = 'max(64px,calc(env(safe-area-inset-bottom,0px) + 44px))';
+        this._wrap.style.gap = '10px';
+      }
+    }
+  }
+
+  _updateFreecamPad(e) {
+    const rect = this._freecamPad.getBoundingClientRect();
+    const cx = rect.left + rect.width * 0.5;
+    const cy = rect.top + rect.height * 0.5;
+    let dx = (e.clientX - cx) / (rect.width * 0.5);
+    let dy = (e.clientY - cy) / (rect.height * 0.5);
+    const len = Math.hypot(dx, dy);
+    if (len > 1) {
+      dx /= len;
+      dy /= len;
+    }
+    this._freecamTouchMove.set(dx, dy);
+    this._updateFreecamStick();
+  }
+
+  _updateFreecamStick() {
+    if (!this._freecamStick) return;
+    const max = 34;
+    const x = this._freecamTouchMove.x * max;
+    const y = this._freecamTouchMove.y * max;
+    this._freecamStick.style.transform = `translate(${x}px, ${y}px)`;
+  }
+
   showBar() {
     this._showLabel('DRAG PYRAMID FOR POWER');
     this._setBarPower(this._power);
   }
 
   hideBar() {
+    if (this._freecamActive) {
+      this._wrap.style.display = 'flex';
+      this._updateFreecamBtn();
+      return;
+    }
     this._wrap.style.display = 'none';
   }
 
@@ -686,6 +938,8 @@ export class InputSystem {
     c.removeEventListener('pointerup',     this._onUp);
     c.removeEventListener('pointercancel', this._onUp);
     window.removeEventListener('keydown',  this._onKey);
+    window.removeEventListener('keyup',    this._onKeyUp);
     if (this._wrap.parentNode) this._wrap.parentNode.removeChild(this._wrap);
+    if (this._freecamPad?.parentNode) this._freecamPad.parentNode.removeChild(this._freecamPad);
   }
 }

@@ -875,6 +875,8 @@ export class NameEntryOverlay {
 
   _buildLaunchTab() {
     const frag = document.createDocumentFragment();
+    const params = new URLSearchParams(window.location.search);
+    const presetRoom = this._sanitizeRoomCode(params.get('room') || localStorage.getItem('cg_last_room') || '');
 
     // Title
     const titleWrap = document.createElement('div');
@@ -967,7 +969,7 @@ export class NameEntryOverlay {
       'animation:glowPulse 3s ease-in-out infinite',
       'text-shadow:0 0 10px rgba(255,255,255,0.5)',
     ].join(';');
-    btn.innerHTML = `<span style="position:relative;z-index:1;">LAUNCH INTO SPACE →</span><div style="position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.15),transparent);transform:translateX(-100%);transition:transform 0.5s;" class="cg-btn-shimmer"></div>`;
+    btn.innerHTML = `<span style="position:relative;z-index:1;">QUICK PLAY →</span><div style="position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.15),transparent);transform:translateX(-100%);transition:transform 0.5s;" class="cg-btn-shimmer"></div>`;
     btn.addEventListener('mouseenter', () => {
       btn.style.transform = 'scale(1.03)';
       btn.querySelector('.cg-btn-shimmer').style.transform = 'translateX(100%)';
@@ -1009,6 +1011,104 @@ export class NameEntryOverlay {
       quickRow.appendChild(qBtn);
     }
     card.appendChild(quickRow);
+
+    const roomDivider = document.createElement('div');
+    roomDivider.style.cssText = 'display:flex;align-items:center;gap:12px;margin:18px 0 14px;';
+    roomDivider.innerHTML = `<div style="flex:1;height:1px;background:rgba(255,255,255,0.07);"></div><span style="font-family:'JetBrains Mono',monospace;font-size:9px;color:rgba(255,255,255,0.25);letter-spacing:2px;">PRIVATE ROOM</span><div style="flex:1;height:1px;background:rgba(255,255,255,0.07);"></div>`;
+    card.appendChild(roomDivider);
+
+    const roomLabel = document.createElement('div');
+    roomLabel.style.cssText = "display:block;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:4px;color:rgba(255,255,255,0.45);margin-bottom:8px;";
+    roomLabel.textContent = 'ROOM CODE';
+    card.appendChild(roomLabel);
+
+    const roomInput = document.createElement('input');
+    roomInput.type = 'text';
+    roomInput.maxLength = 12;
+    roomInput.placeholder = 'JOIN ROOM OR USE BOSS';
+    roomInput.spellcheck = false;
+    roomInput.autocomplete = 'off';
+    roomInput.value = presetRoom;
+    roomInput.style.cssText = input.style.cssText;
+    roomInput.addEventListener('input', () => {
+      roomInput.value = this._sanitizeRoomCode(roomInput.value);
+      roomHint.textContent = roomInput.value === 'BOSS'
+        ? 'BOSS room = Worldeater-only finale test'
+        : 'Create a room to share, or paste an invite room code';
+    });
+    roomInput.addEventListener('focus', () => {
+      roomInput.style.borderColor = '#00DDFF';
+      roomInput.style.boxShadow = '0 0 0 3px rgba(0,221,255,0.16),0 0 20px rgba(0,221,255,0.12)';
+    });
+    roomInput.addEventListener('blur', () => {
+      roomInput.style.borderColor = 'rgba(255,0,204,0.4)';
+      roomInput.style.boxShadow = 'none';
+    });
+    roomInput.addEventListener('keydown', e => { if (e.key === 'Enter') this._confirm(input, { mode: 'join', roomCode: roomInput.value }); });
+    this._roomInput = roomInput;
+    card.appendChild(roomInput);
+
+    const roomHint = document.createElement('div');
+    roomHint.style.cssText = "margin-top:6px;margin-bottom:16px;font-family:'Inter Tight',sans-serif;font-size:12px;color:rgba(255,255,255,0.38);line-height:1.45;";
+    roomHint.textContent = presetRoom === 'BOSS'
+      ? 'BOSS room = Worldeater-only finale test'
+      : 'Create a room to share, or paste an invite room code';
+    card.appendChild(roomHint);
+
+    const roomButtons = document.createElement('div');
+    roomButtons.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:10px;';
+
+    const createBtn = document.createElement('button');
+    createBtn.style.cssText = [
+      'padding:13px 12px',
+      'border-radius:8px',
+      'border:1px solid rgba(0,221,255,0.22)',
+      'background:rgba(0,221,255,0.08)',
+      'color:#9ff7ff',
+      "font-family:'JetBrains Mono',monospace",
+      'font-size:11px',
+      'letter-spacing:2px',
+      'cursor:pointer',
+      'transition:transform 120ms,border-color 120ms,background 120ms',
+    ].join(';');
+    createBtn.textContent = 'CREATE ROOM';
+    createBtn.addEventListener('mouseenter', () => {
+      createBtn.style.borderColor = 'rgba(0,221,255,0.5)';
+      createBtn.style.background = 'rgba(0,221,255,0.12)';
+    });
+    createBtn.addEventListener('mouseleave', () => {
+      createBtn.style.borderColor = 'rgba(0,221,255,0.22)';
+      createBtn.style.background = 'rgba(0,221,255,0.08)';
+    });
+    createBtn.addEventListener('click', () => this._confirm(input, { mode: 'create', roomCode: roomInput.value }));
+    roomButtons.appendChild(createBtn);
+
+    const joinBtn = document.createElement('button');
+    joinBtn.style.cssText = [
+      'padding:13px 12px',
+      'border-radius:8px',
+      'border:1px solid rgba(255,170,68,0.22)',
+      'background:rgba(255,170,68,0.08)',
+      'color:#ffd090',
+      "font-family:'JetBrains Mono',monospace",
+      'font-size:11px',
+      'letter-spacing:2px',
+      'cursor:pointer',
+      'transition:transform 120ms,border-color 120ms,background 120ms',
+    ].join(';');
+    joinBtn.textContent = 'JOIN ROOM';
+    joinBtn.addEventListener('mouseenter', () => {
+      joinBtn.style.borderColor = 'rgba(255,170,68,0.5)';
+      joinBtn.style.background = 'rgba(255,170,68,0.12)';
+    });
+    joinBtn.addEventListener('mouseleave', () => {
+      joinBtn.style.borderColor = 'rgba(255,170,68,0.22)';
+      joinBtn.style.background = 'rgba(255,170,68,0.08)';
+    });
+    joinBtn.addEventListener('click', () => this._confirm(input, { mode: 'join', roomCode: roomInput.value }));
+    roomButtons.appendChild(joinBtn);
+
+    card.appendChild(roomButtons);
 
     frag.appendChild(card);
 
@@ -1157,10 +1257,25 @@ export class NameEntryOverlay {
     this._achievementMgr = mgr;
   }
 
-  _confirm(input) {
+  _sanitizeRoomCode(value) {
+    return (value || '').toUpperCase().replace(/[^A-Z0-9_]/g, '').slice(0, 12);
+  }
+
+  _confirm(input, roomSelection = { mode: 'public' }) {
     const raw = (input ?? this._nameInput).value.trim().toUpperCase();
     const name = raw.length > 0 ? raw : (QUICK_NAMES[Math.floor(Math.random() * QUICK_NAMES.length)]);
+    const roomCode = this._sanitizeRoomCode(roomSelection?.roomCode ?? this._roomInput?.value ?? '');
+    const mode = roomSelection?.mode ?? 'public';
+    if (mode === 'join' && !roomCode) {
+      this._roomInput?.focus();
+      if (this._roomInput) {
+        this._roomInput.style.borderColor = '#FFAA44';
+        this._roomInput.style.boxShadow = '0 0 0 3px rgba(255,170,68,0.18),0 0 20px rgba(255,170,68,0.12)';
+      }
+      return;
+    }
     localStorage.setItem('cg_callsign', name);
+    if (roomCode) localStorage.setItem('cg_last_room', roomCode);
     eventBus.emit(Events.GAME_LAUNCHED);
     this._cosmos.stop();
     this._howToPlay.stop();
@@ -1168,7 +1283,7 @@ export class NameEntryOverlay {
     this._overlay.style.transition = 'opacity 0.4s ease';
     setTimeout(() => {
       this._overlay.style.display = 'none';
-      if (this._resolve) this._resolve({ name });
+      if (this._resolve) this._resolve({ name, mode, roomCode });
     }, 400);
   }
 
@@ -1188,6 +1303,10 @@ export class NameEntryOverlay {
     // Update pill from saved name
     const saved = localStorage.getItem('cg_callsign') || '';
     if (this._pillName) this._pillName.textContent = saved || 'ANONYMOUS';
+    if (this._roomInput) {
+      const params = new URLSearchParams(window.location.search);
+      this._roomInput.value = this._sanitizeRoomCode(params.get('room') || localStorage.getItem('cg_last_room') || '');
+    }
 
     setTimeout(() => { if (this._nameInput) this._nameInput.focus(); }, 60);
     return new Promise(resolve => { this._resolve = resolve; });

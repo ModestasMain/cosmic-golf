@@ -18,29 +18,31 @@ export class BallStylePicker {
     this.el.id = 'ball-style-picker';
     this.el.style.cssText = [
       'position:fixed',
-      'bottom:max(60px, calc(env(safe-area-inset-bottom, 0px) + 52px))',
-      'right:max(20px, calc(env(safe-area-inset-right, 0px) + 12px))',
+      'bottom:max(126px, calc(env(safe-area-inset-bottom, 0px) + 108px))',
+      'left:max(18px, calc(env(safe-area-inset-left, 0px) + 12px))',
       'z-index:190',
       'display:none',
       'flex-direction:column',
-      'gap:6px',
-      'align-items:flex-end',
-      'font-family:monospace',
+      'gap:8px',
+      'align-items:flex-start',
+      'font-family:Inter Tight,sans-serif',
     ].join(';');
 
     this._toggleBtn = document.createElement('button');
     this._toggleBtn.style.cssText = [
-      'background:rgba(10,12,30,0.75)',
-      'color:rgba(160,210,255,0.9)',
-      'font-family:monospace',
-      'font-size:11px',
-      'letter-spacing:2px',
-      'border:1px solid rgba(100,160,255,0.35)',
-      'border-radius:8px',
-      'padding:8px 14px',
+      'background:linear-gradient(180deg, rgba(11,8,22,0.86), rgba(8,5,18,0.84))',
+      'color:rgba(238,232,255,0.94)',
+      'font-family:Orbitron,sans-serif',
+      'font-size:10px',
+      'letter-spacing:0.18em',
+      'text-transform:uppercase',
+      'border:1px solid rgba(132,92,255,0.42)',
+      'border-radius:18px',
+      'padding:12px 16px',
       'cursor:pointer',
-      'backdrop-filter:blur(4px)',
-      '-webkit-backdrop-filter:blur(4px)',
+      'box-shadow:0 18px 50px rgba(3,2,10,0.34)',
+      'backdrop-filter:blur(12px)',
+      '-webkit-backdrop-filter:blur(12px)',
       'touch-action:manipulation',
       'user-select:none',
       '-webkit-user-select:none',
@@ -58,14 +60,15 @@ export class BallStylePicker {
       'display:none',
       'flex-direction:row',
       'flex-wrap:wrap',
-      'gap:6px',
-      'max-width:min(380px, 80vw)',
-      'padding:8px',
-      'background:rgba(4,6,20,0.88)',
-      'border:1px solid rgba(100,160,255,0.25)',
-      'border-radius:10px',
-      'backdrop-filter:blur(8px)',
-      '-webkit-backdrop-filter:blur(8px)',
+      'gap:8px',
+      'max-width:min(260px, 62vw)',
+      'padding:12px',
+      'background:linear-gradient(180deg, rgba(11,8,22,0.9), rgba(8,5,18,0.88))',
+      'border:1px solid rgba(132,92,255,0.28)',
+      'border-radius:20px',
+      'box-shadow:0 18px 52px rgba(3,2,10,0.34)',
+      'backdrop-filter:blur(12px)',
+      '-webkit-backdrop-filter:blur(12px)',
     ].join(';');
 
     for (const id of BALL_STYLE_IDS) {
@@ -85,17 +88,17 @@ export class BallStylePicker {
       const btn = document.createElement('button');
       btn.dataset.styleId = id;
       btn.style.cssText = [
-        'width:48px',
-        'height:48px',
+        'width:42px',
+        'height:42px',
         'border-radius:50%',
-        'border:2px solid rgba(100,160,255,0.3)',
+        'border:2px solid rgba(132,92,255,0.26)',
         'cursor:pointer',
         'padding:0',
         'overflow:hidden',
         'display:flex',
         'align-items:center',
         'justify-content:center',
-        'background:#111',
+        'background:#0b0718',
         'transition:border-color 0.15s, box-shadow 0.15s',
         'touch-action:manipulation',
         'flex-shrink:0',
@@ -109,20 +112,20 @@ export class BallStylePicker {
       const label = document.createElement('span');
       label.textContent = def.name.toUpperCase();
       label.style.cssText = [
-        'font-size:8px',
-        'letter-spacing:0.5px',
-        'color:rgba(160,210,255,0.7)',
+        'font-size:7px',
+        'letter-spacing:0.08em',
+        'color:rgba(206,196,242,0.74)',
         'text-align:center',
-        'max-width:52px',
+        'max-width:48px',
         'line-height:1.1',
         'pointer-events:none',
         'user-select:none',
       ].join(';');
 
       if (id === this._selected) {
-        btn.style.borderColor = '#ffd700';
-        btn.style.boxShadow = '0 0 6px rgba(255,215,0,0.5)';
-        label.style.color = 'rgba(255,215,0,0.9)';
+        btn.style.borderColor = '#ffd073';
+        btn.style.boxShadow = '0 0 12px rgba(255,188,92,0.35)';
+        label.style.color = 'rgba(255,220,164,0.95)';
       }
 
       wrap.appendChild(btn);
@@ -149,8 +152,8 @@ export class BallStylePicker {
       const btn   = wrap.querySelector('button');
       const label = wrap.querySelector('span');
       const active = btn?.dataset.styleId === id;
-      if (btn)   { btn.style.borderColor = active ? '#ffd700' : 'rgba(100,160,255,0.3)'; btn.style.boxShadow = active ? '0 0 6px rgba(255,215,0,0.5)' : 'none'; }
-      if (label) { label.style.color = active ? 'rgba(255,215,0,0.9)' : 'rgba(160,210,255,0.7)'; }
+      if (btn)   { btn.style.borderColor = active ? '#ffd073' : 'rgba(132,92,255,0.26)'; btn.style.boxShadow = active ? '0 0 12px rgba(255,188,92,0.35)' : 'none'; }
+      if (label) { label.style.color = active ? 'rgba(255,220,164,0.95)' : 'rgba(206,196,242,0.74)'; }
     }
   }
 

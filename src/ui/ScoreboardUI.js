@@ -1,7 +1,7 @@
 import { eventBus, Events } from '../core/EventBus.js';
 import { gameState } from '../core/GameState.js';
 import { leaderboardStore } from '../core/LeaderboardStore.js';
-import { HOLE } from '../core/Constants.js';
+import { getScoreResult } from './ScoreCallouts.js';
 
 function getHolesCompleted(entry) {
   if (entry.holesCompleted != null) return entry.holesCompleted;
@@ -21,6 +21,7 @@ export class ScoreboardUI {
   constructor() {
     this._overlay   = document.getElementById('scoreboard-overlay');
     this._title     = document.getElementById('scoreboard-title');
+    this._subtitle  = document.getElementById('scoreboard-subtitle');
     this._header    = document.getElementById('scoreboard-header');
     this._body      = document.getElementById('scoreboard-body');
     this._btnNext   = document.getElementById('btn-next-hole');
@@ -29,6 +30,7 @@ export class ScoreboardUI {
     this._globalEntries = null;
     this._isGameOver = false;
     this._globalSection = null;
+    this._hiddenUiStates = null;
 
     this._btnNext.addEventListener('click', () => {
       eventBus.emit(Events.NEXT_HOLE);
@@ -49,7 +51,32 @@ export class ScoreboardUI {
   show(isGameOver = false) {
     if (!this._overlay) return;
     this._isGameOver = isGameOver;
-    this._title.textContent = isGameOver ? 'GAME OVER' : 'HOLE COMPLETE';
+    if (isGameOver) {
+      this._title.textContent = 'VOID RUN COMPLETE';
+      this._title.style.color = '#f7f4ff';
+      this._title.style.textShadow = '0 0 18px rgba(154, 126, 255, 0.2)';
+      if (this._subtitle) {
+        this._subtitle.textContent = 'FINAL STANDINGS';
+        this._subtitle.style.display = 'flex';
+        this._subtitle.style.color = 'rgba(191, 152, 255, 0.9)';
+        this._subtitle.style.textShadow = 'none';
+      }
+    } else {
+      this._title.textContent = 'HOLE COMPLETE';
+      this._title.style.color = '#f7f4ff';
+      this._title.style.textShadow = '0 0 18px rgba(154, 126, 255, 0.2)';
+      if (this._subtitle) {
+        const strokes = gameState.players[0]?.strokes?.[gameState.currentHole] ?? gameState.currentStrokes;
+        const bossFinale = this._isWorldEaterHole();
+        const result = bossFinale
+          ? { headline: 'WORLDEATER DEFEATED!', color: '#9df6ff', glow: '#54dfff' }
+          : getScoreResult(strokes);
+        this._subtitle.textContent = result.headline;
+        this._subtitle.style.display = 'flex';
+        this._subtitle.style.color = result.color;
+        this._subtitle.style.textShadow = `0 0 12px ${result.glow}aa`;
+      }
+    }
     this._btnNext.textContent = isGameOver ? 'PLAY AGAIN' : 'NEXT HOLE →';
     this._renderTable(isGameOver);
     if (isGameOver) {
@@ -57,6 +84,7 @@ export class ScoreboardUI {
     } else {
       this._clearGlobalSection();
     }
+    this._hideExternalUI();
     this._overlay.style.display = 'flex';
   }
 
@@ -65,6 +93,7 @@ export class ScoreboardUI {
     this._isGameOver = false;
     this._clearGlobalSection();
     this._overlay.style.display = 'none';
+    this._restoreExternalUI();
   }
 
   _renderGlobalSection(entries) {
@@ -140,8 +169,38 @@ export class ScoreboardUI {
     }
   }
 
+  _hideExternalUI() {
+    const ids = ['event-hud', 'settings-btn', 'settings-panel'];
+    this._hiddenUiStates = new Map();
+    for (const id of ids) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      this._hiddenUiStates.set(id, {
+        display: el.style.display,
+        visibility: el.style.visibility,
+      });
+      el.style.display = 'none';
+      el.style.visibility = 'hidden';
+    }
+  }
+
+  _restoreExternalUI() {
+    if (!this._hiddenUiStates) return;
+    for (const [id, state] of this._hiddenUiStates.entries()) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      el.style.display = state.display;
+      el.style.visibility = state.visibility;
+    }
+    this._hiddenUiStates = null;
+  }
+
+  _isWorldEaterHole() {
+    return gameState.isBossRoom || (gameState.totalHoles === 10 && gameState.currentHole === 9);
+  }
+
   _renderTable(isGameOver) {
-    const holeCount = HOLE.COUNT;
+    const holeCount = gameState.totalHoles;
     const player = gameState.players[0];
     const playerTotalStrokes = gameState.totalStrokes(player?.id);
     const playerTotalTime = gameState.totalTime(player?.id);
@@ -163,18 +222,22 @@ export class ScoreboardUI {
       const isCurrentPlayer = this.sessionId && entry.sessionId === this.sessionId;
       if (isCurrentPlayer) playerShown = true;
 
-      const rowStyle = isCurrentPlayer
-        ? 'background:rgba(100,180,255,0.12);border:1px solid rgba(100,180,255,0.3);'
-        : (i % 2 === 1 ? 'background:rgba(255,255,255,0.03);' : '');
+      const rowStyle = [
+        isCurrentPlayer
+          ? 'background:linear-gradient(90deg, rgba(23,36,88,0.92), rgba(9,17,54,0.92)); box-shadow:inset 0 0 0 1px rgba(59,194,255,0.72), 0 0 0 1px rgba(59,194,255,0.22);'
+          : 'background:rgba(13,8,28,0.72);',
+      ].join(' ');
+
+      const rankBadge = this._rankBadge(i + 1);
 
       bodyHTML += `<tr style="${rowStyle}">`;
-      bodyHTML += `<td style="color:rgba(160,210,255,0.7)">${i + 1}</td>`;
-      bodyHTML += `<td>${isCurrentPlayer ? entry.name + ' <span style="font-size:10px;opacity:0.7">(YOU)</span>' : entry.name}</td>`;
+      bodyHTML += `<td style="color:rgba(160,210,255,0.7)">${rankBadge}</td>`;
+      bodyHTML += `<td style="text-align:left;font-weight:700;letter-spacing:0.02em;">${this._playerCell(entry, isCurrentPlayer)}</td>`;
       for (let h = 0; h < holeCount; h++) {
-        bodyHTML += `<td>${entry.strokes?.[h] ?? '—'}</td>`;
+        bodyHTML += `<td style="${this._holeCellStyle(h, isCurrentPlayer)}">${entry.strokes?.[h] ?? '—'}</td>`;
       }
-      bodyHTML += `<td style="font-weight:bold">${entry.totalStrokes || '—'}</td>`;
-      bodyHTML += `<td style="color:rgba(160,210,255,0.8)">${leaderboardStore.formatTime(entry.totalTime)}</td>`;
+      bodyHTML += `<td style="font-weight:800;color:${isCurrentPlayer ? '#3bc2ff' : '#f7f4ff'}">${entry.totalStrokes || '—'}</td>`;
+      bodyHTML += `<td style="color:${isCurrentPlayer ? '#3bc2ff' : 'rgba(160,210,255,0.8)'}">${leaderboardStore.formatTime(entry.totalTime)}</td>`;
       bodyHTML += '</tr>';
     }
 
@@ -183,17 +246,44 @@ export class ScoreboardUI {
       const sorted = [...top10, { holesCompleted, totalStrokes: playerTotalStrokes, totalTime: playerTotalTime }].sort(sortEntries);
       const rank = sorted.findIndex(e => e.holesCompleted === holesCompleted && e.totalStrokes === playerTotalStrokes && e.totalTime === playerTotalTime) + 1;
 
-      bodyHTML += `<tr style="border-top:2px solid rgba(100,180,255,0.3);background:rgba(100,180,255,0.12);">`;
-      bodyHTML += `<td style="color:rgba(160,210,255,0.7)">${rank}</td>`;
-      bodyHTML += `<td style="color:rgba(100,200,255,0.95)">${player.name} <span style="font-size:10px;opacity:0.7">(YOU)</span></td>`;
+      bodyHTML += `<tr style="background:linear-gradient(90deg, rgba(23,36,88,0.92), rgba(9,17,54,0.92)); box-shadow:inset 0 0 0 1px rgba(59,194,255,0.72), 0 0 0 1px rgba(59,194,255,0.22);">`;
+      bodyHTML += `<td style="color:rgba(160,210,255,0.7)">${this._rankBadge(rank)}</td>`;
+      bodyHTML += `<td style="text-align:left;font-weight:700;letter-spacing:0.02em;color:#3bc2ff;">${this._playerCell(player, true)}</td>`;
       for (let h = 0; h < holeCount; h++) {
-        bodyHTML += `<td>${player.strokes[h] ?? '—'}</td>`;
+        bodyHTML += `<td style="${this._holeCellStyle(h, true)}">${player.strokes[h] ?? '—'}</td>`;
       }
-      bodyHTML += `<td style="font-weight:bold">${playerTotalStrokes || '—'}</td>`;
-      bodyHTML += `<td style="color:rgba(160,210,255,0.8)">${leaderboardStore.formatTime(playerTotalTime)}</td>`;
+      bodyHTML += `<td style="font-weight:800;color:#3bc2ff">${playerTotalStrokes || '—'}</td>`;
+      bodyHTML += `<td style="color:#3bc2ff">${leaderboardStore.formatTime(playerTotalTime)}</td>`;
       bodyHTML += '</tr>';
     }
 
     this._body.innerHTML = bodyHTML;
+  }
+
+  _holeCellStyle(holeIndex, isCurrentPlayer) {
+    const isCurrentHole = holeIndex === gameState.currentHole;
+    if (!isCurrentHole) return '';
+    return isCurrentPlayer
+      ? 'background:rgba(144, 74, 255, 0.26); box-shadow:inset 0 0 0 1px rgba(188, 126, 255, 0.55);'
+      : 'background:rgba(128, 74, 255, 0.16); box-shadow:inset 0 0 0 1px rgba(164, 102, 255, 0.35);';
+  }
+
+  _playerCell(entry, isCurrentPlayer) {
+    const color = isCurrentPlayer ? '#3bc2ff' : '#f7f4ff';
+    const marker = isCurrentPlayer ? '<span style="font-size:10px;opacity:0.72">(YOU)</span>' : '';
+    return `<span style="display:inline-flex;align-items:center;gap:10px;color:${color};">
+      <span style="width:18px;height:18px;border-radius:50%;display:inline-grid;place-items:center;background:radial-gradient(circle at 35% 35%, rgba(255,255,255,0.95), ${isCurrentPlayer ? 'rgba(136,71,255,0.95)' : 'rgba(70,38,150,0.92)'} 42%, rgba(18,10,48,0.98) 100%);box-shadow:0 0 10px ${isCurrentPlayer ? 'rgba(132,92,255,0.52)' : 'rgba(132,92,255,0.2)'};font-size:11px;">✦</span>
+      <span>${entry.name}${marker ? ' ' + marker : ''}</span>
+    </span>`;
+  }
+
+  _rankBadge(rank) {
+    const themes = {
+      1: { bg: 'linear-gradient(180deg, #ffdd71, #cc8a00)', glow: 'rgba(255,198,64,0.35)', fg: '#251200' },
+      2: { bg: 'linear-gradient(180deg, #dbe4ff, #6e7b9f)', glow: 'rgba(196,208,255,0.28)', fg: '#162033' },
+      3: { bg: 'linear-gradient(180deg, #ffb46a, #8b4d21)', glow: 'rgba(255,165,98,0.26)', fg: '#241108' },
+    };
+    const theme = themes[rank] ?? { bg: 'linear-gradient(180deg, #432c7a, #1f153d)', glow: 'rgba(122,76,255,0.18)', fg: '#b39cff' };
+    return `<span style="display:inline-grid;place-items:center;width:30px;height:30px;border-radius:50%;background:${theme.bg};color:${theme.fg};font-family:Orbitron,sans-serif;font-weight:800;font-size:13px;box-shadow:0 0 0 1px rgba(255,255,255,0.06), 0 0 12px ${theme.glow};">${rank}</span>`;
   }
 }

@@ -136,7 +136,7 @@ export function stepBall(ball, planets, dt, gravityScale = 1.0, orbitPlanet = nu
  * @param {number} dt
  * @param {number} gravityScale
  * @param {{ position: Vector3, radius: number }|null} orbitPlanet
- * @param {{ blackHole?: { position: Vector3, pullRadius: number, gravity: number, cupRadius: number }, zeroGravity?: boolean, graceFrames?: number, hitFreezeFrames?: number, tee?: Vector3, cup?: Vector3, wormholes?: Vector3[] }|null} options
+ * @param {{ blackHole?: { position: Vector3, pullRadius: number, gravity: number, cupRadius: number }, zeroGravity?: boolean, graceFrames?: number, hitFreezeFrames?: number, tee?: Vector3, cup?: Vector3, wormholes?: Vector3[], bossPreview?: { predictTrajectoryStop: Function } }|null} options
  * @returns {{ points: Vector3[], danger: number[] }} danger: 0=safe, 1=near void, 2=in void/OOB
  */
 export function simulateTrajectory(startPos, startVel, planets, allPlanets, steps, dt, gravityScale = 1.0, orbitPlanet = null, options = null) {
@@ -147,11 +147,35 @@ export function simulateTrajectory(startPos, startVel, planets, allPlanets, step
   const vel = startVel.clone();
   const ball = { position: pos, velocity: vel };
 
+  const planetMotion = options?.planetMotion ?? null;
+  const startTimeMs  = options?.startTimeMs ?? Date.now();
+
+  let simPlanets = planets;
+  let simAllPlanets = allPlanets;
+  let simOrbitPlanet = orbitPlanet;
+
+  if (planetMotion?.samplePositions) {
+    const cloneMap = new Map();
+    const clonePlanet = (planet) => {
+      if (!planet) return planet;
+      let clone = cloneMap.get(planet);
+      if (!clone) {
+        clone = { ...planet, position: planet.position.clone() };
+        cloneMap.set(planet, clone);
+      }
+      return clone;
+    };
+    simPlanets = planets.map(clonePlanet);
+    simAllPlanets = allPlanets.map(clonePlanet);
+    simOrbitPlanet = orbitPlanet ? clonePlanet(orbitPlanet) : null;
+  }
+
   const blackHole   = options?.blackHole ?? null;
   const zeroGravity = options?.zeroGravity ?? false;
   const tee         = options?.tee ?? null;
   const cup         = options?.cup ?? null;
   const wormholes   = options?.wormholes ?? null;
+  const bossPreview = options?.bossPreview ?? null;
 
   let graceFrames = options?.graceFrames ?? PHYSICS.LAUNCH_GRACE_FRAMES;
   let hitFreezeFrames = options?.hitFreezeFrames ?? 0; // 4 frames for actual shots
@@ -165,6 +189,10 @@ export function simulateTrajectory(startPos, startVel, planets, allPlanets, step
   const bounceGraceTotal = 90; // 90 simulation steps post-bounce before slow-drift OOB kicks in
 
   for (let i = 0; i < steps; i++) {
+    if (planetMotion?.samplePositions) {
+      planetMotion.samplePositions(startTimeMs + i * dt * 1000, simAllPlanets);
+    }
+
     points.push(ball.position.clone());
 
     // Hit-freeze: ball stays at starting position, physics doesn't run
@@ -180,12 +208,12 @@ export function simulateTrajectory(startPos, startVel, planets, allPlanets, step
     }
 
     // 1. stepBall — gravity, velocity integration, planet collision response
-    const result = stepBall(ball, planets, dt, gs, orbitPlanet);
+    const result = stepBall(ball, simPlanets, dt, gs, simOrbitPlanet);
 
     // 2. Zero-gravity sticky (server zero-g only — checks ALL planets, not orbit-filtered)
     if (zeroGravity) {
       let stuck = false;
-      for (const planet of allPlanets) {
+      for (const planet of simAllPlanets) {
         const dist = ball.position.distanceTo(planet.position);
         if (dist < planet.radius + BALL.RADIUS + 0.5) {
           _stickNormal.subVectors(ball.position, planet.position).normalize();
@@ -213,8 +241,8 @@ export function simulateTrajectory(startPos, startVel, planets, allPlanets, step
         if (!orbitPlanet) {
           // Find the planet index in allPlanets
           let foundIdx = -1;
-          for (let j = 0; j < allPlanets.length; j++) {
-            if (allPlanets[j] === result.bouncePlanet) { foundIdx = j; break; }
+          for (let j = 0; j < simAllPlanets.length; j++) {
+            if (simAllPlanets[j] === result.bouncePlanet) { foundIdx = j; break; }
           }
           if (foundIdx >= 0) {
             if (foundIdx === bouncePlanetIdx) {
@@ -274,6 +302,16 @@ export function simulateTrajectory(startPos, startVel, planets, allPlanets, step
       }
     }
 
+    if (bossPreview?.predictTrajectoryStop) {
+      const bossStop = bossPreview.predictTrajectoryStop(ball.position, ball.velocity);
+      if (bossStop) {
+        points.push((bossStop.position ?? ball.position).clone());
+        danger.push(0);
+        stopReason = bossStop.stopReason ?? 'boss_block';
+        return { points, danger, stopReason };
+      }
+    }
+
     // 5. Cup check (distance only — matches checkBallHoled, no speed threshold)
     if (blackHole) {
       const cupDist = ball.position.distanceTo(blackHole.position);
@@ -287,7 +325,7 @@ export function simulateTrajectory(startPos, startVel, planets, allPlanets, step
 
     // 6. Settle detection — at-rest on a planet surface (mirrors HoleScene nearSurface + atRest)
     const ballSpeed = ball.velocity.length();
-    const nearSurface = allPlanets.some(p =>
+    const nearSurface = simAllPlanets.some(p =>
       ball.position.distanceTo(p.position) < p.radius + BALL.RADIUS * 3
     );
     if (nearSurface && ballSpeed < 12) {
@@ -308,7 +346,7 @@ export function simulateTrajectory(startPos, startVel, planets, allPlanets, step
 
     // 7. Void detection — mirrors HoleScene exactly
     let nearestSafe = Infinity;
-    for (const p of allPlanets) {
+    for (const p of simAllPlanets) {
       const d = ball.position.distanceTo(p.position) - p.radius;
       if (d < nearestSafe) nearestSafe = d;
     }

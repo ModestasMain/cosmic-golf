@@ -42,8 +42,12 @@ class GameState {
     return this.players[this.currentPlayerIndex] || null;
   }
 
+  get isBossRoom() {
+    return (this.roomCode || '').toUpperCase() === 'BOSS';
+  }
+
   get totalHoles() {
-    return HOLE.COUNT;
+    return this.isBossRoom ? 1 : HOLE.COUNT;
   }
 
   addPlayer(id, name, color) {
@@ -78,7 +82,7 @@ class GameState {
     this.holeComplete = false;
     this.ballInFlight = false;
     this.aimState = 'IDLE';
-    if (this.currentHole >= HOLE.COUNT) {
+    if (this.currentHole >= this.totalHoles) {
       this.gameComplete = true;
     }
   }

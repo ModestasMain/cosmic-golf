@@ -48,11 +48,34 @@ export class MultiplayerManager {
     this._connectPublicSlot(playerName, color, 1);
   }
 
+  createPrivateRoom(playerName = 'PLAYER', playerColor, preferredCode = null) {
+    const code = this._sanitizeRoomCode(preferredCode) || this._generateRoomCode();
+    this.joinRoom(code, playerName, playerColor);
+    return code;
+  }
+
+  joinRoom(roomCode, playerName = 'PLAYER', playerColor) {
+    const code = this._sanitizeRoomCode(roomCode);
+    if (!code) {
+      this._enterSoloMode();
+      return null;
+    }
+
+    this.playerId = `room_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    this.localColor = this._colorFromId(this.playerId);
+    const color = (playerColor != null && playerColor !== 0xffffff)
+      ? playerColor
+      : this.localColor;
+    this.localColor = color;
+    this._setRoomCode(code);
+    this._connectWithFallback(playerName, color, () => this._enterSoloMode());
+    return code;
+  }
+
   /** Try PUBLIC, PUBLIC_2, PUBLIC_3 … up to MAX_PUBLIC_SLOTS before going solo. */
   _connectPublicSlot(playerName, playerColor, slot) {
     const code = slot === 1 ? MULTIPLAYER.PUBLIC_ROOM : `${MULTIPLAYER.PUBLIC_ROOM}_${slot}`;
-    this.roomCode = code;
-    gameState.roomCode = code;
+    this._setRoomCode(code);
     this._connectWithFallback(playerName, playerColor, () => {
       if (slot < MULTIPLAYER.MAX_PUBLIC_SLOTS) {
         this._connectPublicSlot(playerName, playerColor, slot + 1);
@@ -69,6 +92,26 @@ export class MultiplayerManager {
     // Skip slot 0 (white = host), pick from slots 1-7
     const idx = (Math.abs(h) % (MULTIPLAYER.PLAYER_COLORS.length - 1)) + 1;
     return MULTIPLAYER.PLAYER_COLORS[idx];
+  }
+
+  _setRoomCode(code) {
+    this.roomCode = code;
+    gameState.roomCode = code;
+    eventBus.emit(Events.MP_ROOM_CREATED, { code });
+  }
+
+  _sanitizeRoomCode(code) {
+    if (typeof code !== 'string') return '';
+    return code.toUpperCase().replace(/[^A-Z0-9_]/g, '').slice(0, 12);
+  }
+
+  _generateRoomCode() {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let code = '';
+    for (let i = 0; i < 5; i++) {
+      code += alphabet[Math.floor(Math.random() * alphabet.length)];
+    }
+    return code;
   }
 
   /**

@@ -42,6 +42,13 @@ const EMISSION_COUNT  = 10;   // glowing cloud nebulae
 const PILLAR_COUNT    = 6;   // elongated gas filaments
 const GALAXY_COUNT    = 7;   // distant elliptical smudges
 const ARM_STARS       = 1200; // milky-way arm star dust
+const ARM_RADIUS      = 2450;
+const GALAXY_MIN_DIST = 2550;
+const GALAXY_DIST_VAR = 1050;
+const EMISSION_MIN_DIST = 1850;
+const EMISSION_DIST_VAR = 1150;
+const PILLAR_MIN_DIST   = 2000;
+const PILLAR_DIST_VAR   = 950;
 
 export class NebulaField {
   constructor(scene) {
@@ -74,7 +81,7 @@ export class NebulaField {
     const count    = ARM_STARS;
     const pos      = new Float32Array(count * 3);
     const clr      = new Float32Array(count * 3);
-    const arcR     = 1750;
+    const arcR     = ARM_RADIUS;
     const arcStart = sr(seed) * Math.PI * 2;
     const arcLen   = Math.PI * 1.35; // ~240° sweep
 
@@ -105,7 +112,7 @@ export class NebulaField {
     for (let n = 0; n < GALAXY_COUNT; n++) {
       const seed   = n * 71 + 5000;
       const angle  = (n / GALAXY_COUNT) * Math.PI * 2 + sr(seed) * 0.9;
-      const dist   = 1700 + sr(seed + 1) * 900;
+      const dist   = GALAXY_MIN_DIST + sr(seed + 1) * GALAXY_DIST_VAR;
       const cx     = Math.cos(angle) * dist;
       const cy     = (sr(seed + 2) - 0.5) * 750;
       const cz     = Math.sin(angle) * dist;
@@ -149,7 +156,7 @@ export class NebulaField {
     for (let n = 0; n < EMISSION_COUNT; n++) {
       const seed   = n * 37 + 1000;
       const angle  = (n / EMISSION_COUNT) * Math.PI * 2 + n * 0.44;
-      const dist   = 900 + sr(seed + 10) * 700;
+      const dist   = EMISSION_MIN_DIST + sr(seed + 10) * EMISSION_DIST_VAR;
       const cx     = Math.cos(angle) * dist;
       const cy     = (sr(seed + 11) - 0.5) * 580;
       const cz     = Math.sin(angle) * dist;
@@ -196,7 +203,7 @@ export class NebulaField {
     for (let n = 0; n < PILLAR_COUNT; n++) {
       const seed       = n * 53 + 3000;
       const angle      = sr(seed) * Math.PI * 2;
-      const dist       = 900 + sr(seed + 1) * 650;
+      const dist       = PILLAR_MIN_DIST + sr(seed + 1) * PILLAR_DIST_VAR;
       const cx         = Math.cos(angle) * dist;
       const cy         = (sr(seed + 2) - 0.5) * 500;
       const cz         = Math.sin(angle) * dist;

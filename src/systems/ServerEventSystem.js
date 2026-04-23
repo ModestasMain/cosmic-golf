@@ -32,6 +32,7 @@ export class ServerEventSystem {
    */
   constructor(scene) {
     this._scene        = scene;
+    this._enabled      = true;
     this._lastCycleIdx = -1;
     this._activeType   = null;
     this._activeT      = 0;
@@ -58,9 +59,23 @@ export class ServerEventSystem {
 
   get isStatic() { return !this.planetsMoving; }
 
+  setEnabled(enabled) {
+    if (this._enabled === enabled) return;
+    this._enabled = enabled;
+    if (!enabled) {
+      this._warningShown = false;
+      if (this._activeType) this._endEvent();
+      this.gravityScale = 1.0;
+      this._mapFlipTarget = 0;
+      this.mapFlipProgress = 0;
+      this.planetsMoving = false;
+    }
+  }
+
   // ── Update ────────────────────────────────
 
   update(dt) {
+    if (!this._enabled) return;
     const now       = Date.now();
     const cycleMs   = SERVER_EVENTS.CYCLE_MS;
     const eventMs   = SERVER_EVENTS.EVENT_DURATION_MS;

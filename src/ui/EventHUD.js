@@ -31,6 +31,11 @@ export class EventHUD {
     this._currentType  = null;
     this._rafId        = null;
     this._firstEvent   = true;   // show initial event without spinning
+    this._bossMode     = false;
+    this._bossTotal    = 4;
+    this._bossBroken   = 0;
+    this._bossAwakened = false;
+    this._bossResetRemaining = 0;
 
     this._el = this._build();
     document.body.appendChild(this._el);
@@ -45,72 +50,155 @@ export class EventHUD {
     root.id = 'event-hud';
     Object.assign(root.style, {
       position:      'fixed',
-      top:           'max(10px, env(safe-area-inset-top, 0px))',
+      top:           'max(24px, calc(env(safe-area-inset-top, 0px) + 10px))',
       left:          '50%',
       transform:     'translateX(-50%)',
       zIndex:        '450',
       pointerEvents: 'none',
       userSelect:    'none',
-      textAlign:     'center',
-      fontFamily:    '"Courier New", monospace',
+      width:         'auto',
+      maxWidth:      'min(420px, calc(100vw - 64px))',
+      padding:       '10px 14px 10px',
+      borderRadius:  '18px',
+      border:        '1px solid rgba(124, 92, 255, 0.32)',
+      background:    'linear-gradient(180deg, rgba(10, 8, 24, 0.78), rgba(7, 5, 18, 0.74))',
+      boxShadow:     '0 14px 40px rgba(3, 2, 10, 0.32)',
+      backdropFilter:'blur(10px)',
+      WebkitBackdropFilter:'blur(10px)',
+      fontFamily:    '"Inter Tight", sans-serif',
+      display:       'flex',
+      alignItems:    'center',
+      justifyContent:'center',
     });
 
-    // "CURRENT EVENT" micro-label
+    this._dialEl = document.createElement('div');
+    this._dialEl.style.display = 'none';
+
+    const content = document.createElement('div');
+    Object.assign(content.style, {
+      minWidth: '0',
+      width: '100%',
+      flex: '0 1 auto',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+    });
+
     this._labelEl = document.createElement('div');
     Object.assign(this._labelEl.style, {
-      fontSize:      'clamp(7px, 1.8vw, 9px)',
-      letterSpacing: '2px',
-      color:         'rgba(140,170,255,0.55)',
-      marginBottom:  '2px',
+      fontFamily:    '"Orbitron", sans-serif',
+      fontSize:      '9px',
+      letterSpacing: '0.24em',
+      color:         'rgba(173, 118, 255, 0.94)',
+      marginBottom:  '4px',
+      textTransform: 'uppercase',
     });
     this._labelEl.textContent = 'CURRENT EVENT';
 
-    // Clip window — slot reel lives inside here
     const clip = document.createElement('div');
     Object.assign(clip.style, {
       overflow: 'hidden',
-      height:   '2em',
+      width: '100%',
+      minHeight:'18px',
+      textAlign: 'center',
     });
 
-    // The reel — we translateY it to create the scroll illusion
     this._reelEl = document.createElement('div');
     Object.assign(this._reelEl.style, {
-      lineHeight:    '2em',
-      fontSize:      'clamp(10px, 2.8vw, 22px)',
-      fontWeight:    '900',
-      letterSpacing: '0.1em',
-      color:         'rgba(140,180,255,0.4)',
-      textShadow:    'none',
+      lineHeight:    '1.4',
+      fontFamily:    '"Orbitron", sans-serif',
+      fontSize:      'clamp(11px, 1.4vw, 14px)',
+      fontWeight:    '800',
+      letterSpacing: '0.14em',
+      color:         'rgba(244, 241, 255, 0.95)',
       willChange:    'transform',
       transition:    'none',
+      textTransform: 'uppercase',
+      whiteSpace:    'nowrap',
     });
     this._reelEl.textContent = '—';
 
     clip.appendChild(this._reelEl);
 
-    // "NEXT IN  Xs" timer line
     this._timerEl = document.createElement('div');
     Object.assign(this._timerEl.style, {
-      fontSize:      'clamp(7px, 1.8vw, 9px)',
-      letterSpacing: '1.5px',
-      color:         'rgba(140,170,255,0.45)',
-      marginTop:     '2px',
+      fontFamily:    '"JetBrains Mono", monospace',
+      fontSize:      '10px',
+      letterSpacing: '0.14em',
+      color:         'rgba(191, 181, 233, 0.82)',
+      marginTop:     '4px',
+      textTransform: 'uppercase',
     });
     this._timerEl.textContent = 'NEXT IN  —';
 
-    root.appendChild(this._labelEl);
-    root.appendChild(clip);
-    root.appendChild(this._timerEl);
+    this._slotsEl = document.createElement('div');
+    this._slotsEl.style.display = 'none';
+    this._slotEls = [];
+    for (let i = 0; i < 4; i++) {
+      const slot = document.createElement('div');
+      Object.assign(slot.style, {
+        width: '54px',
+        height: '22px',
+        borderRadius: '7px',
+        border: '1px solid rgba(128, 92, 255, 0.48)',
+        background: 'rgba(16, 11, 31, 0.96)',
+        boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.02)',
+      });
+      this._slotsEl.appendChild(slot);
+      this._slotEls.push(slot);
+    }
+
+    content.appendChild(this._labelEl);
+    content.appendChild(clip);
+    content.appendChild(this._timerEl);
+    content.appendChild(this._slotsEl);
+
+    root.appendChild(content);
     return root;
   }
 
   // ── Listeners ─────────────────────────────────────────────
 
   _setupListeners() {
+    eventBus.on(Events.HOLE_LOADED, ({ bossKind }) => {
+      this._bossMode = bossKind === 'WORLDEATER';
+      this._bossTotal = 4;
+      this._bossBroken = 0;
+      this._bossAwakened = false;
+      this._bossResetRemaining = 0;
+      this._syncBossDisplay();
+    });
+
     eventBus.on(Events.SERVER_EVENT, ({ type, phase }) => {
+      if (this._bossMode) return;
       if (phase === 'start') {
         this._triggerSlotMachine(type);
       }
+    });
+
+    eventBus.on(Events.WORLDEATER_WEAKSPOT_HIT, ({ total, remaining }) => {
+      this._bossTotal = total;
+      this._bossBroken = total - remaining;
+      this._syncBossDisplay();
+    });
+
+    eventBus.on(Events.WORLDEATER_OPENED, () => {
+      this._bossAwakened = true;
+      this._bossBroken = this._bossTotal;
+      this._syncBossDisplay();
+    });
+
+    eventBus.on(Events.WORLDEATER_RESET_TIMER, ({ remaining }) => {
+      this._bossResetRemaining = remaining;
+      if (this._bossMode && this._bossAwakened) this._syncBossDisplay();
+    });
+
+    eventBus.on(Events.WORLDEATER_RESET, ({ total, remaining }) => {
+      this._bossTotal = total;
+      this._bossBroken = total - remaining;
+      this._bossAwakened = false;
+      this._bossResetRemaining = 0;
+      this._syncBossDisplay();
     });
   }
 
@@ -118,6 +206,14 @@ export class EventHUD {
 
   _startTick() {
     const tick = () => {
+      if (this._bossMode) {
+        this._timerEl.textContent = this._bossAwakened
+          ? `RESEALS IN ${Math.ceil(this._bossResetRemaining)}s`
+          : `${this._bossBroken}/${this._bossTotal} WEAK SPOTS`;
+        this._rafId = requestAnimationFrame(tick);
+        return;
+      }
+
       if (!this._spinning) {
         const cycleMs = SERVER_EVENTS.CYCLE_MS;
         const eventMs = SERVER_EVENTS.EVENT_DURATION_MS;
@@ -128,7 +224,7 @@ export class EventHUD {
           // During event: show time until event ends
           const msLeft = eventMs - posInCycle;
           const secLeft = Math.ceil(msLeft / 1000);
-          this._timerEl.textContent = `ENDS IN  ${secLeft}s`;
+      this._timerEl.textContent = `ENDS IN  ${secLeft}s`;
         } else {
           // During default phase: show time until next event starts
           const msToNext = cycleMs - posInCycle;
@@ -144,6 +240,7 @@ export class EventHUD {
   // ── Slot-machine animation ────────────────────────────────
 
   _triggerSlotMachine(targetType) {
+    if (this._bossMode) return;
     if (this._spinning) return;
 
     // First event on page load: display immediately, no spin
@@ -216,6 +313,34 @@ export class EventHUD {
         setTimeout(onDone, isFinal ? 90 : 55);
       }));
     }, 55);
+  }
+
+  _syncBossDisplay() {
+    if (!this._bossMode) {
+      this._labelEl.textContent = 'CURRENT EVENT';
+      this._reelEl.style.fontSize = 'clamp(11px, 1.4vw, 14px)';
+      this._reelEl.style.letterSpacing = '0.14em';
+      return;
+    }
+
+    const mobile = window.matchMedia('(max-width: 640px)').matches;
+    this._spinning = false;
+    this._labelEl.textContent = this._bossAwakened ? 'BOSS PHASE' : 'BOSS OBJECTIVE';
+    if (this._bossAwakened) {
+      this._reelEl.textContent = 'WORLD EATER AWAKENED';
+      this._reelEl.style.color = '#9df6ff';
+      this._reelEl.style.fontSize = mobile ? '9px' : 'clamp(10px, 1.18vw, 13px)';
+      this._reelEl.style.letterSpacing = mobile ? '0.06em' : '0.11em';
+      this._reelEl.style.textShadow = 'none';
+      this._timerEl.textContent = `RESEALS IN ${Math.ceil(this._bossResetRemaining)}s`;
+    } else {
+      this._reelEl.textContent = 'BREAK GLOWING SEGMENTS';
+      this._reelEl.style.color = '#ffd67d';
+      this._reelEl.style.fontSize = mobile ? '8px' : 'clamp(10px, 1.12vw, 13px)';
+      this._reelEl.style.letterSpacing = mobile ? '0.03em' : '0.08em';
+      this._reelEl.style.textShadow = 'none';
+      this._timerEl.textContent = `${this._bossBroken}/${this._bossTotal} WEAK SPOTS`;
+    }
   }
 
   destroy() {

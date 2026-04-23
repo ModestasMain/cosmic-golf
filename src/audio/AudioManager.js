@@ -452,6 +452,39 @@ const sfx = {
     // Sub rumble for drama
     oneShot({ freq: 65, freqEnd: 55, type: 'sine', volume: 0.30, attack: 0.05, decay: 1.50, delay: 0.55 });
   },
+
+  worldEaterRoar() {
+    oneShot({ freq: 54, freqEnd: 22, type: 'sawtooth', volume: 0.42, attack: 0.03, decay: 0.9,
+      filterType: 'lowpass', filterFreq: 180, filterQ: 0.8 });
+    oneShot({ freq: 110, freqEnd: 44, type: 'triangle', volume: 0.22, attack: 0.02, decay: 0.55, delay: 0.04 });
+    noiseBurst({ duration: 0.22, volume: 0.14, cutoff: 900, delay: 0.03 });
+  },
+
+  worldEaterWeakspot() {
+    oneShot({ freq: 320, freqEnd: 120, type: 'square', volume: 0.2, attack: 0.003, decay: 0.16,
+      filterType: 'bandpass', filterFreq: 620, filterQ: 2 });
+    oneShot({ freq: 960, freqEnd: 420, type: 'triangle', volume: 0.1, attack: 0.002, decay: 0.22, delay: 0.01 });
+    noiseBurst({ duration: 0.04, volume: 0.08, cutoff: 3200 });
+  },
+
+  worldEaterOpened() {
+    oneShot({ freq: 82, freqEnd: 28, type: 'sawtooth', volume: 0.34, attack: 0.01, decay: 0.65,
+      filterType: 'lowpass', filterFreq: 240, filterQ: 0.9 });
+    oneShot({ freq: 260, freqEnd: 880, type: 'triangle', volume: 0.18, attack: 0.02, decay: 0.45, delay: 0.04 });
+    noiseBurst({ duration: 0.12, volume: 0.1, cutoff: 1800, delay: 0.03 });
+  },
+
+  worldEaterChomp() {
+    oneShot({ freq: 180, freqEnd: 58, type: 'square', volume: 0.22, attack: 0.002, decay: 0.18 });
+    noiseBurst({ duration: 0.08, volume: 0.16, cutoff: 1400 });
+    oneShot({ freq: 70, freqEnd: 38, type: 'sine', volume: 0.22, attack: 0.003, decay: 0.24, delay: 0.02 });
+  },
+
+  worldEaterBoost() {
+    oneShot({ freq: 260, freqEnd: 1200, type: 'triangle', volume: 0.22, attack: 0.01, decay: 0.28 });
+    oneShot({ freq: 820, freqEnd: 2100, type: 'sine', volume: 0.08, attack: 0.006, decay: 0.24, delay: 0.03 });
+    noiseBurst({ duration: 0.05, volume: 0.07, cutoff: 2800 });
+  },
 };
 
 // ── Power charge drone ────────────────────────────────────
@@ -877,6 +910,11 @@ export class AudioManager {
     eventBus.on(Events.BALL_HOLED,  silencePwrDrone);
 
     eventBus.on(Events.GAME_COMPLETE, () => sfx.gameComplete());
+    eventBus.on(Events.WORLDEATER_WARNING, () => sfx.worldEaterRoar());
+    eventBus.on(Events.WORLDEATER_WEAKSPOT_HIT, () => sfx.worldEaterWeakspot());
+    eventBus.on(Events.WORLDEATER_OPENED, () => sfx.worldEaterOpened());
+    eventBus.on(Events.WORLDEATER_CHOMP, () => sfx.worldEaterChomp());
+    eventBus.on(Events.WORLDEATER_BOOST, () => sfx.worldEaterBoost());
 
     // Black hole proximity drone — updated each flight frame
     eventBus.on(Events.BLACK_HOLE_PROXIMITY, ({ proximity }) => {

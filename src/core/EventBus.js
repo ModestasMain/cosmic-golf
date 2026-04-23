@@ -126,4 +126,22 @@ export const Events = {
   // Orbital Capture
   ORBIT_ENTER:         'orbit:enter',
   ORBIT_TOGGLE:        'orbit:toggle',
+
+  // Finale boss hole
+  WORLDEATER_WARNING:      'worldeater:warning',
+  WORLDEATER_WEAKSPOT_HIT: 'worldeater:weakspot_hit',
+  WORLDEATER_OPENED:       'worldeater:opened',
+  WORLDEATER_RESET_TIMER:  'worldeater:reset_timer',
+  WORLDEATER_RESET:        'worldeater:reset',
+  WORLDEATER_CHOMP:        'worldeater:chomp',
+  WORLDEATER_BOOST:        'worldeater:boost',
+  WORLDEATER_DEFEATED:     'worldeater:defeated',
+
+  // Dev tools
+  DEV_FREEZE_ALL:          'dev:freeze_all',
+
+  // Free camera
+  FREECAM_TOGGLE:          'freecam:toggle',
+  FREECAM_MOVE:            'freecam:move',    // { x, y, z, boost }
+  FREECAM_DRAG:            'freecam:drag',    // { dx, dy, mode, pointerType }
 };

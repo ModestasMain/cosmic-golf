@@ -5,22 +5,25 @@
 
 import { eventBus, Events } from '../core/EventBus.js';
 
-const PAR = 4; // mini-golf par per hole
-
 const STYLES = {
-  'HOLE IN ONE!':   { color: '#ffd700', size: '7vw' },
-  'EAGLE!':         { color: '#ffd700', size: '6vw' },
-  'BIRDIE!':        { color: '#00ffcc', size: '5.5vw' },
-  'PAR':            { color: '#aaddff', size: '4.5vw' },
-  'BOGEY':          { color: '#ff9944', size: '4vw' },
-  'DOUBLE BOGEY':   { color: '#ff5522', size: '4vw' },
-  'DISASTER!':      { color: '#ff2244', size: '5vw' },
   'GRAVITY WAVE!':  { color: '#44aaff', size: '5.5vw' },
   'ASTEROID STORM!':{ color: '#ff8800', size: '5.5vw' },
   'SOLAR FLARE!':   { color: '#ffee44', size: '5.5vw' },
   'NICE SHOT!':     { color: '#ffffff', size: '4.5vw' },
   'RICOCHET!':      { color: '#ff44ff', size: '4.5vw' },
   'OWN GOAL?!':     { color: '#ff4444', size: '5vw' },
+  'WORLD EATER AWAKENS': {
+    color: '#ff5bd2',
+    size: '5.8vw',
+    fontFamily: 'Georgia, serif',
+    letterSpacing: '0.08em',
+    shadow: '0 4px 0 rgba(48, 6, 39, 0.95), 0 10px 28px rgba(25, 4, 20, 0.9), 0 0 22px rgba(255, 91, 210, 0.45)',
+    stroke: '1px rgba(63, 10, 52, 0.95)',
+  },
+  'WEAK POINT HIT!': { color: '#ffd67d', size: '5vw' },
+  'CORE EXPOSED!':  { color: '#9df6ff', size: '5.4vw' },
+  'CHOMP!':         { color: '#ff7a3c', size: '5.5vw' },
+  'PERFECT FEED!':  { color: '#ffe26a', size: '5.4vw' },
 };
 
 export class AnnouncerUI {
@@ -74,6 +77,10 @@ export class AnnouncerUI {
     this._el.textContent  = text;
     this._el.style.color  = style.color ?? color;
     this._el.style.fontSize = style.size ?? '5vw';
+    this._el.style.fontFamily = style.fontFamily ?? '"Courier New", monospace';
+    this._el.style.letterSpacing = style.letterSpacing ?? '0.1em';
+    this._el.style.textShadow = style.shadow ?? '0 0 20px currentColor, 0 0 50px currentColor';
+    this._el.style.webkitTextStroke = style.stroke ?? '0px transparent';
 
     // Reset before animating
     this._el.style.transition = 'none';
@@ -99,23 +106,32 @@ export class AnnouncerUI {
   }
 
   _setupListeners() {
-    eventBus.on(Events.BALL_HOLED, ({ strokes }) => {
-      const msg = this._scoreMessage(strokes);
-      if (msg) this.show(msg);
-    });
-
     eventBus.on(Events.COLLECTIBLE_COLLECTED, ({ label, color, remote }) => {
       if (!remote && label) this.show(label, color ?? '#ffffff', 1500);
     });
-  }
 
-  _scoreMessage(strokes) {
-    if (strokes === 1)           return 'HOLE IN ONE!';
-    if (strokes <= PAR - 2)      return 'EAGLE!';
-    if (strokes === PAR - 1)     return 'BIRDIE!';
-    if (strokes === PAR)         return 'PAR';
-    if (strokes === PAR + 1)     return 'BOGEY';
-    if (strokes === PAR + 2)     return 'DOUBLE BOGEY';
-    return 'DISASTER!';
+    eventBus.on(Events.WORLDEATER_WARNING, () => {
+      this.show('WORLD EATER AWAKENS', '#ff5bd2', 2400);
+    });
+
+    eventBus.on(Events.WORLDEATER_WEAKSPOT_HIT, ({ remaining }) => {
+      if (remaining > 0) this.show('WEAK POINT HIT!', '#ffd67d', 1400);
+    });
+
+    eventBus.on(Events.WORLDEATER_OPENED, () => {
+      this.show('CORE EXPOSED!', '#9df6ff', 2200);
+    });
+
+    eventBus.on(Events.WORLDEATER_RESET, () => {
+      this.show('WORLD EATER RESEALED', '#ffd67d', 2200);
+    });
+
+    eventBus.on(Events.WORLDEATER_CHOMP, () => {
+      this.show('CHOMP!', '#ff7a3c', 1400);
+    });
+
+    eventBus.on(Events.WORLDEATER_BOOST, () => {
+      this.show('PERFECT FEED!', '#ffe26a', 1600);
+    });
   }
 }

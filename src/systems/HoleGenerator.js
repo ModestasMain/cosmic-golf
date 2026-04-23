@@ -856,6 +856,7 @@ export const ARCHETYPE_LABELS = {
   CROSSROADS:    'CROSSROADS',
   HELIX:         'DNA HELIX',
   SCATTER:       'COSMIC SCATTER',
+  'WORLD EATER': 'WORLD EATER',
 };
 
 // ── Wormhole placement ─────────────────────────────────────────
@@ -895,6 +896,68 @@ function placeWormholes(rng, tee, cup, planets) {
   return [fallback];
 }
 
+function makeBossPlanet(position, radius, color, seed) {
+  return {
+    position: position.clone(),
+    radius,
+    mass: Math.pow(radius, 3) * PLANET.MASS_FACTOR,
+    color,
+    seed,
+  };
+}
+
+function genBOSS_WORLDEATER() {
+  const palette = COLOR_PALETTES[COLOR_PALETTES.length - 1];
+  const center = new Vector3(0, 0, 0);
+  const tee = new Vector3(-1450, 140, -180);
+  const cup = center.clone();
+  const planets = [];
+
+  const ringPlanets = [
+    { angle: -0.15, radius: 78, dist: 760, y: 36, color: palette.planets[0] },
+    { angle: 0.68,  radius: 58, dist: 560, y: 102, color: palette.planets[1] },
+    { angle: 1.32,  radius: 82, dist: 790, y: -54, color: palette.planets[2] },
+    { angle: 2.08,  radius: 64, dist: 540, y: 82, color: palette.planets[3] },
+    { angle: 2.82,  radius: 92, dist: 760, y: -36, color: palette.planets[4] },
+    { angle: 3.52,  radius: 60, dist: 515, y: 118, color: palette.planets[1] },
+    { angle: 4.18,  radius: 74, dist: 700, y: -100, color: palette.planets[2] },
+    { angle: 5.18,  radius: 66, dist: 585, y: 78, color: palette.planets[3] },
+  ];
+
+  ringPlanets.forEach((def, idx) => {
+    const pos = new Vector3(
+      Math.cos(def.angle) * def.dist,
+      def.y,
+      Math.sin(def.angle) * def.dist,
+    );
+    planets.push(makeBossPlanet(pos, def.radius, def.color, 9000 + idx));
+  });
+
+  planets.push(makeBossPlanet(new Vector3(-980, 72, -260), 108, palette.planets[0], 9100));
+  planets.push(makeBossPlanet(new Vector3(-320, -120, 500), 88, palette.planets[4], 9101));
+  planets.push(makeBossPlanet(new Vector3(260, 148, -620), 72, palette.planets[2], 9102));
+
+  // Keep the handcrafted boss tableau readable without merged gravity wells.
+  deoverlapPlanets(planets, 40);
+  finalizeCup(cup, planets);
+
+  return {
+    planets,
+    tee,
+    cup,
+    wormholes: [],
+    palette,
+    holeIndex: HOLE.COUNT - 1,
+    archetype: 'WORLD EATER',
+    boss: {
+      kind: 'WORLDEATER',
+      center,
+      spitTarget: new Vector3(-190, 40, 130),
+      introWormholePos: new Vector3(980, 240, -920),
+    },
+  };
+}
+
 // ── Main export ────────────────────────────────────────────────
 /**
  * Generate a hole deterministically.
@@ -905,6 +968,17 @@ function placeWormholes(rng, tee, cup, planets) {
  *   in sync.  Solo mode passes a random sessionSeed so each run is unique.
  */
 export function generateHole(holeIndex, roomCode = 0) {
+  if (typeof roomCode === 'string' && roomCode.toUpperCase() === 'BOSS') {
+    return {
+      ...genBOSS_WORLDEATER(),
+      holeIndex,
+    };
+  }
+
+  if (holeIndex === HOLE.COUNT - 1) {
+    return genBOSS_WORLDEATER();
+  }
+
   const roomHashSeed =
     typeof roomCode === 'string' ? hashRoomCode(roomCode) : (roomCode >>> 0);
 

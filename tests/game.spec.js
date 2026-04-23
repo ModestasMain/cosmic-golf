@@ -18,7 +18,7 @@ test('Test 1: Game loads — canvas exists, no critical JS errors, correct title
   await page.waitForTimeout(3000);
 
   // Verify canvas element exists
-  const canvas = page.locator('canvas');
+  const canvas = page.locator('canvas[data-engine]').first();
   await expect(canvas).toBeVisible();
 
   // Verify page title contains "Cosmic Golf" or "cosmic"
@@ -75,7 +75,7 @@ test('Test 4: Portal URL params accepted — no crash', async ({ page }) => {
   await page.waitForTimeout(2000);
 
   // Canvas should still be present — page did not crash
-  const canvas = page.locator('canvas');
+  const canvas = page.locator('canvas[data-engine]').first();
   await expect(canvas).toBeVisible();
 
   // No critical JS errors from portal params
@@ -94,7 +94,7 @@ test('Test 5: Performance baseline — canvas renders', async ({ page }) => {
 
   // Verify canvas exists and is rendered (has non-zero dimensions)
   const canvas = await page.evaluate(() => {
-    const c = document.querySelector('canvas');
+    const c = document.querySelector('canvas[data-engine]') || document.querySelector('canvas');
     if (!c) return null;
     return {
       exists: true,

@@ -135,7 +135,7 @@ export class LobbyPanel {
   }
 
   _show() {
-    if (!gameState.isSoloMode && this._players.size > 0) {
+    if (this._mode === 'scores' && !gameState.isSoloMode && this._players.size > 0) {
       this._el.style.display = 'flex';
     }
   }
@@ -153,6 +153,7 @@ export class LobbyPanel {
   }
 
   _renderRoster() {
+    this._el.style.display = 'none';
     const count = this._players.size;
     this._labelEl.textContent = `${count} PLAYER${count !== 1 ? 'S' : ''}`;
 
@@ -189,6 +190,7 @@ export class LobbyPanel {
   }
 
   _renderScores() {
+    this._el.style.display = 'flex';
     const hole = gameState.currentHole;
     this._labelEl.textContent = `HOLE ${hole} SCORES`;
 

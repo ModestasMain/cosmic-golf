@@ -34,12 +34,14 @@ export class CinematicController {
     this._active     = false;
     this._t          = 0;
     this._wp         = null;
+    this._script     = null;
     this._skipBtn    = null;
   }
 
   get active() { return this._active; }
 
   start(cupPos, teePos, facingDir, followDist, followH) {
+    this._script = null;
     this._active = true;
     this._t      = 0;
 
@@ -88,8 +90,27 @@ export class CinematicController {
     this._showSkipButton();
   }
 
+  startScript({ duration = DURATION, onUpdate = null, onSkip = null } = {}) {
+    this._active = true;
+    this._t = 0;
+    this._wp = null;
+    this._script = { duration, onUpdate, onSkip };
+    this._showSkipButton();
+  }
+
   update(dt) {
-    if (!this._active || !this._wp) return;
+    if (!this._active) return;
+
+    if (this._script) {
+      this._t += dt;
+      const raw = Math.min(this._t / this._script.duration, 1);
+      const e = easeInOutCubic(raw);
+      this._script.onUpdate?.({ raw, eased: e, camera: this._camera });
+      if (raw >= 1) this._end();
+      return;
+    }
+
+    if (!this._wp) return;
 
     this._t += dt;
     const raw = Math.min(this._t / DURATION, 1);
@@ -106,7 +127,13 @@ export class CinematicController {
   }
 
   skip() {
-    if (!this._active || !this._wp) return;
+    if (!this._active) return;
+    if (this._script) {
+      this._script.onSkip?.(this._camera);
+      this._end();
+      return;
+    }
+    if (!this._wp) return;
     const { p2, l2 } = this._wp;
     this._camera.position.copy(p2);
     this._camera.lookAt(l2);
@@ -115,11 +142,13 @@ export class CinematicController {
 
   dispose() {
     this._active = false;
+    this._script = null;
     this._hideSkipButton();
   }
 
   _end() {
     this._active = false;
+    this._script = null;
     this._hideSkipButton();
     this._onComplete?.();
   }

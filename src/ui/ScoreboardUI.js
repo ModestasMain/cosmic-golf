@@ -30,6 +30,7 @@ export class ScoreboardUI {
     this._globalEntries = null;
     this._isGameOver = false;
     this._globalSection = null;
+    this._shareSection = null;
     this._hiddenUiStates = null;
 
     this._btnNext.addEventListener('click', () => {
@@ -84,6 +85,7 @@ export class ScoreboardUI {
     } else {
       this._clearGlobalSection();
     }
+    this._renderShareSection(isGameOver);
     this._hideExternalUI();
     this._overlay.style.display = 'flex';
   }
@@ -92,6 +94,7 @@ export class ScoreboardUI {
     if (!this._overlay) return;
     this._isGameOver = false;
     this._clearGlobalSection();
+    this._clearShareSection();
     this._overlay.style.display = 'none';
     this._restoreExternalUI();
   }
@@ -158,7 +161,7 @@ export class ScoreboardUI {
       section.appendChild(table);
     }
 
-    this._overlay.insertBefore(section, this._btnNext);
+    this._overlay.insertBefore(section, this._shareSection || this._btnNext);
     this._globalSection = section;
   }
 
@@ -167,6 +170,157 @@ export class ScoreboardUI {
       this._globalSection.remove();
       this._globalSection = null;
     }
+  }
+
+  _renderShareSection(isGameOver) {
+    this._clearShareSection();
+
+    const data = this._getShareData(isGameOver);
+    if (!data) return;
+
+    const section = document.createElement('section');
+    section.id = 'score-share-card';
+
+    const eyebrow = document.createElement('div');
+    eyebrow.className = 'score-share-eyebrow';
+    eyebrow.textContent = data.eyebrow;
+
+    const headline = document.createElement('div');
+    headline.className = 'score-share-headline';
+    headline.textContent = data.headline;
+
+    const meta = document.createElement('div');
+    meta.className = 'score-share-meta';
+    meta.textContent = data.meta;
+
+    const seed = document.createElement('div');
+    seed.className = 'score-share-seed';
+    seed.textContent = data.seedLabel;
+
+    const actions = document.createElement('div');
+    actions.className = 'score-share-actions';
+
+    const copyLink = document.createElement('button');
+    copyLink.type = 'button';
+    copyLink.className = 'score-share-btn';
+    copyLink.textContent = 'COPY CHALLENGE LINK';
+    copyLink.addEventListener('click', () => this._copyShareText(data.url, copyLink, data.url));
+
+    const copyResult = document.createElement('button');
+    copyResult.type = 'button';
+    copyResult.className = 'score-share-btn score-share-btn-accent';
+    copyResult.textContent = 'COPY RESULT';
+    copyResult.addEventListener('click', () => this._copyShareText(data.text, copyResult, data.text));
+
+    actions.appendChild(copyLink);
+    actions.appendChild(copyResult);
+
+    const fallback = document.createElement('textarea');
+    fallback.className = 'score-share-fallback';
+    fallback.readOnly = true;
+    fallback.setAttribute('aria-label', 'Share text');
+
+    section.appendChild(eyebrow);
+    section.appendChild(headline);
+    section.appendChild(meta);
+    section.appendChild(seed);
+    section.appendChild(actions);
+    section.appendChild(fallback);
+
+    this._overlay.insertBefore(section, this._btnNext);
+    this._shareSection = section;
+  }
+
+  _clearShareSection() {
+    if (this._shareSection) {
+      this._shareSection.remove();
+      this._shareSection = null;
+    }
+  }
+
+  _getShareData(isGameOver) {
+    const player = gameState.players[0];
+    if (!player) return null;
+
+    const totalStrokes = gameState.totalStrokes(player.id);
+    const totalTime = gameState.totalTime(player.id);
+    const timeText = leaderboardStore.formatTime(totalTime);
+    const url = this._buildChallengeUrl();
+    const seed = this._challengeSeed();
+    const name = player.name || 'PLAYER';
+    const bossChallenge = gameState.isBossRoom || gameState.isBossChallenge;
+
+    if (bossChallenge) {
+      const text = `Cosmic Golf: WORLDEATER DEFEATED! Beat the boss: ${url}`;
+      return {
+        eyebrow: 'BOSS CHALLENGE',
+        headline: 'WORLDEATER DEFEATED!',
+        meta: `${name} · ${totalStrokes || gameState.currentStrokes} strokes · ${timeText}`,
+        seedLabel: 'SOLO BOSS LINK',
+        url,
+        text,
+      };
+    }
+
+    if (isGameOver) {
+      const text = `Cosmic Golf: ${totalStrokes} strokes in ${timeText}. Beat my run: ${url}`;
+      return {
+        eyebrow: 'SHARE RUN',
+        headline: `${totalStrokes} STROKES`,
+        meta: `${name} · ${timeText} · ${gameState.totalHoles} holes`,
+        seedLabel: `CHALLENGE SEED ${seed}`,
+        url,
+        text,
+      };
+    }
+
+    const holeIndex = gameState.currentHole;
+    const strokes = player.strokes?.[holeIndex] ?? gameState.currentStrokes;
+    const result = this._isWorldEaterHole()
+      ? { headline: 'WORLDEATER DEFEATED!' }
+      : getScoreResult(strokes);
+    const text = `Cosmic Golf: ${result.headline} on Hole ${holeIndex + 1}. ${totalStrokes} strokes so far. Beat this seed: ${url}`;
+    return {
+      eyebrow: 'SHARE HOLE',
+      headline: result.headline,
+      meta: `${name} · Hole ${holeIndex + 1} · ${strokes} ${strokes === 1 ? 'stroke' : 'strokes'}`,
+      seedLabel: `CHALLENGE SEED ${seed}`,
+      url,
+      text,
+    };
+  }
+
+  _challengeSeed() {
+    if (gameState.isBossRoom || gameState.isBossChallenge) return 'BOSS';
+    if (gameState.challengeSeed) return gameState.challengeSeed;
+    if (gameState.roomCode) return gameState.roomCode;
+    return String(gameState.sessionSeed >>> 0);
+  }
+
+  _buildChallengeUrl() {
+    const url = new URL(window.location.pathname || '/', window.location.origin);
+    url.searchParams.set('challenge', this._challengeSeed());
+    return url.toString();
+  }
+
+  async _copyShareText(text, button, fallbackText) {
+    const original = button.textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+      button.textContent = 'COPIED';
+    } catch {
+      button.textContent = 'SELECT TEXT';
+      const fallback = this._shareSection?.querySelector('.score-share-fallback');
+      if (fallback) {
+        fallback.value = fallbackText;
+        fallback.style.display = 'block';
+        fallback.focus();
+        fallback.select();
+      }
+    }
+    setTimeout(() => {
+      button.textContent = original;
+    }, 1600);
   }
 
   _hideExternalUI() {
@@ -196,7 +350,9 @@ export class ScoreboardUI {
   }
 
   _isWorldEaterHole() {
-    return gameState.isBossRoom || (gameState.totalHoles === 10 && gameState.currentHole === 9);
+    return gameState.isBossRoom
+      || gameState.isBossChallenge
+      || (gameState.totalHoles === 10 && gameState.currentHole === 9);
   }
 
   _renderTable(isGameOver) {

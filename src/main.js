@@ -24,10 +24,63 @@ import { BallStylePicker } from './ui/BallStylePicker.js';
 import { audioManager } from './audio/AudioManager.js';
 import { DevPanel } from './debug/DevPanel.js';
 
+const QUALITY_PROFILES = {
+  high: {
+    label: 'Cinematic',
+    pixelRatioCap: 1.5,
+    composerMode: 'full',
+    bloomIntensity: 0.9,
+    bloomThreshold: 0.85,
+    bloomSmoothing: 0,
+    vignetteDarkness: 0.73,
+    scene: {
+      stars:  { visible: true, brightness: 1.0, heroScale: 1.0, shimmerAmp: 0.12 },
+      nebula: { visible: true, opacityScale: 1.0, sizeScale: 1.0 },
+      comets: { enabled: true, maxActive: 4, intervalScale: 1.0 },
+      trails: { density: 1.0, sizeScale: 1.0, opacityScale: 1.0 },
+    },
+  },
+  medium: {
+    label: 'Balanced',
+    pixelRatioCap: 1.1,
+    composerMode: 'reduced',
+    bloomIntensity: 0.58,
+    bloomThreshold: 0.88,
+    bloomSmoothing: 0.04,
+    vignetteDarkness: 0.58,
+    scene: {
+      stars:  { visible: true, brightness: 0.86, heroScale: 0.9, shimmerAmp: 0.07 },
+      nebula: { visible: true, opacityScale: 0.72, sizeScale: 0.88 },
+      comets: { enabled: true, maxActive: 2, intervalScale: 1.45 },
+      trails: { density: 0.72, sizeScale: 0.88, opacityScale: 0.9 },
+    },
+  },
+  low: {
+    label: 'Performance',
+    pixelRatioCap: 0.85,
+    composerMode: 'minimal',
+    bloomIntensity: 0.0,
+    bloomThreshold: 0.95,
+    bloomSmoothing: 0.08,
+    vignetteDarkness: 0.42,
+    scene: {
+      stars:  { visible: true, brightness: 0.7, heroScale: 0.78, shimmerAmp: 0.04 },
+      nebula: { visible: false, opacityScale: 0.0, sizeScale: 0.72 },
+      comets: { enabled: false, maxActive: 0, intervalScale: 2.2 },
+      trails: { density: 0.42, sizeScale: 0.78, opacityScale: 0.78 },
+    },
+  },
+};
+
 class Game {
   constructor() {
     this._lastTime = performance.now();
     this._hiddenInterval = null;
+    this._launchTutorialTimer = null;
+    this._firstShotTakenThisRun = false;
+    this._qualityMode = localStorage.getItem('cosmic_quality_mode') || 'auto';
+    this._qualityKey = null;
+    this._quality = null;
     this._init();
   }
 
@@ -48,13 +101,14 @@ class Game {
   }
 
   _setupRenderer() {
+    this._refreshQualityProfile();
     this.renderer = new WebGLRenderer({
       antialias: false,
       powerPreference: 'high-performance',
       stencil: false,
       depth: true,
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this._quality.pixelRatioCap));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setClearColor(0x000000);
     document.body.appendChild(this.renderer.domElement);
@@ -65,13 +119,10 @@ class Game {
   _setupComposer() {
     const { scene, camera } = this.holeScene;
 
-    this.composer = new EffectComposer(this.renderer);
-    this.composer.addPass(new RenderPass(scene, camera));
-
     this.bloom = new BloomEffect({
-      intensity:           0.9,
-      luminanceThreshold:  0.85,
-      luminanceSmoothing:  0,
+      intensity:           this._quality.bloomIntensity,
+      luminanceThreshold:  this._quality.bloomThreshold,
+      luminanceSmoothing:  this._quality.bloomSmoothing,
       mipmapBlur:          true,
       levels:              4,   // fewer mip levels = fewer blur passes (default is 8)
     });
@@ -99,11 +150,9 @@ class Game {
     });
 
     this.smaa = new SMAAEffect({ preset: SMAAPreset.HIGH });
-
-    this.composer.addPass(new EffectPass(camera, this.bloom, this.chromAb, this.vignette));
-    this.composer.addPass(new EffectPass(camera, this.smaa));
     this.blurPass = new EffectPass(camera, this.dof, this.tiltShift);
     this._blurPassAdded = false; // added to composer on first use
+    this._rebuildComposer();
 
     // Dev panel — toggle with backtick key
     this.devPanel = new DevPanel({
@@ -126,6 +175,9 @@ class Game {
 
     // Read portal params
     const params = new URLSearchParams(window.location.search);
+    if (params.has('challenge')) {
+      gameState.setChallengeSeed(params.get('challenge'));
+    }
     if (params.has('username')) {
       gameState.players[0].name = params.get('username').toUpperCase();
     }
@@ -141,6 +193,7 @@ class Game {
     this.scoreboardScene = new ScoreboardScene();
 
     this.inputSystem.camera = this.holeScene.camera;
+    this._applySceneQuality();
   }
 
   _setupUI() {
@@ -234,14 +287,32 @@ class Game {
       this.mp.broadcastGameRestart();
       const savedColor = this.mp.localColor ?? gameState.players[0]?.color ?? 0xff6600;
       const savedName  = gameState.players[0]?.name ?? 'PLAYER';
+      this._firstShotTakenThisRun = false;
+      this._clearLaunchAssistTutorial();
+      this.tutorial.dismiss();
       gameState.reset();
       gameState.addPlayer('solo', savedName, savedColor);
       this.holeScene.loadHole(0);
+      this._scheduleLaunchAssistTutorial();
     });
 
     eventBus.on(Events.BALL_RESET_TO_TEE, () => {
       this.mp.broadcastBallReset(gameState.currentHole);
       this.holeScene.resetBallToTee();
+    });
+
+    eventBus.on(Events.SHOT_TAKEN, () => {
+      this._firstShotTakenThisRun = true;
+      this._clearLaunchAssistTutorial();
+      this.tutorial.dismiss();
+    });
+
+    eventBus.on(Events.HOLE_LOADED, ({ holeIndex }) => {
+      if (holeIndex === 0 && !this._firstShotTakenThisRun) {
+        this._scheduleLaunchAssistTutorial();
+      } else {
+        this._clearLaunchAssistTutorial();
+      }
     });
 
     this._buildSettingsDrawer();
@@ -315,6 +386,33 @@ class Game {
       'padding:0 2px 2px',
     ].join(';');
     panel.appendChild(header);
+
+    const perfBtn = document.createElement('button');
+    perfBtn.id = 'quality-toggle-btn';
+    perfBtn.style.cssText = [
+      'width:100%',
+      'display:flex',
+      'align-items:center',
+      'justify-content:space-between',
+      'gap:10px',
+      'background:linear-gradient(180deg, rgba(11, 8, 22, 0.86), rgba(8, 5, 18, 0.84))',
+      'color:rgba(231, 226, 255, 0.92)',
+      'font-family:Orbitron, sans-serif',
+      'font-size:10px',
+      'letter-spacing:0.14em',
+      'border:1px solid rgba(132, 92, 255, 0.34)',
+      'border-radius:16px',
+      'padding:10px 12px',
+      'cursor:pointer',
+      'box-shadow:0 16px 42px rgba(3,2,10,0.2)',
+      'text-transform:uppercase',
+    ].join(';');
+    perfBtn.addEventListener('click', () => {
+      this._setQualityMode(this._qualityMode === 'performance' ? 'auto' : 'performance');
+    });
+    panel.appendChild(perfBtn);
+    this._qualityToggleBtn = perfBtn;
+    this._updateQualityToggle();
 
     const volumeControl = document.getElementById('volume-control');
     if (volumeControl) {
@@ -407,6 +505,7 @@ class Game {
       this.mp.joinPublic(name, color);
       this.holeScene.loadHole(0);
       this.ballStylePicker.show();
+      this._scheduleLaunchAssistTutorial();
       setTimeout(() => this.mp.updateIdentity(name, color), 2000);
       // Portal skips the name overlay — start BGM on first interaction instead
       document.addEventListener('pointerdown', () => eventBus.emit(Events.GAME_LAUNCHED), { once: true });
@@ -416,11 +515,16 @@ class Game {
     this.nameEntry.show().then(({ name, mode, roomCode }) => {
       gameState.players[0].name = name;
       if (mode === 'create') {
+        gameState.clearChallenge();
         const createdCode = this.mp.createPrivateRoom(name, undefined, roomCode);
         this._syncRoomUrl(createdCode);
       } else if (mode === 'join' && roomCode) {
+        gameState.clearChallenge();
         this.mp.joinRoom(roomCode, name);
         this._syncRoomUrl(roomCode);
+      } else if (gameState.challengeSeed) {
+        this.mp.startSolo(name);
+        this._syncRoomUrl(null);
       } else {
         this.mp.joinPublic(name); // no color — _colorFromId assigns unique color
         this._syncRoomUrl(null);
@@ -431,7 +535,7 @@ class Game {
       this.playerLabels.addPlayer(gameState.players[0].id, name, color);
       this.holeScene.loadHole(0);
       this.ballStylePicker.show();
-      setTimeout(() => this.tutorial.show(), 600);
+      this._scheduleLaunchAssistTutorial();
       setTimeout(() => this.mp.updateIdentity(name, color), 2000);
     });
   }
@@ -440,6 +544,7 @@ class Game {
     const url = new URL(window.location.href);
     if (roomCode && roomCode !== 'PUBLIC') {
       url.searchParams.set('room', roomCode);
+      url.searchParams.delete('challenge');
     } else {
       url.searchParams.delete('room');
     }
@@ -514,9 +619,106 @@ class Game {
   }
 
   _onResize() {
+    const previousKey = this._qualityKey;
+    if (this._qualityMode === 'auto') this._refreshQualityProfile();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this._quality.pixelRatioCap));
+    if (this._qualityMode === 'auto' && previousKey !== this._qualityKey) {
+      this._rebuildComposer();
+      this._applySceneQuality();
+      this._updateQualityToggle();
+    }
     if (this.composer) this.composer.setSize(window.innerWidth, window.innerHeight);
     this.holeScene.onResize();
+  }
+
+  _detectAutoQualityKey() {
+    const width = Math.min(window.innerWidth, window.innerHeight);
+    const coarse = window.matchMedia?.('(pointer: coarse)')?.matches ?? false;
+    const dpr = window.devicePixelRatio || 1;
+    const cores = navigator.hardwareConcurrency || 8;
+    const memory = navigator.deviceMemory || 8;
+
+    if (coarse && (width <= 430 || dpr >= 3 || cores <= 4 || memory <= 4)) return 'low';
+    if (coarse || width <= 900 || dpr > 1.8 || cores <= 6 || memory <= 6) return 'medium';
+    return 'high';
+  }
+
+  _refreshQualityProfile() {
+    const key = this._qualityMode === 'performance' ? 'low' : this._detectAutoQualityKey();
+    this._qualityKey = key;
+    this._quality = QUALITY_PROFILES[key];
+  }
+
+  _rebuildComposer() {
+    const { scene, camera } = this.holeScene;
+    this.bloom.intensity = this._quality.bloomIntensity;
+    this.bloom.luminanceMaterial.threshold = this._quality.bloomThreshold;
+    this.bloom.luminanceMaterial.smoothing = this._quality.bloomSmoothing;
+    this.vignette.darkness = this._quality.vignetteDarkness;
+    this.chromAb.offset.set(0, 0);
+
+    this.composer = new EffectComposer(this.renderer);
+    this.composer.addPass(new RenderPass(scene, camera));
+
+    if (this._quality.composerMode === 'full') {
+      this.composer.addPass(new EffectPass(camera, this.bloom, this.chromAb, this.vignette));
+      this.composer.addPass(new EffectPass(camera, this.smaa));
+    } else if (this._quality.composerMode === 'reduced') {
+      this.composer.addPass(new EffectPass(camera, this.bloom, this.vignette));
+    }
+
+    this._blurPassAdded = false;
+    this.composer.setSize(window.innerWidth, window.innerHeight);
+
+    if (this.devPanel?._refs) {
+      this.devPanel._refs.composer = this.composer;
+      this.devPanel._refs.blurPass = this.blurPass;
+      this.devPanel._refs.bloom = this.bloom;
+      this.devPanel._refs.vignette = this.vignette;
+      this.devPanel._refs.chromAb = this.chromAb;
+    }
+  }
+
+  _applySceneQuality() {
+    if (!this.holeScene || !this._quality) return;
+    this.holeScene.setVisualQuality(this._quality.scene);
+  }
+
+  _setQualityMode(mode) {
+    this._qualityMode = mode;
+    localStorage.setItem('cosmic_quality_mode', mode);
+    this._refreshQualityProfile();
+    if (this.renderer) {
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this._quality.pixelRatioCap));
+    }
+    if (this.bloom && this.holeScene) {
+      this._rebuildComposer();
+      this._applySceneQuality();
+    }
+    this._updateQualityToggle();
+  }
+
+  _updateQualityToggle() {
+    if (!this._qualityToggleBtn) return;
+    const modeLabel = this._qualityMode === 'performance' ? 'Forced Low FX' : `Auto · ${this._quality.label}`;
+    this._qualityToggleBtn.innerHTML = `<span>Performance</span><strong style="font-weight:700;color:rgba(159,247,255,0.92);letter-spacing:0.08em;">${modeLabel}</strong>`;
+  }
+
+  _clearLaunchAssistTutorial() {
+    if (this._launchTutorialTimer) {
+      clearTimeout(this._launchTutorialTimer);
+      this._launchTutorialTimer = null;
+    }
+  }
+
+  _scheduleLaunchAssistTutorial() {
+    this._clearLaunchAssistTutorial();
+    this._launchTutorialTimer = setTimeout(() => {
+      if (!this._firstShotTakenThisRun && gameState.currentHole === 0 && gameState.currentStrokes === 0) {
+        this.tutorial.show();
+      }
+    }, 8500);
   }
 }
 

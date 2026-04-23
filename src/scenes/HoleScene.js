@@ -24,7 +24,7 @@ import { StarField } from '../objects/StarField.js';
 import { NebulaField } from '../objects/NebulaField.js';
 import { ProceduralSpaceBg } from '../objects/ProceduralSpaceBg.js';
 import { PortalSystem } from '../portal/PortalSystem.js';
-// import { BallTrail } from '../effects/BalxTrail.js';
+import { BallTrail } from '../effects/BallTrail.js';
 import { ScreenShake } from '../effects/ScreenShake.js';
 import { LaunchBurst } from '../effects/LaunchBurst.js';
 import { GhostBall } from '../objects/GhostBall.js';
@@ -114,6 +114,7 @@ export class HoleScene {
     this._holeStartTime = null;
     this._bossIntroPending = false;
     this._bossWarningShown = false;
+    this._visualQuality = null;
 
     // Spectator mode — active after local player holes in MP
 
@@ -595,9 +596,9 @@ export class HoleScene {
     gameState.aimState = 'IDLE';
     this._state = 'IDLE';
 
-    // Use room code for multiplayer (all clients share it → identical holes).
-    // Fall back to sessionSeed for solo so each run is a fresh set of holes.
-    const holeSeed = gameState.roomCode ?? gameState.sessionSeed;
+    // Challenge links recreate the shared seed without joining the same lobby.
+    // Multiplayer still uses room code, and solo falls back to a fresh session seed.
+    const holeSeed = gameState.challengeSeed ?? gameState.roomCode ?? gameState.sessionSeed;
     this._holeData = generateHole(holeIndex, holeSeed);
     const { planets, tee, cup, palette } = this._holeData;
     this._bossIntroPending = this._holeData.boss?.kind === 'WORLDEATER';
@@ -614,6 +615,7 @@ export class HoleScene {
     }
     if (this.starField)   this.starField.setColor(palette.stars);
     if (this.nebulaField) this.nebulaField.setColors(palette);
+    this._applyVisualQuality();
 
     // Place planets
     this.planets = planets;
@@ -639,6 +641,7 @@ export class HoleScene {
     this.ball = new GolfBall(palette.ball, null, gameState.ballStyle);
     this.ball.setPosition(tee.clone().add(new Vector3(0, BALL.RADIUS + 0.2, 0)));
     this.ball.addToScene(this.scene);
+    this._applyTrailQuality(this.ball);
 
     // Place cup
     this.cup = new HoleCup(cup, palette.cup);
@@ -2160,6 +2163,7 @@ export class HoleScene {
     const teePos = this._holeData.tee.clone().add(new Vector3(0, BALL.RADIUS + 0.2, 0));
     ball.setPosition(teePos);
     ball.addToScene(this.scene);
+    this._applyTrailQuality(ball);
     this._remoteBalls.set(playerId, {
       ball, inFlight: false, holed: false,
       _stateBuffer: [],
@@ -2242,6 +2246,32 @@ export class HoleScene {
 
   render() {
     this.renderer.render(this.scene, this.camera);
+  }
+
+  setVisualQuality(profile = {}) {
+    this._visualQuality = profile;
+    this._applyVisualQuality();
+  }
+
+  _applyVisualQuality() {
+    if (!this._visualQuality) return;
+    const { stars, nebula, comets, trails } = this._visualQuality;
+    if (stars && this.starField) this.starField.setQuality(stars);
+    if (nebula && this.nebulaField) this.nebulaField.setQuality(nebula);
+    if (comets && this.cometSystem) this.cometSystem.setQuality(comets);
+    if (trails) {
+      BallTrail.setGlobalQuality(trails);
+      this._applyTrailQuality(this.ball);
+      for (const remote of this._remoteBalls.values()) {
+        this._applyTrailQuality(remote.ball);
+      }
+    }
+  }
+
+  _applyTrailQuality(ball) {
+    const trails = this._visualQuality?.trails;
+    if (!ball?.trail || !trails) return;
+    ball.trail.setQuality(trails);
   }
 
   onResize() {

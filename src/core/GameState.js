@@ -10,6 +10,9 @@ class GameState {
   }
 
   reset() {
+    const challengeSeed = this.challengeSeed ?? null;
+    const challengeMode = this.challengeMode ?? null;
+
     this.currentHole = 0;           // 0-indexed
     this.players = [];              // [{ id, name, color, strokes: [] }]
     this.currentPlayerIndex = 0;
@@ -19,6 +22,8 @@ class GameState {
     this.isSoloMode = true;
     this.isMuted = false;
     this.roomCode = null;
+    this.challengeSeed = challengeSeed;
+    this.challengeMode = challengeMode;
     // Random seed for solo sessions — each run gets unique holes.
     // Multiplayer uses the room code string instead (see generateHole).
     this.sessionSeed = Math.floor(Math.random() * 0xffffffff);
@@ -46,8 +51,25 @@ class GameState {
     return (this.roomCode || '').toUpperCase() === 'BOSS';
   }
 
+  get isBossChallenge() {
+    return this.challengeMode === 'BOSS';
+  }
+
   get totalHoles() {
-    return this.isBossRoom ? 1 : HOLE.COUNT;
+    return (this.isBossRoom || this.isBossChallenge) ? 1 : HOLE.COUNT;
+  }
+
+  setChallengeSeed(value) {
+    const seed = String(value || '').trim().slice(0, 64);
+    this.challengeSeed = seed || null;
+    this.challengeMode = seed.toUpperCase() === 'BOSS'
+      ? 'BOSS'
+      : (seed ? 'RUN' : null);
+  }
+
+  clearChallenge() {
+    this.challengeSeed = null;
+    this.challengeMode = null;
   }
 
   addPlayer(id, name, color) {

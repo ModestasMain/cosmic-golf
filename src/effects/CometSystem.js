@@ -217,21 +217,37 @@ export class CometSystem {
     this._comets  = [];
     this._timer   = MIN_INTERVAL + Math.random() * (MAX_INTERVAL - MIN_INTERVAL);
     this._spr     = glowSprite();
+    this._quality = { enabled: true, maxActive: MAX_ACTIVE, intervalScale: 1 };
+  }
+
+  setQuality({ enabled = true, maxActive = MAX_ACTIVE, intervalScale = 1 } = {}) {
+    this._quality = { enabled, maxActive, intervalScale };
+    if (!enabled || maxActive <= 0) {
+      this.dispose();
+    } else {
+      while (this._comets.length > maxActive) {
+        const c = this._comets.pop();
+        c?.dispose();
+      }
+    }
   }
 
   /** Reset timer when a new hole loads so a comet arrives quickly. */
   onHoleLoaded() {
-    this._timer = 5 + Math.random() * 10; // first comet in 5–15s
+    this._timer = (5 + Math.random() * 10) * (this._quality.intervalScale ?? 1); // first comet in 5–15s
   }
 
   update(dt) {
+    if (!this._quality.enabled || this._quality.maxActive <= 0) return;
+
     // Count down to next comet
     this._timer -= dt;
     if (this._timer <= 0) {
-      if (this._comets.length < MAX_ACTIVE) {
+      if (this._comets.length < this._quality.maxActive) {
         this._comets.push(new Comet(this._scene, this._spr));
       }
-      this._timer = MIN_INTERVAL + Math.random() * (MAX_INTERVAL - MIN_INTERVAL);
+      this._timer = (MIN_INTERVAL + Math.random() * (MAX_INTERVAL - MIN_INTERVAL))
+        * (this._quality.intervalScale ?? 1);
     }
 
     // Update active comets

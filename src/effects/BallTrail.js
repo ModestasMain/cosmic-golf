@@ -26,6 +26,12 @@ const CORE_SCATTER  = 0.4;  // tight spine width
 const NEBULA_SCATTER= 3.0;  // gas cloud half-width at widest point
 const SPARK_SCATTER = 2.8;  // spark drift radius
 
+let GLOBAL_QUALITY = {
+  density: 1,
+  sizeScale: 1,
+  opacityScale: 1,
+};
+
 // ── Soft circular sprite ──────────────────────────────────
 function makeSprite(innerStop = 0.0, outerStop = 1.0) {
   const size = 64;
@@ -71,7 +77,8 @@ function buildLayer(scene, count, size, renderOrder, sprite) {
   scene.add(pts);
 
   return {
-    pts, geo,
+    pts, geo, mat,
+    baseSize: size,
     pos: geo.attributes.position.array,
     col: geo.attributes.color.array,
   };
@@ -107,6 +114,14 @@ function buildPerp(dir) {
 // ──────────────────────────────────────────────────────────
 
 export class BallTrail {
+  static setGlobalQuality(q = {}) {
+    GLOBAL_QUALITY = {
+      density: Math.max(0.18, Math.min(1, q.density ?? 1)),
+      sizeScale: Math.max(0.45, q.sizeScale ?? 1),
+      opacityScale: Math.max(0.35, q.opacityScale ?? 1),
+    };
+  }
+
   constructor(scene, color = 0xff6600) {
     this._history     = [];
     this._active      = false;
@@ -120,9 +135,22 @@ export class BallTrail {
     this._sparks = buildLayer(scene, SPARK_COUNT,   2.5, 90, _spriteSpark);
     this._core   = buildLayer(scene, HISTORY,        4.5, 92, _spriteCore);
     this._glow   = buildLayer(scene, GLOW_COUNT,     8.0, 89, _spriteNebula);
+    this.setQuality(GLOBAL_QUALITY);
   }
 
   setColor(color) { this._color.set(color); }
+
+  setQuality(q = GLOBAL_QUALITY) {
+    this._quality = {
+      density: Math.max(0.18, Math.min(1, q.density ?? 1)),
+      sizeScale: Math.max(0.45, q.sizeScale ?? 1),
+      opacityScale: Math.max(0.35, q.opacityScale ?? 1),
+    };
+    for (const layer of [this._core, this._nebula, this._sparks, this._glow]) {
+      layer.mat.size = layer.baseSize * this._quality.sizeScale;
+      layer.mat.opacity = this._quality.opacityScale;
+    }
+  }
 
   setActive(active) {
     this._active = active;
@@ -154,6 +182,7 @@ export class BallTrail {
     if (this._history.length > HISTORY) this._history.pop();
     const n = this._history.length;
     if (n < 2) { this._glow.geo.setDrawRange(0, 0); return; }
+    const density = this._quality?.density ?? 1;
 
     const t  = this._t;
     const pr = this._color.r;
@@ -168,9 +197,10 @@ export class BallTrail {
     buildPerp(this._vel);
 
     // ── CORE SPINE ──────────────────────────────────────────
-    for (let i = 0; i < n; i++) {
+    const coreCount = Math.max(2, Math.floor(n * density));
+    for (let i = 0; i < coreCount; i++) {
       const p    = this._history[i];
-      const frac = 1 - i / (n - 1);
+      const frac = 1 - i / Math.max(coreCount - 1, 1);
       const sc   = CORE_SCATTER * frac;
 
       this._core.pos[i * 3]     = p.x + hash(i, 0, t) * sc;
@@ -185,15 +215,16 @@ export class BallTrail {
     }
     this._core.geo.attributes.position.needsUpdate = true;
     this._core.geo.attributes.color.needsUpdate    = true;
-    this._core.geo.setDrawRange(0, n);
+    this._core.geo.setDrawRange(0, coreCount);
 
     // ── NEBULA CLOUD ─────────────────────────────────────────
     // Dense mist: start from history[1] so ball stays visible.
     // Narrow near head, peaks in width at ~30% of tail, tapers at end.
     const nebulaStart = 1; // skip index 0 (ball position)
     const nebulaSpan  = n - nebulaStart;
-    for (let i = 0; i < NEBULA_COUNT; i++) {
-      const hi   = nebulaStart + Math.floor((i / NEBULA_COUNT) * nebulaSpan);
+    const nebulaCount = Math.max(48, Math.floor(NEBULA_COUNT * density));
+    for (let i = 0; i < nebulaCount; i++) {
+      const hi   = nebulaStart + Math.floor((i / nebulaCount) * nebulaSpan);
       const p    = this._history[Math.min(hi, n - 1)];
       // t01: 0 at head, 1 at tail
       const t01  = (hi - nebulaStart) / Math.max(nebulaSpan - 1, 1);
@@ -219,12 +250,13 @@ export class BallTrail {
     }
     this._nebula.geo.attributes.position.needsUpdate = true;
     this._nebula.geo.attributes.color.needsUpdate    = true;
-    this._nebula.geo.setDrawRange(0, NEBULA_COUNT);
+    this._nebula.geo.setDrawRange(0, nebulaCount);
 
     // ── SPARK SCATTER ────────────────────────────────────────
     // Bright individual embers that drift away from the spine
-    for (let i = 0; i < SPARK_COUNT; i++) {
-      const hi   = Math.floor((i / SPARK_COUNT) * n);
+    const sparkCount = Math.max(24, Math.floor(SPARK_COUNT * density));
+    for (let i = 0; i < sparkCount; i++) {
+      const hi   = Math.floor((i / sparkCount) * n);
       const p    = this._history[hi];
       const frac = 1 - hi / (n - 1);
 
@@ -247,13 +279,14 @@ export class BallTrail {
     }
     this._sparks.geo.attributes.position.needsUpdate = true;
     this._sparks.geo.attributes.color.needsUpdate    = true;
-    this._sparks.geo.setDrawRange(0, SPARK_COUNT);
+    this._sparks.geo.setDrawRange(0, sparkCount);
 
     // ── VOLUMETRIC GLOW HEAD ─────────────────────────────────
     // Tight bright bloom just behind the ball (skip index 0)
     const headSteps = Math.min(n - 1, 8);
-    for (let i = 0; i < GLOW_COUNT; i++) {
-      const hi   = 1 + Math.floor((i / GLOW_COUNT) * headSteps);
+    const glowCount = Math.max(6, Math.floor(GLOW_COUNT * density));
+    for (let i = 0; i < glowCount; i++) {
+      const hi   = 1 + Math.floor((i / glowCount) * headSteps);
       const p    = this._history[Math.min(hi, n - 1)];
       const frac = 1 - (hi - 1) / Math.max(headSteps - 1, 1);
       const spread = 1.2 * frac;
@@ -271,7 +304,7 @@ export class BallTrail {
     }
     this._glow.geo.attributes.position.needsUpdate = true;
     this._glow.geo.attributes.color.needsUpdate    = true;
-    this._glow.geo.setDrawRange(0, GLOW_COUNT);
+    this._glow.geo.setDrawRange(0, glowCount);
   }
 
   _drawChargeAura(_ballPos, _t, _pr, _pg, _pb) {
@@ -282,7 +315,6 @@ export class BallTrail {
   dispose() {
     for (const layer of [this._core, this._nebula, this._sparks, this._glow]) {
       layer.geo.dispose();
-      layer.pts.material.map?.dispose();
       layer.pts.material.dispose();
       if (layer.pts.parent) layer.pts.parent.remove(layer.pts);
     }

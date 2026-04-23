@@ -430,6 +430,94 @@
       padding-bottom: 14px;
     }
     #scoreboard-table tbody tr:last-child td { border-bottom: none; }
+    #score-share-card {
+      position: relative;
+      z-index: 1;
+      width: min(760px, calc(100vw - 72px));
+      margin: -8px 0 22px;
+      padding: 16px 18px;
+      border-radius: 20px;
+      color: #f7f4ff;
+      text-align: center;
+      background:
+        radial-gradient(circle at 20% 0%, rgba(255, 210, 74, 0.12), transparent 38%),
+        linear-gradient(180deg, rgba(14, 9, 34, 0.9), rgba(8, 5, 20, 0.84));
+      border: 1px solid rgba(122, 76, 255, 0.44);
+      box-shadow: 0 20px 70px rgba(3, 2, 10, 0.42), inset 0 0 0 1px rgba(255,255,255,0.035);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+    }
+    .score-share-eyebrow {
+      font-family: 'JetBrains Mono', monospace;
+      color: rgba(191, 152, 255, 0.82);
+      font-size: 10px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .score-share-headline {
+      font-family: 'Orbitron', sans-serif;
+      color: #ffd24a;
+      font-size: clamp(17px, 2.4vw, 26px);
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      text-shadow: 0 0 18px rgba(255, 210, 74, 0.28);
+    }
+    .score-share-meta,
+    .score-share-seed {
+      font-family: 'JetBrains Mono', monospace;
+      color: rgba(218, 232, 255, 0.62);
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin-top: 7px;
+    }
+    .score-share-seed {
+      color: rgba(96, 220, 255, 0.72);
+      font-size: 9px;
+    }
+    .score-share-actions {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 14px;
+      flex-wrap: wrap;
+    }
+    .score-share-btn {
+      border: 1px solid rgba(132, 92, 255, 0.52);
+      border-radius: 13px;
+      padding: 10px 14px;
+      min-width: 178px;
+      background: linear-gradient(180deg, rgba(18, 11, 44, 0.92), rgba(9, 5, 24, 0.9));
+      color: rgba(240, 236, 255, 0.94);
+      font-family: 'Orbitron', sans-serif;
+      font-size: 10px;
+      letter-spacing: 0.13em;
+      text-transform: uppercase;
+      cursor: pointer;
+      box-shadow: 0 14px 36px rgba(3, 2, 10, 0.32);
+    }
+    .score-share-btn-accent {
+      border-color: rgba(255, 210, 74, 0.54);
+      color: #fff2ad;
+    }
+    .score-share-fallback {
+      display: none;
+      box-sizing: border-box;
+      width: 100%;
+      min-height: 54px;
+      margin-top: 12px;
+      resize: none;
+      border-radius: 12px;
+      border: 1px solid rgba(96, 220, 255, 0.32);
+      background: rgba(4, 8, 18, 0.78);
+      color: rgba(230, 248, 255, 0.9);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      line-height: 1.4;
+      padding: 10px;
+    }
     #btn-next-hole {
       position: relative;
       z-index: 1;
@@ -700,6 +788,37 @@
       #scoreboard-table th {
         font-size: 7px;
         letter-spacing: 0.05em;
+      }
+      #score-share-card {
+        width: calc(100vw - 24px);
+        margin: -2px 0 12px;
+        padding: 11px 10px;
+        border-radius: 16px;
+      }
+      .score-share-eyebrow {
+        font-size: 8px;
+        letter-spacing: 0.16em;
+      }
+      .score-share-headline {
+        font-size: clamp(14px, 4.8vw, 20px);
+        letter-spacing: 0.06em;
+      }
+      .score-share-meta,
+      .score-share-seed {
+        font-size: 8px;
+        letter-spacing: 0.08em;
+        margin-top: 5px;
+      }
+      .score-share-actions {
+        gap: 7px;
+        margin-top: 10px;
+      }
+      .score-share-btn {
+        flex: 1 1 130px;
+        min-width: 0;
+        padding: 9px 8px;
+        font-size: 8px;
+        border-radius: 11px;
       }
       #btn-next-hole {
         min-width: calc(100vw - 88px);

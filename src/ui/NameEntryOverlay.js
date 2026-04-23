@@ -678,7 +678,7 @@ export class NameEntryOverlay {
     this._howToPlay = new HowToPlayPanel();
     this._statsData = null;
     this._build();
-    this._fetchStats();
+    setTimeout(() => this._fetchStats(), 1400);
   }
 
   _build() {
@@ -717,9 +717,20 @@ export class NameEntryOverlay {
         #name-entry-overlay input:focus { outline: none; }
         .cg-quick-btn:hover { border-color: #BFFF00 !important; color: #BFFF00 !important; box-shadow: 0 0 10px rgba(191,255,0,0.3) !important; }
         .cg-achievement-card.unlocked:hover { transform: translateY(-3px); }
+        #cg-private-room summary::-webkit-details-marker { display: none; }
+        #cg-private-room summary::after {
+          content: '▾';
+          margin-left: auto;
+          color: rgba(159,247,255,0.7);
+          transition: transform 180ms ease;
+        }
+        #cg-private-room[open] summary::after { transform: rotate(180deg); }
         @media (max-width: 680px) {
           #cg-tabs { gap: 16px !important; }
           #cg-callsign-pill { display: none !important; }
+          #cg-launch-title { font-size: clamp(30px, 13vw, 46px) !important; }
+          #cg-launch-card { padding: 18px 16px 16px !important; }
+          #cg-launch-stats { display: none !important; }
         }
         @media (max-width: 480px) {
           #cg-tabs { gap: 10px !important; }
@@ -890,13 +901,14 @@ export class NameEntryOverlay {
         </svg>
         <span style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:5px;color:rgba(255,255,255,0.45);">Multiplayer · Gravity · Mini Golf</span>
       </div>
-      <div style="font-family:'Orbitron',sans-serif;font-size:clamp(38px,6vw,64px);font-weight:900;letter-spacing:6px;text-align:center;line-height:1;background:linear-gradient(135deg,#fff 0%,#FF00CC 40%,#AA00FF 70%,#00DDFF 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:4px;">COSMIC<br/>GOLF</div>
-      <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:5px;color:rgba(255,255,255,0.3);margin-bottom:36px;">── SPACE EDITION ──</div>
+      <div id="cg-launch-title" style="font-family:'Orbitron',sans-serif;font-size:clamp(38px,6vw,64px);font-weight:900;letter-spacing:6px;text-align:center;line-height:1;background:linear-gradient(135deg,#fff 0%,#FF00CC 40%,#AA00FF 70%,#00DDFF 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:4px;">COSMIC<br/>GOLF</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:5px;color:rgba(255,255,255,0.3);margin-bottom:22px;">── SPACE EDITION ──</div>
     `;
     frag.appendChild(titleWrap);
 
     // Card
     const card = document.createElement('div');
+    card.id = 'cg-launch-card';
     card.style.cssText = [
       'width:100%', 'background:rgba(10,6,26,0.78)',
       'border:1px solid rgba(255,0,204,0.3)',
@@ -982,6 +994,11 @@ export class NameEntryOverlay {
     btn.addEventListener('pointerup', () => { btn.style.transform = 'scale(1)'; this._confirm(input); });
     card.appendChild(btn);
 
+    const launchHint = document.createElement('div');
+    launchHint.style.cssText = "margin-top:10px;text-align:center;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:2px;color:rgba(255,255,255,0.35);";
+    launchHint.textContent = 'ENTER TO LAUNCH · FIRST SHOT STARTS FAST';
+    card.appendChild(launchHint);
+
     // Divider
     const divider = document.createElement('div');
     divider.style.cssText = 'display:flex;align-items:center;gap:12px;margin:18px 0;';
@@ -1012,15 +1029,40 @@ export class NameEntryOverlay {
     }
     card.appendChild(quickRow);
 
+    const roomDetails = document.createElement('details');
+    roomDetails.id = 'cg-private-room';
+    roomDetails.open = Boolean(presetRoom);
+    roomDetails.style.cssText = 'margin-top:16px;border:1px solid rgba(0,221,255,0.14);border-radius:12px;background:rgba(0,221,255,0.035);overflow:hidden;';
+
+    const roomSummary = document.createElement('summary');
+    roomSummary.style.cssText = [
+      'display:flex',
+      'align-items:center',
+      'gap:8px',
+      'padding:11px 13px',
+      'cursor:pointer',
+      "font-family:'JetBrains Mono',monospace",
+      'font-size:10px',
+      'letter-spacing:2px',
+      'color:rgba(159,247,255,0.76)',
+      'list-style:none',
+      'user-select:none',
+    ].join(';');
+    roomSummary.innerHTML = '<span>PRIVATE ROOM / BOSS TEST</span>';
+    roomDetails.appendChild(roomSummary);
+
+    const roomContent = document.createElement('div');
+    roomContent.style.cssText = 'padding:0 13px 14px;';
+
     const roomDivider = document.createElement('div');
     roomDivider.style.cssText = 'display:flex;align-items:center;gap:12px;margin:18px 0 14px;';
     roomDivider.innerHTML = `<div style="flex:1;height:1px;background:rgba(255,255,255,0.07);"></div><span style="font-family:'JetBrains Mono',monospace;font-size:9px;color:rgba(255,255,255,0.25);letter-spacing:2px;">PRIVATE ROOM</span><div style="flex:1;height:1px;background:rgba(255,255,255,0.07);"></div>`;
-    card.appendChild(roomDivider);
+    roomContent.appendChild(roomDivider);
 
     const roomLabel = document.createElement('div');
     roomLabel.style.cssText = "display:block;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:4px;color:rgba(255,255,255,0.45);margin-bottom:8px;";
     roomLabel.textContent = 'ROOM CODE';
-    card.appendChild(roomLabel);
+    roomContent.appendChild(roomLabel);
 
     const roomInput = document.createElement('input');
     roomInput.type = 'text';
@@ -1046,14 +1088,14 @@ export class NameEntryOverlay {
     });
     roomInput.addEventListener('keydown', e => { if (e.key === 'Enter') this._confirm(input, { mode: 'join', roomCode: roomInput.value }); });
     this._roomInput = roomInput;
-    card.appendChild(roomInput);
+    roomContent.appendChild(roomInput);
 
     const roomHint = document.createElement('div');
     roomHint.style.cssText = "margin-top:6px;margin-bottom:16px;font-family:'Inter Tight',sans-serif;font-size:12px;color:rgba(255,255,255,0.38);line-height:1.45;";
     roomHint.textContent = presetRoom === 'BOSS'
       ? 'BOSS room = Worldeater-only finale test'
       : 'Create a room to share, or paste an invite room code';
-    card.appendChild(roomHint);
+    roomContent.appendChild(roomHint);
 
     const roomButtons = document.createElement('div');
     roomButtons.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:10px;';
@@ -1108,12 +1150,15 @@ export class NameEntryOverlay {
     joinBtn.addEventListener('click', () => this._confirm(input, { mode: 'join', roomCode: roomInput.value }));
     roomButtons.appendChild(joinBtn);
 
-    card.appendChild(roomButtons);
+    roomContent.appendChild(roomButtons);
+    roomDetails.appendChild(roomContent);
+    card.appendChild(roomDetails);
 
     frag.appendChild(card);
 
     // Stats strip
     const stats = document.createElement('div');
+    stats.id = 'cg-launch-stats';
     stats.style.cssText = 'margin-top:24px;display:flex;gap:0;border:1px solid rgba(255,255,255,0.07);border-radius:12px;overflow:hidden;background:rgba(255,255,255,0.03);backdrop-filter:blur(10px);width:100%;';
     this._statsEl = stats;
     this._renderStats(stats);
@@ -1308,7 +1353,12 @@ export class NameEntryOverlay {
       this._roomInput.value = this._sanitizeRoomCode(params.get('room') || localStorage.getItem('cg_last_room') || '');
     }
 
-    setTimeout(() => { if (this._nameInput) this._nameInput.focus(); }, 60);
+    setTimeout(() => {
+      if (this._nameInput) {
+        this._nameInput.focus();
+        if (this._nameInput.value) this._nameInput.select();
+      }
+    }, 60);
     return new Promise(resolve => { this._resolve = resolve; });
   }
 }

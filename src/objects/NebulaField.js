@@ -54,6 +54,7 @@ export class NebulaField {
   constructor(scene) {
     this._meshes = [];
     this._scene  = scene;
+    this._quality = { visible: true, opacityScale: 1, sizeScale: 1 };
   }
 
   /** Rebuild every hole — matches new color palette. */
@@ -73,6 +74,22 @@ export class NebulaField {
     this._buildDistantGalaxies(spr);
     this._buildEmissionNebulae(palColors, spr);
     this._buildGasPillars(palColors, spr);
+    this._applyQuality();
+  }
+
+  setQuality({ visible = true, opacityScale = 1, sizeScale = 1 } = {}) {
+    this._quality = { visible, opacityScale, sizeScale };
+    this._applyQuality();
+  }
+
+  _applyQuality() {
+    for (const mesh of this._meshes) {
+      mesh.visible = this._quality.visible;
+      if (mesh.material._baseOpacity === undefined) mesh.material._baseOpacity = mesh.material.opacity;
+      if (mesh.material._baseSize === undefined) mesh.material._baseSize = mesh.material.size;
+      mesh.material.opacity = mesh.material._baseOpacity * this._quality.opacityScale;
+      mesh.material.size = mesh.material._baseSize * this._quality.sizeScale;
+    }
   }
 
   // ── 1. Galactic arm — milky-way band arc in deep background ──
@@ -255,6 +272,8 @@ export class NebulaField {
       sizeAttenuation: true,
       alphaTest:       map ? 0.001 : 0,
     });
+    mat._baseOpacity = opacity;
+    mat._baseSize = size;
 
     const mesh = new Points(geo, mat);
     mesh.renderOrder = 1;

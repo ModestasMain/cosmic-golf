@@ -100,6 +100,7 @@ export class StarField {
   constructor(scene) {
     this.scene   = scene;
     this._layers = []; // { pts, geo, mat, baseClr }
+    this._qualityVisible = true;
     this._build();
     eventBus.on(Events.HOLE_LOADED, () => {});
   }
@@ -259,8 +260,15 @@ export class StarField {
     }
   }
 
+  setQuality({ visible = true, brightness = 1.0, heroScale = 1.0, shimmerAmp = 0.12 } = {}) {
+    this._qualityVisible = visible;
+    for (const { pts } of this._layers) pts.visible = visible;
+    if (visible) this.setStarParams({ brightness, heroScale, shimmerAmp });
+  }
+
   /** Animate star shimmer — call every frame. */
   update(dt) {
+    if (!this._qualityVisible) return;
     this._t = (this._t ?? 0) + dt;
     const t   = this._t;
     const amp = this._shimmerAmp ?? 0.12;

@@ -72,6 +72,29 @@ export class MultiplayerManager {
     return code;
   }
 
+  startSolo(playerName = 'PLAYER', playerColor) {
+    if (this._heartbeatTimer) {
+      clearInterval(this._heartbeatTimer);
+      this._heartbeatTimer = null;
+    }
+    if (this.ws) {
+      this.ws.onclose = null;
+      this.ws.close();
+      this.ws = null;
+    }
+    this.playerId = `solo_${Date.now()}`;
+    this.localColor = (playerColor != null && playerColor !== 0xffffff)
+      ? playerColor
+      : this._colorFromId(this.playerId);
+    this.roomCode = null;
+    this.players.clear();
+    this._isConnected = false;
+    this._isSolo = false;
+    gameState.roomCode = null;
+    this._enterSoloMode();
+    this.updateIdentity(playerName, this.localColor);
+  }
+
   /** Try PUBLIC, PUBLIC_2, PUBLIC_3 … up to MAX_PUBLIC_SLOTS before going solo. */
   _connectPublicSlot(playerName, playerColor, slot) {
     const code = slot === 1 ? MULTIPLAYER.PUBLIC_ROOM : `${MULTIPLAYER.PUBLIC_ROOM}_${slot}`;

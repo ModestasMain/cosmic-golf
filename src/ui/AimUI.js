@@ -31,6 +31,7 @@ export class AimUI {
     this._aimHintVisible = true;
     this._penaltyTimer = null;
     this._tutorialDismissed = sessionStorage.getItem('cosmic-golf-howto-dismissed') === '1';
+    this._shotTakenThisHole = false;
 
     this._setupVolumeSlider();
     this._setupCupIndicator();
@@ -309,18 +310,22 @@ export class AimUI {
 
   _setupListeners() {
     eventBus.on(Events.AIM_START, () => {
-      this._setHint('DRAG TO AIM  •  DRAG PYRAMID FOR POWER', 'rgba(255,255,255,0.55)');
+      const text = this._shotTakenThisHole
+        ? 'DRAG TO AIM  •  DRAG PYRAMID FOR POWER'
+        : 'AIM AT THE BLACK HOLE  •  DRAG PYRAMID FOR POWER';
+      this._setHint(text, 'rgba(255,255,255,0.55)');
     });
 
     eventBus.on(Events.AIM_DIR_LOCKED, () => {
-      this._setHint('DRAG PYRAMID UP/DOWN FOR POWER  •  TAP PYRAMID TO SHOOT', 'rgba(100,220,255,0.7)');
+      this._setHint('SET POWER  •  RELEASE TO SHOOT', 'rgba(100,220,255,0.74)');
     });
 
     eventBus.on(Events.AIM_CANCEL, () => {
-      this._setHint('DRAG NEAR BALL TO AIM', 'rgba(255,255,255,0.4)');
+      this._showAimHint();
     });
 
     eventBus.on(Events.SHOT_TAKEN, () => {
+      this._shotTakenThisHole = true;
       this._setHint('', 'rgba(255,255,255,0.4)');
       if (!this._tutorialDismissed) {
         this._tutorialDismissed = true;
@@ -330,7 +335,8 @@ export class AimUI {
     });
 
     eventBus.on(Events.HOLE_LOADED, ({ archetype }) => {
-      this._setHint('DRAG NEAR BALL TO AIM', 'rgba(255,255,255,0.4)');
+      this._shotTakenThisHole = false;
+      this._showAimHint();
       if (this._els.archetype) {
         this._els.archetype.textContent = archetype ? (ARCHETYPE_LABELS[archetype] ?? archetype) : '';
       }
@@ -379,7 +385,10 @@ export class AimUI {
   }
 
   _showAimHint() {
-    this._setHint('DRAG NEAR BALL TO AIM', 'rgba(255,255,255,0.4)');
+    const text = this._shotTakenThisHole
+      ? 'DRAG NEAR BALL TO AIM'
+      : 'DRAG NEAR BALL TO AIM  •  THEN DRAG PYRAMID FOR POWER';
+    this._setHint(text, 'rgba(100,220,255,0.58)');
   }
 
   _showPenalty() {

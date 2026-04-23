@@ -24,6 +24,12 @@ import { BallStylePicker } from './ui/BallStylePicker.js';
 import { audioManager } from './audio/AudioManager.js';
 
 const LOCAL_DEV_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
+const QUALITY_MODE_ORDER = ['auto', 'high', 'medium', 'performance'];
+const MANUAL_QUALITY_KEYS = {
+  high: 'high',
+  medium: 'medium',
+  performance: 'low',
+};
 
 function isLocalDevHost() {
   return import.meta.env.DEV && LOCAL_DEV_HOSTS.has(window.location.hostname);
@@ -83,9 +89,12 @@ class Game {
     this._hiddenInterval = null;
     this._launchTutorialTimer = null;
     this._firstShotTakenThisRun = false;
-    this._qualityMode = localStorage.getItem('cosmic_quality_mode') || 'auto';
+    this._qualityMode = this._normalizeQualityMode(localStorage.getItem('cosmic_quality_mode') || 'auto');
     this._qualityKey = null;
     this._quality = null;
+    this._gpuTier = null;
+    this._autoQualityOverrideKey = null;
+    this._qualityFrameStats = { frames: 0, elapsed: 0 };
     this.devPanel = null;
     this._init();
   }
@@ -114,6 +123,8 @@ class Game {
       stencil: false,
       depth: true,
     });
+    this._gpuTier = this._detectGpuTier();
+    this._refreshQualityProfile();
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this._quality.pixelRatioCap));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setClearColor(0x000000);
@@ -425,7 +436,7 @@ class Game {
       'text-transform:uppercase',
     ].join(';');
     perfBtn.addEventListener('click', () => {
-      this._setQualityMode(this._qualityMode === 'performance' ? 'auto' : 'performance');
+      this._cycleQualityMode();
     });
     panel.appendChild(perfBtn);
     this._qualityToggleBtn = perfBtn;
@@ -608,6 +619,7 @@ class Game {
 
     this._updatePlayerLabels();
     this.composer.render(dt);
+    this._trackAutoQuality(dt);
   }
 
   _updatePlayerLabels() {
@@ -637,6 +649,7 @@ class Game {
 
   _onResize() {
     const previousKey = this._qualityKey;
+    if (this._qualityMode === 'auto') this._autoQualityOverrideKey = null;
     if (this._qualityMode === 'auto') this._refreshQualityProfile();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this._quality.pixelRatioCap));
@@ -649,20 +662,72 @@ class Game {
     this.holeScene.onResize();
   }
 
+  _normalizeQualityMode(mode) {
+    return QUALITY_MODE_ORDER.includes(mode) ? mode : 'auto';
+  }
+
+  _detectGpuTier() {
+    if (!this.renderer) return null;
+    try {
+      const gl = this.renderer.getContext();
+      const maxTexture = gl.getParameter(gl.MAX_TEXTURE_SIZE) || 0;
+      const maxRenderbuffer = gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) || 0;
+      const highp = gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT)?.precision ?? 0;
+
+      if (maxTexture >= 16384 && maxRenderbuffer >= 8192 && highp >= 20) return 'high';
+      if (maxTexture >= 8192 && maxRenderbuffer >= 4096 && highp >= 16) return 'medium';
+      return 'low';
+    } catch {
+      return null;
+    }
+  }
+
   _detectAutoQualityKey() {
-    const width = Math.min(window.innerWidth, window.innerHeight);
+    const shortSide = Math.min(window.innerWidth, window.innerHeight);
+    const longSide = Math.max(window.innerWidth, window.innerHeight);
     const coarse = window.matchMedia?.('(pointer: coarse)')?.matches ?? false;
     const dpr = window.devicePixelRatio || 1;
-    const cores = navigator.hardwareConcurrency || 8;
-    const memory = navigator.deviceMemory || 8;
+    const coresKnown = Number.isFinite(navigator.hardwareConcurrency);
+    const memoryKnown = Number.isFinite(navigator.deviceMemory);
+    const cores = coresKnown ? navigator.hardwareConcurrency : (coarse ? 6 : 8);
+    const memory = memoryKnown ? navigator.deviceMemory : (coarse ? 6 : 8);
+    const effectiveDpr = Math.min(dpr, 2.5);
+    const renderPixels = shortSide * longSide * effectiveDpr * effectiveDpr;
 
-    if (coarse && (width <= 430 || dpr >= 3 || cores <= 4 || memory <= 4)) return 'low';
-    if (coarse || width <= 900 || dpr > 1.8 || cores <= 6 || memory <= 6) return 'medium';
-    return 'high';
+    let score = 0;
+
+    if (cores >= 8) score += 3;
+    else if (cores >= 6) score += 2;
+    else if (cores >= 4) score += 1;
+    else score -= 1;
+
+    if (memory >= 8) score += 3;
+    else if (memory >= 6) score += 2;
+    else if (memory >= 4) score += 1;
+    else if (memory <= 2) score -= 2;
+
+    if (this._gpuTier === 'high') score += 3;
+    else if (this._gpuTier === 'medium') score += 1;
+    else if (this._gpuTier === 'low') score -= 2;
+
+    if (renderPixels > 5_500_000) score -= 2;
+    else if (renderPixels > 3_500_000) score -= 1;
+    else if (renderPixels < 1_500_000) score += 1;
+
+    if (!coarse && shortSide > 900) score += 1;
+    if (coarse && cores >= 8 && (!memoryKnown || memory >= 6)) score += 1;
+    if (coarse && shortSide <= 360 && cores <= 4) score -= 1;
+
+    if (coarse && cores <= 4 && memoryKnown && memory <= 3) return 'low';
+    if (score >= 5) return 'high';
+    if (score >= 1) return 'medium';
+    return 'low';
   }
 
   _refreshQualityProfile() {
-    const key = this._qualityMode === 'performance' ? 'low' : this._detectAutoQualityKey();
+    this._qualityMode = this._normalizeQualityMode(this._qualityMode);
+    const manualKey = MANUAL_QUALITY_KEYS[this._qualityMode];
+    const key = manualKey ?? this._autoQualityOverrideKey ?? this._detectAutoQualityKey();
     this._qualityKey = key;
     this._quality = QUALITY_PROFILES[key];
   }
@@ -703,8 +768,56 @@ class Game {
   }
 
   _setQualityMode(mode) {
-    this._qualityMode = mode;
-    localStorage.setItem('cosmic_quality_mode', mode);
+    this._qualityMode = this._normalizeQualityMode(mode);
+    this._autoQualityOverrideKey = null;
+    this._resetQualityMonitor();
+    localStorage.setItem('cosmic_quality_mode', this._qualityMode);
+    this._refreshQualityProfile();
+    if (this.renderer) {
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this._quality.pixelRatioCap));
+    }
+    if (this.bloom && this.holeScene) {
+      this._rebuildComposer();
+      this._applySceneQuality();
+    }
+    this._updateQualityToggle();
+  }
+
+  _cycleQualityMode() {
+    const current = QUALITY_MODE_ORDER.indexOf(this._qualityMode);
+    const next = QUALITY_MODE_ORDER[(current + 1) % QUALITY_MODE_ORDER.length] ?? 'auto';
+    this._setQualityMode(next);
+  }
+
+  _resetQualityMonitor() {
+    this._qualityFrameStats = { frames: 0, elapsed: 0 };
+  }
+
+  _trackAutoQuality(dt) {
+    if (this._qualityMode !== 'auto' || document.hidden || !this._qualityKey) return;
+    if (dt <= 0 || dt >= 0.12) return;
+
+    const stats = this._qualityFrameStats;
+    stats.frames += 1;
+    stats.elapsed += dt;
+    if (stats.elapsed < 5 || stats.frames < 120) return;
+
+    const fps = stats.frames / stats.elapsed;
+    this._resetQualityMonitor();
+
+    if (this._qualityKey === 'high' && fps < 42) {
+      this._setAutoQualityOverride('medium');
+    } else if (this._qualityKey === 'medium' && fps < 34) {
+      this._setAutoQualityOverride('low');
+    }
+  }
+
+  _setAutoQualityOverride(key) {
+    if (this._qualityMode !== 'auto' || this._autoQualityOverrideKey === key) return;
+    const rank = { low: 0, medium: 1, high: 2 };
+    if (rank[key] >= rank[this._qualityKey]) return;
+
+    this._autoQualityOverrideKey = key;
     this._refreshQualityProfile();
     if (this.renderer) {
       this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this._quality.pixelRatioCap));
@@ -718,8 +831,14 @@ class Game {
 
   _updateQualityToggle() {
     if (!this._qualityToggleBtn) return;
-    const modeLabel = this._qualityMode === 'performance' ? 'Forced Low FX' : `Auto · ${this._quality.label}`;
-    this._qualityToggleBtn.innerHTML = `<span>Performance</span><strong style="font-weight:700;color:rgba(159,247,255,0.92);letter-spacing:0.08em;">${modeLabel}</strong>`;
+    const modeLabel = this._qualityMode === 'auto'
+      ? `Auto · ${this._quality.label}`
+      : {
+          high: 'Full FX',
+          medium: 'Balanced FX',
+          performance: 'Low FX',
+        }[this._qualityMode] ?? `Auto · ${this._quality.label}`;
+    this._qualityToggleBtn.innerHTML = `<span>Quality</span><strong style="font-weight:700;color:rgba(159,247,255,0.92);letter-spacing:0.08em;">${modeLabel}</strong>`;
   }
 
   _clearLaunchAssistTutorial() {

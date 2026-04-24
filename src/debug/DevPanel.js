@@ -62,6 +62,73 @@ export class DevPanel {
     const { spaceBg } = this._refs;
     const p = spaceBg.params;
     const apply = () => spaceBg.applyParams();
+    const imageState = {
+      activeImage: spaceBg.textureName ?? 'procedural',
+      uploadPng: () => {},
+      loadCubemapJson: () => {},
+      useProcedural: () => {},
+      resetImageGrade: () => {},
+      resetOrientation: () => {},
+    };
+    let activeImageCtrl = null;
+    const syncActiveImage = () => {
+      imageState.activeImage = spaceBg.textureName ?? 'procedural';
+      activeImageCtrl?.updateDisplay();
+    };
+    imageState.uploadPng = () => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/png,image/jpeg,image/jpg,image/webp';
+      input.style.cssText = 'position:fixed;top:-9999px;opacity:0;pointer-events:none';
+      document.body.appendChild(input);
+      input.onchange = async (e) => {
+        document.body.removeChild(input);
+        const file = e.target.files?.[0];
+        if (!file) return;
+        try {
+          await spaceBg.loadTextureFromFile(file);
+          syncActiveImage();
+        } catch (err) {
+          console.error('[DevPanel] Void PNG load failed:', err);
+        }
+      };
+      input.click();
+    };
+    imageState.loadCubemapJson = async () => {
+      const manifestPath = window.prompt('Paste cubemap manifest path', '/cubemaps/void/cubemap.json');
+      if (!manifestPath) return;
+      try {
+        await spaceBg.loadCubeMapFromManifest(manifestPath);
+        syncActiveImage();
+      } catch (err) {
+        console.error('[DevPanel] Cubemap load failed:', err);
+      }
+    };
+    imageState.useProcedural = () => {
+      spaceBg.useProcedural();
+      syncActiveImage();
+    };
+    imageState.resetImageGrade = () => {
+      p.imageExposure = 1.0;
+      p.imageContrast = 1.0;
+      p.imageSaturation = 1.0;
+      p.imageBlackPoint = 0.0;
+      p.imageHighlightCompression = 0.0;
+      p.imagePoleFadeStart = 0.72;
+      p.imagePoleFadeStrength = 0.0;
+      p.imageSeamBlendWidth = 0.04;
+      p.imageSeamBlendStrength = 0.0;
+      p.imageSeamBlur = 0.0;
+      apply();
+      f.controllersRecursive().forEach(c => c.updateDisplay());
+    };
+    imageState.resetOrientation = () => {
+      p.rotationX = 0.0;
+      p.rotationY = 0.0;
+      p.rotationZ = 0.0;
+      apply();
+      f.controllersRecursive().forEach(c => c.updateDisplay());
+    };
     const load = () => {
       const text = window.prompt('Paste Void JSON');
       if (!text) return;
@@ -76,6 +143,32 @@ export class DevPanel {
     };
 
     const f = gui.addFolder('🌌 Void Background');
+    activeImageCtrl = f.add(imageState, 'activeImage').name('Active image');
+    activeImageCtrl.disable?.();
+    f.add(imageState, 'uploadPng').name('🖼 Upload PNG');
+    f.add(imageState, 'loadCubemapJson').name('🧊 Load cubemap JSON');
+    f.add(imageState, 'useProcedural').name('↩ Procedural void');
+    f.add(p, 'sphereRadius', 1200, 12000, 50).name('Sphere radius').onChange(apply);
+
+    const orient = f.addFolder('Orientation');
+    orient.add(p, 'rotationX', -180, 180, 1).name('Pitch').onChange(apply);
+    orient.add(p, 'rotationY', -180, 180, 1).name('Yaw').onChange(apply);
+    orient.add(p, 'rotationZ', -180, 180, 1).name('Roll').onChange(apply);
+    orient.add(imageState, 'resetOrientation').name('↺ Reset orientation');
+
+    const img = f.addFolder('Uploaded Image  (image only)');
+    img.add(p, 'imageExposure', 0.35, 2.5, 0.01).name('Brightness').onChange(apply);
+    img.add(p, 'imageContrast', 0.4, 1.8, 0.01).name('Contrast').onChange(apply);
+    img.add(p, 'imageSaturation', 0, 2, 0.01).name('Saturation').onChange(apply);
+    img.add(p, 'imageBlackPoint', 0, 0.35, 0.005).name('Deepen blacks').onChange(apply);
+    img.add(p, 'imageHighlightCompression', 0, 1.5, 0.01).name('Compress highlights').onChange(apply);
+    img.add(p, 'imageSeamBlendStrength', 0, 1, 0.01).name('Hide seam').onChange(apply);
+    img.add(p, 'imageSeamBlendWidth', 0.005, 0.18, 0.005).name('Seam blend width').onChange(apply);
+    img.add(p, 'imageSeamBlur', 0, 0.03, 0.0005).name('Seam blur').onChange(apply);
+    img.add(p, 'imagePoleFadeStrength', 0, 1, 0.01).name('Hide pole pinch').onChange(apply);
+    img.add(p, 'imagePoleFadeStart', 0.45, 0.98, 0.01).name('Pole fade start').onChange(apply);
+    img.add(imageState, 'resetImageGrade').name('↺ Reset image grade');
+
     f.addColor(p, 'voidColor')              .name('Void base colour')   .onChange(apply);
     f.add(p, 'warpAmount',  0,   1,   0.02) .name('Domain warp')        .onChange(apply);
     f.add(p, 'exposure',    0.5, 6,   0.05) .name('Exposure')           .onChange(apply);

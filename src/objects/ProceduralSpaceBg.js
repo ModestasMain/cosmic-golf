@@ -7,7 +7,14 @@
 //   Uniform-backed params → DevPanel can tweak everything live
 // ============================================================
 
-import { SphereGeometry, MeshBasicMaterial, Mesh, BackSide, Color, Vector3 } from 'three';
+import {
+  SphereGeometry, MeshBasicMaterial, Mesh, BackSide, Color, Vector3,
+  TextureLoader, CubeTextureLoader, SRGBColorSpace, LinearFilter, ClampToEdgeWrapping, EquirectangularReflectionMapping,
+} from 'three';
+
+const VOID_BG_RADIUS = 6000;
+const VOID_BG_WIDTH_SEGMENTS = 256;
+const VOID_BG_HEIGHT_SEGMENTS = 128;
 
 export const DEFAULT_VOID_PARAMS = {
   voidColor:     '#050210',
@@ -24,6 +31,20 @@ export const DEFAULT_VOID_PARAMS = {
   exposure:      0.65,
   saturation:    1.3,
   animSpeed:     0.02,
+  imageExposure: 1.0,
+  imageContrast: 1.0,
+  imageSaturation: 1.0,
+  imageBlackPoint: 0.0,
+  imageHighlightCompression: 0.0,
+  imagePoleFadeStart: 0.72,
+  imagePoleFadeStrength: 0.0,
+  imageSeamBlendWidth: 0.04,
+  imageSeamBlendStrength: 0.0,
+  imageSeamBlur: 0.0,
+  sphereRadius: 6000,
+  rotationX:    0.0,
+  rotationY:    0.0,
+  rotationZ:    0.0,
 };
 
 const VERT = /* glsl */`
@@ -121,14 +142,28 @@ export class ProceduralSpaceBg {
     this._material = null;
     this._clock    = 0;
     this._u        = null;
+    this._loader   = new TextureLoader();
+    this._cubeLoader = new CubeTextureLoader();
+    this._texture  = null;
+    this._cubeTexture = null;
+    this._backgroundMode = 'procedural';
+    this.textureName = 'procedural';
     this.params    = { ...DEFAULT_VOID_PARAMS };
   }
 
   load() {
-    const geo = new SphereGeometry(6000, 64, 32);
-    this._material = new MeshBasicMaterial({ side: BackSide, depthWrite: false, fog: false });
+    const geo = new SphereGeometry(VOID_BG_RADIUS, VOID_BG_WIDTH_SEGMENTS, VOID_BG_HEIGHT_SEGMENTS);
+    this._material = this._createProceduralMaterial();
+    this._mesh = new Mesh(geo, this._material);
+    this._mesh.renderOrder = -1000;
+    this._mesh.name = 'proceduralSpaceBg';
+    this._scene.add(this._mesh);
+    this.applyParams();
+  }
 
-    this._material.onBeforeCompile = (shader) => {
+  _createProceduralMaterial() {
+    const material = new MeshBasicMaterial({ side: BackSide, depthWrite: false, fog: false });
+    material.onBeforeCompile = (shader) => {
       const p = this.params;
       this._u = {
         uTime:          { value: 0                    },
@@ -150,42 +185,325 @@ export class ProceduralSpaceBg {
       Object.assign(shader.uniforms, this._u);
       shader.vertexShader   = VERT;
       shader.fragmentShader = FRAG;
-      this._material.userData.shader = shader;
+      material.userData.shader = shader;
+    };
+    return material;
+  }
+
+  _createTextureMaterial(tex) {
+    const material = new MeshBasicMaterial({
+      map: tex,
+      side: BackSide,
+      depthWrite: false,
+      fog: false,
+      toneMapped: false,
+    });
+
+    material.onBeforeCompile = (shader) => {
+      const p = this.params;
+      this._u = {
+        uImageExposure: { value: p.imageExposure },
+        uImageContrast: { value: p.imageContrast },
+        uImageSaturation: { value: p.imageSaturation },
+        uImageBlackPoint: { value: p.imageBlackPoint },
+        uImageHighlightCompression: { value: p.imageHighlightCompression },
+        uImagePoleFadeStart: { value: p.imagePoleFadeStart },
+        uImagePoleFadeStrength: { value: p.imagePoleFadeStrength },
+        uImagePoleFadeColor: { value: hexToV3(p.voidColor) },
+        uImageSeamBlendWidth: { value: p.imageSeamBlendWidth },
+        uImageSeamBlendStrength: { value: p.imageSeamBlendStrength },
+        uImageSeamBlur: { value: p.imageSeamBlur },
+      };
+      Object.assign(shader.uniforms, this._u);
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+uniform float uImageExposure;
+uniform float uImageContrast;
+uniform float uImageSaturation;
+uniform float uImageBlackPoint;
+uniform float uImageHighlightCompression;
+uniform float uImagePoleFadeStart;
+uniform float uImagePoleFadeStrength;
+uniform vec3 uImagePoleFadeColor;
+
+vec3 applyVoidImageGrade(vec3 col, vec2 uv) {
+  col *= uImageExposure;
+  float lum = dot(col, vec3(0.299, 0.587, 0.114));
+  col = mix(vec3(lum), col, uImageSaturation);
+  col = (col - 0.5) * uImageContrast + 0.5;
+  col = max(col - uImageBlackPoint, 0.0) / max(1.0 - uImageBlackPoint, 0.0001);
+  col = col / (1.0 + col * uImageHighlightCompression * 2.0);
+  float pole = smoothstep(uImagePoleFadeStart, 1.0, abs(uv.y - 0.5) * 2.0);
+  col = mix(col, uImagePoleFadeColor, pole * uImagePoleFadeStrength);
+  return clamp(col, 0.0, 1.0);
+}
+`,
+        )
+        .replace(
+          '#include <map_pars_fragment>',
+          `#include <map_pars_fragment>
+uniform float uImageSeamBlendWidth;
+uniform float uImageSeamBlendStrength;
+uniform float uImageSeamBlur;
+
+vec2 wrapVoidUv(vec2 uv) {
+  return vec2(fract(uv.x + 1.0), clamp(uv.y, 0.0001, 0.9999));
+}
+
+vec4 blurVoidMap(vec2 uv, float blur) {
+  vec4 col = texture2D(map, wrapVoidUv(uv)) * 0.40;
+  col += texture2D(map, wrapVoidUv(uv + vec2(-blur * 2.0, 0.0))) * 0.10;
+  col += texture2D(map, wrapVoidUv(uv + vec2(-blur, 0.0))) * 0.20;
+  col += texture2D(map, wrapVoidUv(uv + vec2(blur, 0.0))) * 0.20;
+  col += texture2D(map, wrapVoidUv(uv + vec2(blur * 2.0, 0.0))) * 0.10;
+  return col;
+}
+
+vec4 sampleVoidMap(vec2 uv) {
+  float width = max(uImageSeamBlendWidth, 0.0001);
+  float distToSeam = min(uv.x, 1.0 - uv.x);
+  float seamZone = 1.0 - smoothstep(0.0, width, distToSeam);
+  float seamMask = seamZone * uImageSeamBlendStrength;
+  float blur = uImageSeamBlur * seamZone;
+  vec4 base = blur > 0.0001
+    ? blurVoidMap(uv, blur)
+    : texture2D(map, wrapVoidUv(uv));
+
+  if (seamMask > 0.0001) {
+    float seamOffset = uv.x < 0.5 ? 1.0 : -1.0;
+    vec4 seam = blurVoidMap(vec2(uv.x + seamOffset, uv.y), max(blur, 0.0005));
+    base = mix(base, seam, clamp(seamMask, 0.0, 1.0));
+  }
+
+  return base;
+}
+`,
+        )
+        .replace(
+          '#include <map_fragment>',
+          `#ifdef USE_MAP
+  vec4 sampledDiffuseColor = sampleVoidMap(vMapUv);
+  diffuseColor *= sampledDiffuseColor;
+#endif
+diffuseColor.rgb = applyVoidImageGrade(diffuseColor.rgb, vMapUv);
+`,
+        );
+      material.userData.shader = shader;
     };
 
-    this._mesh = new Mesh(geo, this._material);
-    this._mesh.renderOrder = -1000;
-    this._mesh.name = 'proceduralSpaceBg';
-    this._scene.add(this._mesh);
+    return material;
+  }
+
+  _prepareTexture(tex, name) {
+    tex.name = name || 'uploaded void';
+    tex.colorSpace = SRGBColorSpace;
+    tex.generateMipmaps = false;
+    tex.anisotropy = 8;
+    tex.minFilter = LinearFilter;
+    tex.magFilter = LinearFilter;
+    tex.wrapS = ClampToEdgeWrapping;
+    tex.wrapT = ClampToEdgeWrapping;
+    tex.mapping = EquirectangularReflectionMapping;
+    tex.needsUpdate = true;
+    return tex;
+  }
+
+  _disposeTexture() {
+    if (!this._texture) return;
+    if (this._scene.background === this._texture) this._scene.background = null;
+    this._texture.dispose();
+    this._texture = null;
+  }
+
+  _disposeCubeTexture() {
+    if (!this._cubeTexture) return;
+    if (this._scene.background === this._cubeTexture) this._scene.background = null;
+    this._cubeTexture.dispose();
+    this._cubeTexture = null;
+  }
+
+  _swapMaterial(nextMaterial) {
+    if (!this._mesh) return;
+    const oldMaterial = this._mesh.material;
+    this._mesh.material = nextMaterial;
+    if (oldMaterial) oldMaterial.dispose();
+    this._material = nextMaterial;
+  }
+
+  _loadTexture(url, name, revokeUrl = false) {
+    return new Promise((resolve, reject) => {
+      this._loader.load(
+        url,
+        (tex) => {
+          if (revokeUrl) URL.revokeObjectURL(url);
+          this.useTexture(this._prepareTexture(tex, name));
+          resolve(tex);
+        },
+        undefined,
+        (err) => {
+          if (revokeUrl) URL.revokeObjectURL(url);
+          reject(err);
+        },
+      );
+    });
+  }
+
+  loadTextureFromFile(file) {
+    if (!file || !file.type?.startsWith('image/')) {
+      return Promise.reject(new Error('Void background upload must be an image file.'));
+    }
+    return this._loadTexture(URL.createObjectURL(file), file.name, true);
+  }
+
+  loadTextureFromPath(path) {
+    if (String(path).toLowerCase().endsWith('.json')) {
+      return this.loadCubeMapFromManifest(path);
+    }
+    return this._loadTexture(path, path, false);
+  }
+
+  async loadCubeMapFromManifest(manifestPath) {
+    const res = await fetch(manifestPath, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`Could not load cubemap manifest: ${manifestPath}`);
+    const manifest = await res.json();
+    const faces = manifest?.faces || {};
+    const urls = ['px', 'nx', 'py', 'ny', 'pz', 'nz'].map((key) => {
+      if (!faces[key]) throw new Error(`Cubemap manifest missing face: ${key}`);
+      return new URL(faces[key], res.url).toString();
+    });
+    return this.loadCubeMapFromFaces(urls, manifestPath);
+  }
+
+  loadCubeMapFromFaces(faceUrls, name = 'cubemap') {
+    return new Promise((resolve, reject) => {
+      this._cubeLoader.load(
+        faceUrls,
+        (cubeTexture) => {
+          cubeTexture.colorSpace = SRGBColorSpace;
+          cubeTexture.name = name;
+          this.useCubeTexture(cubeTexture);
+          resolve(cubeTexture);
+        },
+        undefined,
+        reject,
+      );
+    });
+  }
+
+  useTexture(tex) {
+    this._disposeCubeTexture();
+    this._disposeTexture();
+    this._texture = tex;
+    this._backgroundMode = 'equirect';
+    this.textureName = tex?.name || 'uploaded void';
+    this._u = null;
+    if (this._mesh) this._mesh.visible = false;
+    this._scene.backgroundBlurriness = 0;
+    this._scene.background = tex;
+    this.applyParams();
+  }
+
+  useCubeTexture(cubeTexture) {
+    this._disposeTexture();
+    this._disposeCubeTexture();
+    this._cubeTexture = cubeTexture;
+    this._backgroundMode = 'cubemap';
+    this.textureName = cubeTexture?.name || 'cubemap';
+    this._u = null;
+    if (this._mesh) this._mesh.visible = false;
+    this._scene.backgroundBlurriness = 0;
+    this._scene.background = cubeTexture;
+    this.applyParams();
+  }
+
+  useProcedural() {
+    this._disposeTexture();
+    this._disposeCubeTexture();
+    this._backgroundMode = 'procedural';
+    this.textureName = 'procedural';
+    this._scene.background = null;
+    this._scene.backgroundIntensity = 1;
+    this._scene.backgroundRotation.set(0, 0, 0);
+    this._u = null;
+    this._swapMaterial(this._createProceduralMaterial());
+    if (this._mesh) this._mesh.visible = true;
+    this.applyParams();
   }
 
   /** Push this.params into live shader uniforms. Called by DevPanel. */
   applyParams() {
+    const p = this.params;
+    if (this._mesh) {
+      const radiusScale = Math.max(0.1, p.sphereRadius / VOID_BG_RADIUS);
+      this._mesh.scale.setScalar(radiusScale);
+      this._mesh.rotation.set(
+        p.rotationX * Math.PI / 180,
+        p.rotationY * Math.PI / 180,
+        p.rotationZ * Math.PI / 180,
+      );
+      this._mesh.visible = this._backgroundMode === 'procedural';
+    }
+
+    if (this._backgroundMode !== 'procedural' && (this._texture || this._cubeTexture)) {
+      this._scene.background = this._cubeTexture || this._texture;
+      this._scene.backgroundBlurriness = 0;
+      this._scene.backgroundIntensity = p.imageExposure;
+      this._scene.backgroundRotation.set(
+        p.rotationX * Math.PI / 180,
+        p.rotationY * Math.PI / 180,
+        p.rotationZ * Math.PI / 180,
+      );
+    }
+
     const u = this._u;
     if (!u) return;
-    const p = this.params;
-    const v1 = hexToV3(p.voidColor);
-    const v2 = hexToV3(p.neb1Color);
-    const v3 = hexToV3(p.neb2Color);
-    u.uVoidColor.value.set(v1.x, v1.y, v1.z);
-    u.uNeb1Color.value.set(v2.x, v2.y, v2.z);
-    u.uNeb2Color.value.set(v3.x, v3.y, v3.z);
-    u.uNeb1Scale.value     = p.neb1Scale;
-    u.uNeb1Intensity.value = p.neb1Intensity;
-    u.uNeb1Sharpness.value = p.neb1Sharpness;
-    u.uNeb2Scale.value     = p.neb2Scale;
-    u.uNeb2Intensity.value = p.neb2Intensity;
-    u.uNeb2Sharpness.value = p.neb2Sharpness;
-    u.uWarmIntensity.value = p.warmIntensity;
-    u.uWarpAmount.value    = p.warpAmount;
-    u.uExposure.value      = p.exposure;
-    u.uSaturation.value    = p.saturation;
-    u.uAnimSpeed.value     = p.animSpeed;
+    if (u.uVoidColor) {
+      const v1 = hexToV3(p.voidColor);
+      const v2 = hexToV3(p.neb1Color);
+      const v3 = hexToV3(p.neb2Color);
+      u.uVoidColor.value.set(v1.x, v1.y, v1.z);
+      u.uNeb1Color.value.set(v2.x, v2.y, v2.z);
+      u.uNeb2Color.value.set(v3.x, v3.y, v3.z);
+      u.uNeb1Scale.value     = p.neb1Scale;
+      u.uNeb1Intensity.value = p.neb1Intensity;
+      u.uNeb1Sharpness.value = p.neb1Sharpness;
+      u.uNeb2Scale.value     = p.neb2Scale;
+      u.uNeb2Intensity.value = p.neb2Intensity;
+      u.uNeb2Sharpness.value = p.neb2Sharpness;
+      u.uWarmIntensity.value = p.warmIntensity;
+      u.uWarpAmount.value    = p.warpAmount;
+      u.uExposure.value      = p.exposure;
+      u.uSaturation.value    = p.saturation;
+      u.uAnimSpeed.value     = p.animSpeed;
+    }
+    if (u.uImageExposure) {
+      const fadeColor = hexToV3(p.voidColor);
+      u.uImageExposure.value = p.imageExposure;
+      u.uImageContrast.value = p.imageContrast;
+      u.uImageSaturation.value = p.imageSaturation;
+      u.uImageBlackPoint.value = p.imageBlackPoint;
+      u.uImageHighlightCompression.value = p.imageHighlightCompression;
+      u.uImagePoleFadeStart.value = p.imagePoleFadeStart;
+      u.uImagePoleFadeStrength.value = p.imagePoleFadeStrength;
+      u.uImagePoleFadeColor.value.set(fadeColor.x, fadeColor.y, fadeColor.z);
+      u.uImageSeamBlendWidth.value = p.imageSeamBlendWidth;
+      u.uImageSeamBlendStrength.value = p.imageSeamBlendStrength;
+      u.uImageSeamBlur.value = p.imageSeamBlur;
+    }
   }
 
-  update(dt) {
+  update(dt, camera = null) {
     this._clock += dt;
-    if (this._u) this._u.uTime.value = this._clock;
+    if (this._backgroundMode !== 'procedural') {
+      const bg = this._cubeTexture || this._texture;
+      if (bg && this._scene.background !== bg) this._scene.background = bg;
+    }
+    if (camera && this._mesh) {
+      this._mesh.position.copy(camera.position);
+    }
+    if (this._u?.uTime) this._u.uTime.value = this._clock;
   }
 
   dispose() {
@@ -195,5 +513,7 @@ export class ProceduralSpaceBg {
       this._material.dispose();
       this._mesh = null;
     }
+    this._disposeTexture();
+    this._disposeCubeTexture();
   }
 }

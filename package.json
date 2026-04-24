@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "npm run build && wrangler dev",
     "test": "playwright test",
+    "upscaler": "node tools/ai-upscale-server.mjs",
     "deploy": "npm run build && wrangler deploy"
   },
   "keywords": [
@@ -20,7 +21,6 @@
   "license": "ISC",
   "dependencies": {
     "@tweenjs/tween.js": "^25.0.0",
-    "gsap": "^3.14.2",
     "lil-gui": "^0.21.0",
     "postprocessing": "^6.39.0",
     "simplex-noise": "^4.0.3",

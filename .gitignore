@@ -10,3 +10,5 @@ test-results/
 !.dev.vars.example
 .env*
 !.env.example
+tools/vendor/
+tools/.tmp/

@@ -611,8 +611,9 @@ export class HoleScene {
     this._worldEaterBounceCooldown = 0;
     this.serverEvents.setEnabled(true);
 
-    // Background is the void.png equirectangular sphere — no color clear needed
-    this.scene.background = null;
+    // Let the active void background mode restore itself (procedural sphere or uploaded pano).
+    if (this.spaceBg) this.spaceBg.applyParams();
+    else this.scene.background = null;
 
     if (!this._devLightLock) {
       this.ambientLight.color.set(palette.ambient);
@@ -1288,7 +1289,7 @@ export class HoleScene {
     }
 
     // Update background ambiance
-    if (this.spaceBg)    this.spaceBg.update(simDt);
+    if (this.spaceBg)    this.spaceBg.update(simDt, this.camera);
     if (this.starField)  this.starField.update(simDt);
     if (this.cometSystem) this.cometSystem.update(simDt);
 

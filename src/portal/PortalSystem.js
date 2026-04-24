@@ -13,7 +13,7 @@ import {
 import { eventBus, Events } from '../core/EventBus.js';
 import { gameState } from '../core/GameState.js';
 
-const EXIT_URL_BASE = 'https://vibej.am/portal/2026';
+const EXIT_URL_BASE = 'https://jam.pieter.com/portal/2026';
 const DOMAIN = window.location.hostname || 'cosmic-golf.pages.dev';
 
 // Distance from tee to each portal, perpendicular to facing direction.

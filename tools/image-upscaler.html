@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Image Upscaler</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: #05050b;
+      color: #f4f1ff;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    body {
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+    main {
+      width: min(760px, 100%);
+      display: grid;
+      gap: 16px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      font-weight: 800;
+    }
+    .panel {
+      display: grid;
+      gap: 14px;
+      padding: 18px;
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 8px;
+      background: rgba(255,255,255,0.045);
+    }
+    .status {
+      min-height: 18px;
+      color: rgba(244,241,255,0.68);
+      font-size: 13px;
+    }
+    .drop {
+      display: grid;
+      place-items: center;
+      min-height: 180px;
+      border: 1px dashed rgba(186,143,255,0.55);
+      border-radius: 8px;
+      background: rgba(160,92,255,0.075);
+      cursor: pointer;
+      overflow: hidden;
+      transition: border-color 120ms ease, background 120ms ease;
+    }
+    .drop:hover,
+    .drop.drag {
+      border-color: rgba(255,107,221,0.9);
+      background: rgba(255,107,221,0.09);
+    }
+    .drop span {
+      color: rgba(244,241,255,0.72);
+      font-size: 14px;
+    }
+    .drop img {
+      display: block;
+      width: 100%;
+      max-height: 360px;
+      object-fit: contain;
+      background: #020207;
+    }
+    .controls {
+      display: grid;
+      grid-template-columns: 1fr 160px 160px;
+      gap: 10px;
+      align-items: center;
+    }
+    select,
+    button,
+    a.download {
+      width: 100%;
+      height: 42px;
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 6px;
+      background: rgba(255,255,255,0.08);
+      color: #fff;
+      font: inherit;
+    }
+    select {
+      padding: 0 12px;
+      appearance: none;
+    }
+    button,
+    a.download {
+      display: inline-grid;
+      place-items: center;
+      text-decoration: none;
+      cursor: pointer;
+      font-weight: 700;
+    }
+    button {
+      background: linear-gradient(90deg, #8e3bff, #ff26c9);
+      border-color: transparent;
+    }
+    button:disabled,
+    select:disabled,
+    a.download.disabled {
+      opacity: 0.38;
+      pointer-events: none;
+    }
+    .meta {
+      min-height: 20px;
+      color: rgba(244,241,255,0.64);
+      font-size: 13px;
+      overflow-wrap: anywhere;
+    }
+    .progress {
+      height: 4px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.1);
+      opacity: 0;
+    }
+    .progress.active { opacity: 1; }
+    .bar {
+      width: 35%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #8e3bff, #ff26c9);
+      animation: slide 850ms ease-in-out infinite alternate;
+    }
+    input[type="file"] { display: none; }
+    code {
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: rgba(255,255,255,0.08);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+    }
+    @keyframes slide {
+      from { transform: translateX(-80%); }
+      to { transform: translateX(260%); }
+    }
+    @media (max-width: 640px) {
+      body { padding: 14px; }
+      .controls { grid-template-columns: 1fr; }
+      h1 { font-size: 22px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>AI Image Upscaler</h1>
+    <section class="panel">
+      <div class="status" id="status">Checking local AI engine...</div>
+      <label class="drop" id="drop">
+        <input id="file" type="file" accept="image/png,image/jpeg,image/jpg,image/webp">
+        <span id="placeholder">Upload or drop image</span>
+        <img id="preview" alt="" hidden>
+      </label>
+      <div class="controls">
+        <select id="target">
+          <option value="skybox4k">4K skybox - 4096 x 2048</option>
+          <option value="skybox8k">8K skybox - 8192 x 4096</option>
+          <option value="cubemap4k">Cubemap - 1024 px faces</option>
+          <option value="cubemap8k">Cubemap - 2048 px faces</option>
+          <option value="long4k">4K keep shape - long edge 4096</option>
+          <option value="long8k">8K keep shape - long edge 8192</option>
+        </select>
+        <button id="upscale" disabled>Upscale</button>
+        <a id="download" class="download disabled">Download</a>
+      </div>
+      <div class="progress" id="progress"><div class="bar"></div></div>
+      <div class="meta" id="meta">Start the local server with <code>npm run upscaler</code>, then open <code>http://127.0.0.1:3320/</code>.</div>
+    </section>
+  </main>
+
+  <script>
+    const SERVER = `${location.protocol === 'file:' ? 'http://127.0.0.1:3320' : location.origin}`;
+    const fileInput = document.getElementById('file');
+    const drop = document.getElementById('drop');
+    const preview = document.getElementById('preview');
+    const placeholder = document.getElementById('placeholder');
+    const target = document.getElementById('target');
+    const upscaleBtn = document.getElementById('upscale');
+    const download = document.getElementById('download');
+    const progress = document.getElementById('progress');
+    const meta = document.getElementById('meta');
+    const status = document.getElementById('status');
+
+    let sourceFile = null;
+    let sourceUrl = '';
+    let downloadUrl = '';
+    let serverReady = false;
+
+    function formatBytes(bytes) {
+      const mb = bytes / 1024 / 1024;
+      return `${mb.toFixed(mb >= 10 ? 1 : 2)} MB`;
+    }
+
+    function setBusy(busy) {
+      progress.classList.toggle('active', busy);
+      upscaleBtn.disabled = busy || !sourceFile || !serverReady;
+      target.disabled = busy || !serverReady;
+      fileInput.disabled = busy;
+    }
+
+    function clearDownload() {
+      if (downloadUrl) URL.revokeObjectURL(downloadUrl);
+      downloadUrl = '';
+      download.removeAttribute('href');
+      download.removeAttribute('download');
+      download.classList.add('disabled');
+      download.textContent = 'Download';
+    }
+
+    function setDownload(blob, filename) {
+      clearDownload();
+      downloadUrl = URL.createObjectURL(blob);
+      download.href = downloadUrl;
+      download.download = filename || 'upscaled-image.png';
+      download.classList.remove('disabled');
+      download.textContent = 'Download';
+    }
+
+    async function checkServer() {
+      try {
+        const res = await fetch(`${SERVER}/api/status`, { cache: 'no-store' });
+        const info = await res.json();
+        serverReady = !!(res.ok && info.ai && info.models);
+        if (serverReady) {
+          status.textContent = `AI engine ready - ${info.engine}`;
+          meta.textContent = sourceFile ? meta.textContent : 'Upload an image, choose 4K or 8K, then upscale.';
+        } else {
+          status.textContent = 'AI engine not ready';
+          meta.innerHTML = 'Start the local server with <code>npm run upscaler</code>, then open <code>http://127.0.0.1:3320/</code>.';
+        }
+      } catch {
+        serverReady = false;
+        status.textContent = 'Local server offline';
+        meta.innerHTML = 'Start the local server with <code>npm run upscaler</code>, then open <code>http://127.0.0.1:3320/</code>.';
+      }
+      upscaleBtn.disabled = !sourceFile || !serverReady;
+      target.disabled = !serverReady;
+    }
+
+    function loadPreview(file) {
+      if (!file || !file.type.startsWith('image/')) return;
+
+      sourceFile = file;
+      clearDownload();
+      if (sourceUrl) URL.revokeObjectURL(sourceUrl);
+      sourceUrl = URL.createObjectURL(file);
+      preview.src = sourceUrl;
+      preview.hidden = false;
+      placeholder.hidden = true;
+      meta.textContent = `${file.name} - ${formatBytes(file.size)}`;
+      upscaleBtn.disabled = !serverReady;
+    }
+
+    async function upscale() {
+      if (!sourceFile || !serverReady) return;
+
+      setBusy(true);
+      clearDownload();
+      meta.textContent = 'Running Real-ESRGAN...';
+
+      try {
+        const form = new FormData();
+        form.append('image', sourceFile);
+        form.append('target', target.value);
+
+        const res = await fetch(`${SERVER}/api/upscale`, {
+          method: 'POST',
+          body: form,
+        });
+
+        if (!res.ok) {
+          const error = await res.json().catch(() => ({}));
+          throw new Error(error.error || 'Upscale failed.');
+        }
+
+        const blob = await res.blob();
+        const outputKind = res.headers.get('x-output-kind') || 'image';
+        const width = res.headers.get('x-output-width');
+        const height = res.headers.get('x-output-height');
+        const faceSize = res.headers.get('x-face-size');
+        const aiScale = res.headers.get('x-ai-scale');
+        const filename = decodeURIComponent(res.headers.get('x-output-filename') || 'upscaled-image.png');
+
+        setDownload(blob, filename);
+        if (outputKind === 'cubemap') {
+          meta.textContent = `${filename} - cubemap zip - ${faceSize}px faces - ${formatBytes(blob.size)} - AI ${aiScale}x`;
+        } else {
+          meta.textContent = `${filename} - ${width} x ${height} - ${formatBytes(blob.size)} - AI ${aiScale}x`;
+        }
+      } catch (err) {
+        console.error(err);
+        meta.textContent = err.message || 'Upscale failed.';
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    fileInput.addEventListener('change', (event) => loadPreview(event.target.files?.[0]));
+    upscaleBtn.addEventListener('click', upscale);
+
+    drop.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      drop.classList.add('drag');
+    });
+    drop.addEventListener('dragleave', () => drop.classList.remove('drag'));
+    drop.addEventListener('drop', (event) => {
+      event.preventDefault();
+      drop.classList.remove('drag');
+      loadPreview(event.dataTransfer.files?.[0]);
+    });
+
+    window.addEventListener('beforeunload', () => {
+      if (sourceUrl) URL.revokeObjectURL(sourceUrl);
+      clearDownload();
+    });
+
+    checkServer();
+  </script>
+</body>
+</html>

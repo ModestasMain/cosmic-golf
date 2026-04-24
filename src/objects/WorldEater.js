@@ -320,7 +320,7 @@ function loadWorldEaterBodyTexture() {
   const fallback = makeTubeTexture();
 
   try {
-    const texture = _textureLoader.load('/assets/worldeater-scales.png');
+    const texture = _textureLoader.load('/assets/worldeater-scales.jpg');
     texture.colorSpace = SRGBColorSpace;
     texture.wrapS = RepeatWrapping;
     texture.wrapT = RepeatWrapping;

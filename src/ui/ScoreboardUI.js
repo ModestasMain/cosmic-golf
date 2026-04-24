@@ -200,20 +200,13 @@ export class ScoreboardUI {
     const actions = document.createElement('div');
     actions.className = 'score-share-actions';
 
-    const copyLink = document.createElement('button');
-    copyLink.type = 'button';
-    copyLink.className = 'score-share-btn';
-    copyLink.textContent = 'COPY CHALLENGE LINK';
-    copyLink.addEventListener('click', () => this._copyShareText(data.url, copyLink, data.url));
+    const shareResult = document.createElement('button');
+    shareResult.type = 'button';
+    shareResult.className = 'score-share-btn score-share-btn-accent';
+    shareResult.textContent = 'SHARE RESULTS';
+    shareResult.addEventListener('click', () => this._shareResult(data, shareResult));
 
-    const copyResult = document.createElement('button');
-    copyResult.type = 'button';
-    copyResult.className = 'score-share-btn score-share-btn-accent';
-    copyResult.textContent = 'COPY RESULT';
-    copyResult.addEventListener('click', () => this._copyShareText(data.text, copyResult, data.text));
-
-    actions.appendChild(copyLink);
-    actions.appendChild(copyResult);
+    actions.appendChild(shareResult);
 
     const fallback = document.createElement('textarea');
     fallback.className = 'score-share-fallback';
@@ -251,9 +244,9 @@ export class ScoreboardUI {
     const bossChallenge = gameState.isBossRoom || gameState.isBossChallenge;
 
     if (bossChallenge) {
-      const text = `Cosmic Golf: WORLDEATER DEFEATED! Beat the boss: ${url}`;
+      const text = `Can you beat my score? ${url}`;
       return {
-        eyebrow: 'BOSS CHALLENGE',
+        eyebrow: 'SHARE RESULTS',
         headline: 'WORLDEATER DEFEATED!',
         meta: `${name} · ${totalStrokes || gameState.currentStrokes} strokes · ${timeText}`,
         seedLabel: 'SOLO BOSS LINK',
@@ -263,9 +256,9 @@ export class ScoreboardUI {
     }
 
     if (isGameOver) {
-      const text = `Cosmic Golf: ${totalStrokes} strokes in ${timeText}. Beat my run: ${url}`;
+      const text = `Can you beat my score? ${url}`;
       return {
-        eyebrow: 'SHARE RUN',
+        eyebrow: 'SHARE RESULTS',
         headline: `${totalStrokes} STROKES`,
         meta: `${name} · ${timeText} · ${gameState.totalHoles} holes`,
         seedLabel: `CHALLENGE SEED ${seed}`,
@@ -279,9 +272,9 @@ export class ScoreboardUI {
     const result = this._isWorldEaterHole()
       ? { headline: 'WORLDEATER DEFEATED!' }
       : getScoreResult(strokes);
-    const text = `Cosmic Golf: ${result.headline} on Hole ${holeIndex + 1}. ${totalStrokes} strokes so far. Beat this seed: ${url}`;
+    const text = `Can you beat my score? ${url}`;
     return {
-      eyebrow: 'SHARE HOLE',
+      eyebrow: 'SHARE RESULTS',
       headline: result.headline,
       meta: `${name} · Hole ${holeIndex + 1} · ${strokes} ${strokes === 1 ? 'stroke' : 'strokes'}`,
       seedLabel: `CHALLENGE SEED ${seed}`,
@@ -321,6 +314,232 @@ export class ScoreboardUI {
     setTimeout(() => {
       button.textContent = original;
     }, 1600);
+  }
+
+  async _shareResult(data, button) {
+    const original = button.textContent;
+    const fallback = this._shareSection?.querySelector('.score-share-fallback');
+    button.textContent = 'CREATING IMAGE';
+
+    try {
+      const imageBlob = await this._createShareImage(data);
+      const textBlob = new Blob([data.text], { type: 'text/plain' });
+
+      if (!navigator.clipboard?.write || !window.ClipboardItem) {
+        throw new Error('Rich clipboard unavailable');
+      }
+
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'image/png': imageBlob,
+          'text/plain': textBlob,
+        }),
+      ]);
+      button.textContent = 'COPIED IMAGE + TEXT';
+      if (fallback) fallback.style.display = 'none';
+    } catch {
+      button.textContent = 'COPIED TEXT';
+      if (navigator.clipboard?.writeText) {
+        try {
+          await navigator.clipboard.writeText(data.text);
+        } catch {
+          button.textContent = 'SELECT TEXT';
+        }
+      } else {
+        button.textContent = 'SELECT TEXT';
+      }
+      if (fallback) {
+        fallback.value = data.text;
+        fallback.style.display = 'block';
+        fallback.focus();
+        fallback.select();
+      }
+    }
+
+    setTimeout(() => {
+      button.textContent = original;
+    }, 1900);
+  }
+
+  async _createShareImage(data) {
+    if (document.fonts?.ready) {
+      await document.fonts.ready;
+    }
+
+    const canvas = document.createElement('canvas');
+    const width = 1200;
+    const height = 630;
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+
+    this._drawShareBackground(ctx, width, height);
+
+    ctx.save();
+    ctx.shadowColor = 'rgba(88, 44, 255, 0.42)';
+    ctx.shadowBlur = 30;
+    ctx.strokeStyle = 'rgba(154, 112, 255, 0.72)';
+    ctx.lineWidth = 3;
+    this._roundRect(ctx, 64, 64, width - 128, height - 128, 34);
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(191, 152, 255, 0.9)';
+    ctx.font = '700 30px "JetBrains Mono", monospace';
+    ctx.fillText('SHARE RESULTS', width / 2, 128);
+
+    ctx.fillStyle = '#ffd24a';
+    ctx.shadowColor = 'rgba(255, 210, 74, 0.38)';
+    ctx.shadowBlur = 24;
+    ctx.font = '800 76px Orbitron, sans-serif';
+    ctx.fillText(data.headline, width / 2, 214);
+    ctx.shadowBlur = 0;
+
+    ctx.fillStyle = 'rgba(218, 232, 255, 0.76)';
+    ctx.font = '700 28px "JetBrains Mono", monospace';
+    ctx.fillText(data.meta.toUpperCase(), width / 2, 286);
+
+    const player = gameState.players[0];
+    const name = (player?.name || 'PLAYER').toUpperCase();
+    const totalStrokes = gameState.totalStrokes(player?.id) || gameState.currentStrokes || 0;
+    const totalTime = leaderboardStore.formatTime(gameState.totalTime(player?.id));
+
+    const rowX = 118;
+    const rowY = 334;
+    const rowW = width - 236;
+    const rowH = 140;
+
+    ctx.save();
+    const rowGradient = ctx.createLinearGradient(rowX, rowY, rowX + rowW, rowY);
+    rowGradient.addColorStop(0, 'rgba(20, 34, 90, 0.94)');
+    rowGradient.addColorStop(0.55, 'rgba(13, 11, 44, 0.96)');
+    rowGradient.addColorStop(1, 'rgba(45, 21, 90, 0.94)');
+    ctx.fillStyle = rowGradient;
+    ctx.shadowColor = 'rgba(59, 194, 255, 0.28)';
+    ctx.shadowBlur = 22;
+    this._roundRect(ctx, rowX, rowY, rowW, rowH, 24);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = 'rgba(59, 194, 255, 0.62)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.textAlign = 'left';
+    ctx.fillStyle = 'rgba(96, 220, 255, 0.95)';
+    ctx.font = '800 20px Orbitron, sans-serif';
+    ctx.fillText('PLAYER', rowX + 34, rowY + 34);
+    ctx.fillStyle = '#f7f4ff';
+    ctx.font = '800 30px Orbitron, sans-serif';
+    ctx.fillText(name, rowX + 34, rowY + 72);
+
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#ffd24a';
+    ctx.font = '800 34px Orbitron, sans-serif';
+    ctx.fillText(`${totalStrokes} STROKES`, rowX + rowW - 34, rowY + 45);
+    ctx.fillStyle = 'rgba(218, 232, 255, 0.68)';
+    ctx.font = '700 19px "JetBrains Mono", monospace';
+    ctx.fillText(totalTime.toUpperCase(), rowX + rowW - 34, rowY + 78);
+
+    const holeCount = Math.min(10, gameState.totalHoles || 10);
+    const gap = 8;
+    const stripX = rowX + 34;
+    const stripY = rowY + 94;
+    const stripW = rowW - 68;
+    const cellW = (stripW - gap * (holeCount - 1)) / holeCount;
+    const cellH = 34;
+
+    for (let i = 0; i < holeCount; i++) {
+      const x = stripX + i * (cellW + gap);
+      const stroke = player?.strokes?.[i] ?? (i === gameState.currentHole ? gameState.currentStrokes : null);
+      const isCurrent = i === gameState.currentHole;
+
+      ctx.save();
+      ctx.fillStyle = isCurrent ? 'rgba(144, 74, 255, 0.34)' : 'rgba(7, 12, 34, 0.66)';
+      ctx.strokeStyle = isCurrent ? 'rgba(255, 210, 74, 0.62)' : 'rgba(96, 220, 255, 0.26)';
+      ctx.lineWidth = 1.5;
+      this._roundRect(ctx, x, stripY, cellW, cellH, 10);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(191, 152, 255, 0.9)';
+      ctx.font = '700 11px "JetBrains Mono", monospace';
+      ctx.fillText(`H${i + 1}`, x + cellW / 2, stripY + 10);
+      ctx.fillStyle = stroke == null ? 'rgba(218, 232, 255, 0.36)' : '#f7f4ff';
+      ctx.font = '800 18px Orbitron, sans-serif';
+      ctx.fillText(stroke == null ? '-' : String(stroke), x + cellW / 2, stripY + 25);
+    }
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(96, 220, 255, 0.82)';
+    ctx.font = '700 24px "JetBrains Mono", monospace';
+    ctx.fillText('CAN YOU BEAT MY SCORE?', width / 2, 516);
+
+    return new Promise((resolve, reject) => {
+      canvas.toBlob(blob => {
+        if (blob) resolve(blob);
+        else reject(new Error('Share image failed'));
+      }, 'image/png');
+    });
+  }
+
+  _drawShareBackground(ctx, width, height) {
+    const gradient = ctx.createLinearGradient(0, 0, width, height);
+    gradient.addColorStop(0, '#050210');
+    gradient.addColorStop(0.42, '#12124a');
+    gradient.addColorStop(1, '#27081f');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, height);
+
+    const nebulaA = ctx.createRadialGradient(240, 160, 20, 240, 160, 420);
+    nebulaA.addColorStop(0, 'rgba(101, 220, 255, 0.34)');
+    nebulaA.addColorStop(0.45, 'rgba(84, 56, 255, 0.15)');
+    nebulaA.addColorStop(1, 'rgba(84, 56, 255, 0)');
+    ctx.fillStyle = nebulaA;
+    ctx.fillRect(0, 0, width, height);
+
+    const nebulaB = ctx.createRadialGradient(930, 430, 20, 930, 430, 460);
+    nebulaB.addColorStop(0, 'rgba(255, 83, 215, 0.28)');
+    nebulaB.addColorStop(0.5, 'rgba(122, 76, 255, 0.15)');
+    nebulaB.addColorStop(1, 'rgba(122, 76, 255, 0)');
+    ctx.fillStyle = nebulaB;
+    ctx.fillRect(0, 0, width, height);
+
+    let seed = 123456789;
+    const random = () => {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      return seed / 4294967296;
+    };
+
+    for (let i = 0; i < 240; i++) {
+      const x = random() * width;
+      const y = random() * height;
+      const r = random() * 1.8 + 0.45;
+      const alpha = random() * 0.68 + 0.24;
+      ctx.fillStyle = `rgba(235, 245, 255, ${alpha})`;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  _roundRect(ctx, x, y, width, height, radius) {
+    const r = Math.min(radius, width / 2, height / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + width - r, y);
+    ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+    ctx.lineTo(x + width, y + height - r);
+    ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+    ctx.lineTo(x + r, y + height);
+    ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
   }
 
   _hideExternalUI() {

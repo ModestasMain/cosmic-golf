@@ -63,48 +63,92 @@ export class AimUI {
     beacon.style.cssText = [
       'position:fixed',
       'pointer-events:none',
-      'z-index:50',
+      'z-index:80',
       'display:none',
       'transform:translateX(-50%)',
       'text-align:center',
-      'font-family:monospace',
+      'font-family:"JetBrains Mono", monospace',
     ].join(';');
+
+    const targetEl = document.createElement('div');
+    targetEl.style.cssText = [
+      'display:inline-block',
+      'padding:3px 8px',
+      'border-radius:999px',
+      'background:rgba(5, 8, 22, 0.78)',
+      'border:1px solid rgba(255, 210, 74, 0.56)',
+      'color:#ffd24a',
+      'font-family:"Orbitron", sans-serif',
+      'font-size:clamp(8px,1.4vw,11px)',
+      'font-weight:800',
+      'letter-spacing:0.16em',
+      'text-shadow:0 0 10px rgba(255, 210, 74, 0.36)',
+      'box-shadow:0 0 18px rgba(255, 210, 74, 0.18)',
+      'white-space:nowrap',
+    ].join(';');
+    targetEl.textContent = 'TARGET';
 
     // Golf flag SVG — pole + pennant, glowing gold
     const flagEl = document.createElement('div');
     flagEl.style.cssText = [
       'display:flex', 'justify-content:center',
-      'filter:drop-shadow(0 0 6px rgb(0, 0, 0))',
+      'filter:drop-shadow(0 0 8px rgba(255, 210, 74, 0.75)) drop-shadow(0 0 7px rgb(0, 0, 0))',
       'animation:cup-bounce 1.1s ease-in-out infinite',
+      'margin-top:4px',
     ].join(';');
     flagEl.innerHTML = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="28" viewBox="0 0 28 38">
+      <svg xmlns="http://www.w3.org/2000/svg" width="28" height="38" viewBox="0 0 28 38">
         <!-- Pole -->
         <line x1="10" y1="2" x2="10" y2="36"
-              stroke="rgba(255, 255, 255, 0.95)" stroke-width="2.2" stroke-linecap="round"/>
+              stroke="rgba(255, 255, 255, 0.98)" stroke-width="2.8" stroke-linecap="round"/>
         <!-- Pennant flag pointing right -->
         <polygon points="10,3 26,11 10,19"
-                 fill="rgb(255, 255, 255)"/>
+                 fill="#ffd24a"/>
       </svg>
     `;
 
     // Distance text below the flag
     const distEl = document.createElement('div');
     distEl.style.cssText = [
-      'color:rgb(255, 255, 255)',
-      'font-size:clamp(9px,2vw,11px)',
-      'font-weight:bold',
-      'letter-spacing:1px',
-      'text-shadow:0 0 6px rgba(0, 0, 0, 0.9)',
+      'display:inline-block',
+      'color:#f7f4ff',
+      'font-size:clamp(11px,2.4vw,14px)',
+      'font-weight:900',
+      'letter-spacing:0.08em',
+      'text-shadow:0 0 8px rgba(0, 0, 0, 0.95)',
       'margin-top:2px',
+      'padding:2px 8px',
+      'border-radius:999px',
+      'background:rgba(5, 8, 22, 0.72)',
+      'border:1px solid rgba(96, 220, 255, 0.38)',
       'white-space:nowrap',
     ].join(';');
 
+    beacon.appendChild(targetEl);
     beacon.appendChild(flagEl);
     beacon.appendChild(distEl);
     document.body.appendChild(beacon);
     this._cupBeacon  = beacon;
     this._cupBeaconDist = distEl;
+
+    const guideLine = document.createElement('div');
+    guideLine.id = 'cup-guide-line';
+    guideLine.style.cssText = [
+      'position:fixed',
+      'left:0',
+      'top:0',
+      'height:2px',
+      'width:0',
+      'pointer-events:none',
+      'z-index:45',
+      'display:none',
+      'transform-origin:left center',
+      'background:linear-gradient(90deg, rgba(96,220,255,0.05), rgba(96,220,255,0.42), rgba(255,210,74,0.72))',
+      'box-shadow:0 0 12px rgba(96,220,255,0.26)',
+      'opacity:0.78',
+    ].join(';');
+    document.body.appendChild(guideLine);
+    this._cupGuideLine = guideLine;
 
     // Inject bounce keyframes once
     if (!document.getElementById('cup-beacon-style')) {
@@ -128,10 +172,10 @@ export class AimUI {
       'pointer-events:none',
       'z-index:50',
       'display:none',
-      'border-top:9px solid transparent',
-      'border-bottom:9px solid transparent',
-      'border-left:16px solid rgba(255, 255, 255, 0.92)',
-      'filter:drop-shadow(0 0 4px rgb(0, 0, 0))',
+      'border-top:12px solid transparent',
+      'border-bottom:12px solid transparent',
+      'border-left:22px solid #ffd24a',
+      'filter:drop-shadow(0 0 9px rgba(255, 210, 74, 0.78)) drop-shadow(0 0 5px rgb(0, 0, 0))',
     ].join(';');
     document.body.appendChild(arrow);
     this._cupArrow = arrow;
@@ -144,11 +188,18 @@ export class AimUI {
       'pointer-events:none',
       'z-index:50',
       'display:none',
-      'color:rgba(255, 255, 255, 0.9)',
-      'font-family:monospace',
-      'font-size:clamp(9px,2vw,11px)',
-      'font-weight:bold',
+      'color:#f7f4ff',
+      'font-family:"JetBrains Mono", monospace',
+      'font-size:clamp(10px,2.2vw,13px)',
+      'font-weight:900',
+      'letter-spacing:0.08em',
+      'padding:4px 9px',
+      'border-radius:999px',
+      'background:rgba(5, 8, 22, 0.78)',
+      'border:1px solid rgba(255, 210, 74, 0.42)',
+      'box-shadow:0 0 14px rgba(255, 210, 74, 0.18)',
       'text-shadow:0 0 6px rgb(0, 0, 0)',
+      'white-space:nowrap',
     ].join(';');
     document.body.appendChild(lbl);
     this._cupLabel = lbl;
@@ -164,13 +215,17 @@ export class AimUI {
       this._cupBeacon.style.display = 'none';
       this._cupArrow.style.display  = 'none';
       this._cupLabel.style.display  = 'none';
+      this._cupGuideLine.style.display = 'none';
       return;
     }
 
     const projected = cupWorldPos.clone().project(camera);
+    const ballProjected = ballWorldPos ? ballWorldPos.clone().project(camera) : null;
     const W = window.innerWidth, H = window.innerHeight;
     const sx = (projected.x *  0.5 + 0.5) * W;
     const sy = (projected.y * -0.5 + 0.5) * H;
+    const bx = ballProjected ? (ballProjected.x * 0.5 + 0.5) * W : null;
+    const by = ballProjected ? (ballProjected.y * -0.5 + 0.5) * H : null;
 
     const margin   = 36;
     const onScreen = projected.z < 1
@@ -184,11 +239,28 @@ export class AimUI {
       // ── On-screen beacon ────────────────────────────────────
       // Position the beacon so the chevron tip points at the cup.
       // The beacon sits above the projected cup coord.
-      const BEACON_OFFSET = 44; // px above cup centre — clears the flag pole bottom
+      const BEACON_OFFSET = 72; // px above cup centre — clears the larger target marker
       this._cupBeacon.style.left    = `${sx}px`;
       this._cupBeacon.style.top     = `${sy - BEACON_OFFSET}px`;
       this._cupBeacon.style.display = 'block';
       this._cupBeaconDist.textContent = distText;
+
+      if (ballProjected && ballProjected.z < 1) {
+        const dx = sx - bx;
+        const dy = sy - by;
+        const len = Math.hypot(dx, dy);
+        if (len > 70) {
+          this._cupGuideLine.style.left = `${bx}px`;
+          this._cupGuideLine.style.top = `${by}px`;
+          this._cupGuideLine.style.width = `${len}px`;
+          this._cupGuideLine.style.transform = `rotate(${Math.atan2(dy, dx)}rad)`;
+          this._cupGuideLine.style.display = 'block';
+        } else {
+          this._cupGuideLine.style.display = 'none';
+        }
+      } else {
+        this._cupGuideLine.style.display = 'none';
+      }
 
       this._cupArrow.style.display = 'none';
       this._cupLabel.style.display = 'none';
@@ -197,6 +269,7 @@ export class AimUI {
 
     // ── Off-screen edge arrow ──────────────────────────────────
     this._cupBeacon.style.display = 'none';
+    this._cupGuideLine.style.display = 'none';
 
     const cx = W / 2, cy = H / 2;
     const dx = sx - cx, dy = sy - cy;
@@ -214,15 +287,15 @@ export class AimUI {
       ex = cx + dx * (halfH / absDy);
     }
 
-    this._cupArrow.style.left      = `${ex - 8}px`;
-    this._cupArrow.style.top       = `${ey - 9}px`;
+    this._cupArrow.style.left      = `${ex - 11}px`;
+    this._cupArrow.style.top       = `${ey - 12}px`;
     this._cupArrow.style.transform = `rotate(${angle}rad)`;
     this._cupArrow.style.display   = 'block';
 
     if (dist !== null) {
       this._cupLabel.style.left        = `${ex + Math.cos(angle) * 20}px`;
       this._cupLabel.style.top         = `${ey + Math.sin(angle) * 20 - 7}px`;
-      this._cupLabel.textContent       = distText;
+      this._cupLabel.textContent       = `TARGET ${distText}`;
       this._cupLabel.style.display     = 'block';
     }
   }

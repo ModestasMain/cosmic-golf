@@ -32,6 +32,7 @@ export class AimUI {
     this._penaltyTimer = null;
     this._tutorialDismissed = sessionStorage.getItem('cosmic-golf-howto-dismissed') === '1';
     this._shotTakenThisHole = false;
+    this._cupIndicatorSuppressed = false;
 
     this._setupVolumeSlider();
     this._setupCupIndicator();
@@ -131,25 +132,6 @@ export class AimUI {
     this._cupBeacon  = beacon;
     this._cupBeaconDist = distEl;
 
-    const guideLine = document.createElement('div');
-    guideLine.id = 'cup-guide-line';
-    guideLine.style.cssText = [
-      'position:fixed',
-      'left:0',
-      'top:0',
-      'height:2px',
-      'width:0',
-      'pointer-events:none',
-      'z-index:45',
-      'display:none',
-      'transform-origin:left center',
-      'background:linear-gradient(90deg, rgba(96,220,255,0.05), rgba(96,220,255,0.42), rgba(255,210,74,0.72))',
-      'box-shadow:0 0 12px rgba(96,220,255,0.26)',
-      'opacity:0.78',
-    ].join(';');
-    document.body.appendChild(guideLine);
-    this._cupGuideLine = guideLine;
-
     // Inject bounce keyframes once
     if (!document.getElementById('cup-beacon-style')) {
       const style = document.createElement('style');
@@ -211,21 +193,15 @@ export class AimUI {
    * - Cup off-screen → shows a rotated arrow at the screen edge + distance label.
    */
   updateCupIndicator(cupWorldPos, camera, ballWorldPos) {
-    if (!cupWorldPos || !camera) {
-      this._cupBeacon.style.display = 'none';
-      this._cupArrow.style.display  = 'none';
-      this._cupLabel.style.display  = 'none';
-      this._cupGuideLine.style.display = 'none';
+    if (this._cupIndicatorSuppressed || !cupWorldPos || !camera) {
+      this._hideCupIndicator();
       return;
     }
 
     const projected = cupWorldPos.clone().project(camera);
-    const ballProjected = ballWorldPos ? ballWorldPos.clone().project(camera) : null;
     const W = window.innerWidth, H = window.innerHeight;
     const sx = (projected.x *  0.5 + 0.5) * W;
     const sy = (projected.y * -0.5 + 0.5) * H;
-    const bx = ballProjected ? (ballProjected.x * 0.5 + 0.5) * W : null;
-    const by = ballProjected ? (ballProjected.y * -0.5 + 0.5) * H : null;
 
     const margin   = 36;
     const onScreen = projected.z < 1
@@ -245,23 +221,6 @@ export class AimUI {
       this._cupBeacon.style.display = 'block';
       this._cupBeaconDist.textContent = distText;
 
-      if (ballProjected && ballProjected.z < 1) {
-        const dx = sx - bx;
-        const dy = sy - by;
-        const len = Math.hypot(dx, dy);
-        if (len > 70) {
-          this._cupGuideLine.style.left = `${bx}px`;
-          this._cupGuideLine.style.top = `${by}px`;
-          this._cupGuideLine.style.width = `${len}px`;
-          this._cupGuideLine.style.transform = `rotate(${Math.atan2(dy, dx)}rad)`;
-          this._cupGuideLine.style.display = 'block';
-        } else {
-          this._cupGuideLine.style.display = 'none';
-        }
-      } else {
-        this._cupGuideLine.style.display = 'none';
-      }
-
       this._cupArrow.style.display = 'none';
       this._cupLabel.style.display = 'none';
       return;
@@ -269,7 +228,6 @@ export class AimUI {
 
     // ── Off-screen edge arrow ──────────────────────────────────
     this._cupBeacon.style.display = 'none';
-    this._cupGuideLine.style.display = 'none';
 
     const cx = W / 2, cy = H / 2;
     const dx = sx - cx, dy = sy - cy;
@@ -298,6 +256,12 @@ export class AimUI {
       this._cupLabel.textContent       = `TARGET ${distText}`;
       this._cupLabel.style.display     = 'block';
     }
+  }
+
+  _hideCupIndicator() {
+    if (this._cupBeacon) this._cupBeacon.style.display = 'none';
+    if (this._cupArrow) this._cupArrow.style.display = 'none';
+    if (this._cupLabel) this._cupLabel.style.display = 'none';
   }
 
   _setupVolumeSlider() {
@@ -409,6 +373,7 @@ export class AimUI {
 
     eventBus.on(Events.HOLE_LOADED, ({ archetype }) => {
       this._shotTakenThisHole = false;
+      this._cupIndicatorSuppressed = false;
       this._showAimHint();
       if (this._els.archetype) {
         this._els.archetype.textContent = archetype ? (ARCHETYPE_LABELS[archetype] ?? archetype) : '';
@@ -416,10 +381,18 @@ export class AimUI {
     });
 
     eventBus.on(Events.BALL_HOLED, () => {
-      // Hide all cup indicators once the ball is in
-      if (this._cupBeacon) this._cupBeacon.style.display = 'none';
-      if (this._cupArrow)  this._cupArrow.style.display  = 'none';
-      if (this._cupLabel)  this._cupLabel.style.display  = 'none';
+      this._cupIndicatorSuppressed = true;
+      this._hideCupIndicator();
+    });
+
+    eventBus.on(Events.HOLE_COMPLETE, () => {
+      this._cupIndicatorSuppressed = true;
+      this._hideCupIndicator();
+    });
+
+    eventBus.on(Events.GAME_COMPLETE, () => {
+      this._cupIndicatorSuppressed = true;
+      this._hideCupIndicator();
     });
 
     eventBus.on(Events.BALL_OUT_OF_BOUNDS, () => {

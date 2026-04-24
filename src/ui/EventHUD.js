@@ -369,14 +369,13 @@ export class EventHUD {
       return;
     }
 
-    const nextType = this._pickType(cycleIdx + 1);
-    if (this._lastDisplayMode !== 'next' || this._currentType !== nextType) {
-      this._setEventName(nextType, 'NEXT EVENT');
+    if (this._lastDisplayMode !== 'cooldown') {
+      this._setIdleEventName();
     }
     const secLeft = Math.max(0, Math.ceil((cycleMs - posInCycle) / 1000));
-    this._timerEl.textContent = `NEXT IN  ${secLeft}s`;
-    this._lastDisplayMode = 'next';
-    this._currentType = nextType;
+    this._timerEl.textContent = `NEXT EVENT IN  ${secLeft}s`;
+    this._lastDisplayMode = 'cooldown';
+    this._currentType = null;
   }
 
   _pickType(idx) {
@@ -390,6 +389,13 @@ export class EventHUD {
     this._labelEl.textContent = label;
     this._reelEl.textContent = name;
     this._reelEl.style.color = color;
+    this._reelEl.style.textShadow = 'none';
+  }
+
+  _setIdleEventName() {
+    this._labelEl.textContent = 'CURRENT EVENT';
+    this._reelEl.textContent = 'NONE';
+    this._reelEl.style.color = 'rgba(244, 241, 255, 0.58)';
     this._reelEl.style.textShadow = 'none';
   }
 

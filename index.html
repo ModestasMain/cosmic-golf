@@ -26,7 +26,9 @@
       --hud-side-gap: max(10px, calc(env(safe-area-inset-left, 0px) + 8px));
       --hud-top-gap: max(10px, calc(env(safe-area-inset-top, 0px) + 6px));
       --hud-bottom-gap: max(10px, calc(env(safe-area-inset-bottom, 0px) + 6px));
-      --hud-card-width: clamp(120px, 28vw, 284px);
+      /* Width = exactly 1/3 of available horizontal space (after side gaps and 8px between cards),
+         capped at 284px on wide screens. Guarantees the three top cards never overlap. */
+      --hud-card-width: min(284px, calc((100vw - (var(--hud-side-gap) * 2) - 16px) / 3));
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #000; overflow: hidden; width: 100vw; height: 100vh; touch-action: none; font-family: 'Inter Tight', sans-serif; }
@@ -123,7 +125,8 @@
       flex-direction: column;
       align-items: center;
       pointer-events: none;
-      width: clamp(148px, 28vw, 232px);
+      /* Capped to 60% of viewport so it doesn't overlap the ball area on phones */
+      width: min(232px, max(140px, 50vw));
       padding: clamp(6px, 1vw, 10px) clamp(8px, 1.2vw, 14px) clamp(8px, 1.2vw, 14px);
       border-radius: clamp(14px, 2.2vw, 22px);
       background: linear-gradient(180deg, rgba(11, 8, 22, 0.84), rgba(8, 5, 18, 0.76));
@@ -310,7 +313,13 @@
       bottom: max(102px, calc(env(safe-area-inset-bottom, 0px) + 88px)) !important;
     }
     #event-hud {
-      max-width: clamp(160px, 28vw, 300px) !important;
+      top: var(--hud-top-gap) !important;
+      left: 50% !important;
+      transform: translateX(-50%) !important;
+      width: var(--hud-card-width) !important;
+      max-width: var(--hud-card-width) !important;
+      padding: clamp(7px, 1.2vw, 14px) clamp(8px, 1.4vw, 16px) !important;
+      border-radius: var(--hud-radius) !important;
     }
     #settings-btn svg { flex: 0 0 auto; }
     #settings-panel #volume-control,
@@ -646,6 +655,79 @@
         transform: scale(0.72);
         transform-origin: bottom right;
       }
+    }
+
+    /* ── Responsive overrides for JS-injected UIs (inline styles use px) ──
+       JS sets inline styles, so we need !important to win specificity. */
+    #settings-btn {
+      left: var(--hud-side-gap) !important;
+      bottom: var(--hud-bottom-gap) !important;
+      gap: clamp(5px, 0.8vw, 8px) !important;
+      padding: clamp(6px, 1vw, 10px) clamp(8px, 1.3vw, 14px) !important;
+      border-radius: clamp(12px, 1.8vw, 16px) !important;
+      font-size: clamp(6px, 1vw, 10px) !important;
+      letter-spacing: clamp(0.1em, 0.5vw, 0.16em) !important;
+    }
+    #settings-btn svg {
+      width: clamp(10px, 1.4vw, 14px) !important;
+      height: clamp(10px, 1.4vw, 14px) !important;
+    }
+    #settings-panel {
+      left: var(--hud-side-gap) !important;
+      bottom: max(42px, calc(env(safe-area-inset-bottom, 0px) + 34px)) !important;
+      width: clamp(156px, 24vw, 260px) !important;
+      gap: clamp(6px, 1vw, 10px) !important;
+      padding: clamp(7px, 1.2vw, 12px) !important;
+      border-radius: clamp(14px, 2vw, 18px) !important;
+    }
+    #settings-panel > div:first-child {
+      font-size: clamp(6px, 1vw, 10px) !important;
+      letter-spacing: clamp(0.14em, 0.6vw, 0.2em) !important;
+    }
+    #volume-control {
+      padding: clamp(5px, 1vw, 10px) clamp(6px, 1.2vw, 12px) !important;
+      gap: clamp(4px, 0.8vw, 8px) !important;
+      border-radius: clamp(10px, 1.6vw, 14px) !important;
+    }
+    #volume-control > div:first-child {
+      font-size: clamp(6px, 1vw, 10px) !important;
+      letter-spacing: clamp(0.08em, 0.5vw, 0.14em) !important;
+    }
+    #volume-control #volume-slider {
+      width: clamp(48px, 9vw, 96px) !important;
+    }
+    #ball-style-picker { gap: clamp(4px, 0.8vw, 6px) !important; }
+    #ball-style-picker > button {
+      font-size: clamp(6px, 1vw, 10px) !important;
+      letter-spacing: clamp(0.1em, 0.5vw, 0.14em) !important;
+      padding: clamp(6px, 1vw, 12px) clamp(8px, 1.4vw, 16px) !important;
+      border-radius: clamp(10px, 1.6vw, 14px) !important;
+    }
+    #ball-style-picker > div {
+      max-width: clamp(180px, 34vw, 280px) !important;
+      padding: clamp(6px, 1.2vw, 12px) !important;
+      gap: clamp(4px, 0.8vw, 8px) !important;
+      border-radius: clamp(10px, 1.6vw, 16px) !important;
+    }
+    #ball-style-picker > div button {
+      width: clamp(22px, 3.6vw, 36px) !important;
+      height: clamp(22px, 3.6vw, 36px) !important;
+    }
+    #ball-style-picker > div span {
+      font-size: clamp(4px, 0.8vw, 7px) !important;
+      max-width: clamp(26px, 4.4vw, 44px) !important;
+    }
+    #freecam-btn {
+      min-width: clamp(88px, 14vw, 128px) !important;
+      height: clamp(28px, 4vw, 36px) !important;
+      padding: 0 clamp(10px, 1.6vw, 16px) !important;
+      font-size: clamp(8px, 1.2vw, 11px) !important;
+      letter-spacing: clamp(0.1em, 0.5vw, 0.14em) !important;
+      border-radius: 999px !important;
+    }
+    #power-pyramid-wrap {
+      transform: scale(clamp(0.78, 0.6 + 0.04vw, 1));
+      transform-origin: center bottom;
     }
   </style>
 </head>

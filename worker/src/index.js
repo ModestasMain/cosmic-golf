@@ -7,6 +7,7 @@
 
 export { CosmicGolfRoom } from './room.js';
 import { upsertGlobalEntry } from './globalLb.js';
+import { getGlobalStats, updateGlobalStats } from './globalStats.js';
 
 export default {
   async fetch(request, env) {
@@ -22,7 +23,8 @@ export default {
     // Route: GET /global-leaderboard
     if (url.pathname === '/global-leaderboard' && request.method === 'GET') {
       const entries = (await env.GLOBAL_LB.get('top10', { type: 'json' })) ?? [];
-      return new Response(JSON.stringify({ entries }), {
+      const stats = await getGlobalStats(env);
+      return new Response(JSON.stringify({ entries, stats }), {
         headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
       });
     }
@@ -34,7 +36,7 @@ export default {
         return new Response('Bad request', { status: 400, headers: corsHeaders() });
       }
       const e = body?.entry;
-      if (!e || e.holesCompleted !== 10) {
+      if (!e || (e.holesCompleted !== 10 && e.bossDefeated !== true)) {
         return new Response('Incomplete game', { status: 400, headers: corsHeaders() });
       }
 
@@ -42,20 +44,27 @@ export default {
         ? e.name.replace(/[^\w\s\-!?.]/g, '').slice(0, 12).trim()
         : '') || 'PLAYER';
       const sessionId = typeof e.sessionId === 'string' ? e.sessionId.slice(0, 48) : null;
+      const playerId = typeof e.playerId === 'string' ? e.playerId.slice(0, 80) : sessionId;
       const totalStrokes = (typeof e.totalStrokes === 'number' && e.totalStrokes >= 0)
         ? Math.round(e.totalStrokes) : null;
       const totalTime = (typeof e.totalTime === 'number' && e.totalTime >= 0) ? e.totalTime : 0;
+      const strokes = Array.isArray(e.strokes)
+        ? e.strokes.slice(0, 10).map(s => (typeof s === 'number' && s >= 0) ? Math.min(99, Math.round(s)) : null)
+        : [];
 
       if (!sessionId || totalStrokes === null) {
         return new Response('Invalid entry', { status: 400, headers: corsHeaders() });
       }
 
-      const entry = { sessionId, name, totalStrokes, totalTime, holesCompleted: 10 };
-      const stored = (await env.GLOBAL_LB.get('top10', { type: 'json' })) ?? [];
-      const top10 = upsertGlobalEntry(stored, entry);
-      await env.GLOBAL_LB.put('top10', JSON.stringify(top10));
+      const entry = { sessionId, playerId, name, totalStrokes, totalTime, holesCompleted: e.holesCompleted, strokes, bossDefeated: e.bossDefeated === true };
+      let top10 = (await env.GLOBAL_LB.get('top10', { type: 'json' })) ?? [];
+      if (e.holesCompleted === 10) {
+        top10 = upsertGlobalEntry(top10, { sessionId, name, totalStrokes, totalTime, holesCompleted: 10 });
+        await env.GLOBAL_LB.put('top10', JSON.stringify(top10));
+      }
+      const stats = await updateGlobalStats(env, entry);
 
-      return new Response(JSON.stringify({ entries: top10 }), {
+      return new Response(JSON.stringify({ entries: top10, stats }), {
         headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
       });
     }

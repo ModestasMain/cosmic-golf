@@ -4,6 +4,7 @@
 // ============================================================
 
 import { upsertGlobalEntry } from './globalLb.js';
+import { getGlobalStats, updateGlobalStats } from './globalStats.js';
 
 const MAX_PLAYERS = 24;
 const MAX_LEADERBOARD = 10;
@@ -116,7 +117,8 @@ export class CosmicGolfRoom {
 
       ws.send(JSON.stringify({ type: 'leaderboard', entries: this._leaderboard }));
       const globalEntries = (await this.env.GLOBAL_LB.get(GLOBAL_KV_KEY, { type: 'json' })) ?? [];
-      ws.send(JSON.stringify({ type: 'global_leaderboard', entries: globalEntries }));
+      const globalStats = await getGlobalStats(this.env);
+      ws.send(JSON.stringify({ type: 'global_leaderboard', entries: globalEntries, stats: globalStats }));
       return;
     }
 
@@ -128,10 +130,12 @@ export class CosmicGolfRoom {
 
       const safeEntry = {
         sessionId:      e.sessionId.slice(0, 32),
+        playerId:       typeof e.playerId === 'string' ? e.playerId.slice(0, 80) : e.sessionId.slice(0, 32),
         name:           sanitizeName(e.name),
         totalStrokes:   Math.round(e.totalStrokes),
         holesCompleted: Math.min(10, Math.max(0, Math.round(e.holesCompleted ?? 0))),
         totalTime:      typeof e.totalTime === 'number' && e.totalTime >= 0 ? e.totalTime : 0,
+        bossDefeated:   e.bossDefeated === true,
         strokes:        Array.isArray(e.strokes)
           ? e.strokes.slice(0, 10).map(s => (typeof s === 'number' && s >= 0) ? Math.min(99, Math.round(s)) : null)
           : [],
@@ -145,13 +149,20 @@ export class CosmicGolfRoom {
       if (safeEntry.holesCompleted === 10) {
         const globalEntry = {
           sessionId:    safeEntry.sessionId,
+          playerId:     safeEntry.playerId,
           name:         safeEntry.name,
           totalStrokes: safeEntry.totalStrokes,
           totalTime:    safeEntry.totalTime,
           holesCompleted: 10,
+          strokes:      safeEntry.strokes,
         };
         const top10 = await this._updateGlobalKV(globalEntry);
-        this._broadcast(JSON.stringify({ type: 'global_leaderboard', entries: top10 }));
+        const stats = await updateGlobalStats(this.env, globalEntry);
+        this._broadcast(JSON.stringify({ type: 'global_leaderboard', entries: top10, stats }));
+      } else if (safeEntry.bossDefeated) {
+        const stats = await updateGlobalStats(this.env, safeEntry);
+        const globalEntries = (await this.env.GLOBAL_LB.get(GLOBAL_KV_KEY, { type: 'json' })) ?? [];
+        this._broadcast(JSON.stringify({ type: 'global_leaderboard', entries: globalEntries, stats }));
       }
       return;
     }

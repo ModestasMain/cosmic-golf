@@ -1075,8 +1075,8 @@ export class NameEntryOverlay {
     roomInput.addEventListener('input', () => {
       roomInput.value = this._sanitizeRoomCode(roomInput.value);
       roomHint.textContent = roomInput.value === 'BOSS'
-        ? 'BOSS room = Worldeater-only finale test'
-        : 'Create a room to share, or paste an invite room code';
+        ? 'TIP: Use room "BOSS" for a boss fight'
+        : 'TIP: Use room "BOSS" for a boss fight';
     });
     roomInput.addEventListener('focus', () => {
       roomInput.style.borderColor = '#00DDFF';
@@ -1093,8 +1093,8 @@ export class NameEntryOverlay {
     const roomHint = document.createElement('div');
     roomHint.style.cssText = "margin-top:6px;margin-bottom:16px;font-family:'Inter Tight',sans-serif;font-size:12px;color:rgba(255,255,255,0.38);line-height:1.45;";
     roomHint.textContent = presetRoom === 'BOSS'
-      ? 'BOSS room = Worldeater-only finale test'
-      : 'Create a room to share, or paste an invite room code';
+      ? 'TIP: Use room "BOSS" for a boss fight'
+      : 'TIP: Use room "BOSS" for a boss fight';
     roomContent.appendChild(roomHint);
 
     const roomButtons = document.createElement('div');
@@ -1170,12 +1170,13 @@ export class NameEntryOverlay {
   _renderStats(el) {
     const d = this._statsData;
     const items = [
-      { label: 'PILOTS RANKED',  val: d ? String(d.count)    : '—',  color: '#00DDFF' },
-      { label: 'BEST SCORE',     val: d ? String(d.bestScore) : '—',  color: '#FFAA44' },
-      { label: 'HOLES IN ONE',   val: d ? String(d.hio)       : '—',  color: '#FF00CC' },
+      { label: 'TIMES PLAYED',   val: d ? String(d.timesPlayed)   : '—',  color: '#00DDFF' },
+      { label: 'UNIQUE PLAYERS', val: d ? String(d.uniquePlayers) : '—',  color: '#9FF7FF' },
+      { label: 'HOLES IN ONE',   val: d ? String(d.holeInOnes)    : '—',  color: '#FF00CC' },
+      { label: 'BOSS DEFEATS',   val: d ? String(d.bossDefeats)   : '—',  color: '#FFAA44' },
     ];
     el.innerHTML = items.map((s, i) => `
-      <div style="padding:13px 0;flex:1;text-align:center;${i < 2 ? 'border-right:1px solid rgba(255,255,255,0.07);' : ''}">
+      <div style="padding:13px 0;flex:1;text-align:center;${i < items.length - 1 ? 'border-right:1px solid rgba(255,255,255,0.07);' : ''}">
         <div style="font-family:'Orbitron',sans-serif;font-weight:700;font-size:18px;color:${s.color};letter-spacing:1px;">${s.val}</div>
         <div style="font-family:'JetBrains Mono',monospace;font-size:8px;color:rgba(255,255,255,0.35);letter-spacing:2px;margin-top:4px;">${s.label}</div>
       </div>
@@ -1186,13 +1187,14 @@ export class NameEntryOverlay {
     try {
       const res = await fetch(`https://${WORKER_HOST}/global-leaderboard`);
       if (!res.ok) return;
-      const { entries } = await res.json();
-      if (!Array.isArray(entries)) return;
-      const count = entries.length;
-      const bestScore = count > 0 ? Math.min(...entries.map(e => e.totalStrokes)) : 0;
-      // HIO estimation: entries with strokes <= 10 have at least one HIO
-      const hio = entries.filter(e => e.totalStrokes <= 10).length;
-      this._statsData = { count, bestScore, hio };
+      const { stats } = await res.json();
+      if (!stats || typeof stats !== 'object') return;
+      this._statsData = {
+        timesPlayed: Math.max(0, Math.round(stats.timesPlayed ?? 0)),
+        uniquePlayers: Math.max(0, Math.round(stats.uniquePlayers ?? 0)),
+        holeInOnes: Math.max(0, Math.round(stats.holeInOnes ?? 0)),
+        bossDefeats: Math.max(0, Math.round(stats.bossDefeats ?? 0)),
+      };
       if (this._statsEl) this._renderStats(this._statsEl);
     } catch {}
   }

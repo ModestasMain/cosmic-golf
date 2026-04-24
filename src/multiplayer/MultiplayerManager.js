@@ -306,7 +306,7 @@ export class MultiplayerManager {
         break;
 
       case 'global_leaderboard':
-        eventBus.emit(Events.GLOBAL_LEADERBOARD_UPDATE, { entries: msg.entries ?? [] });
+        eventBus.emit(Events.GLOBAL_LEADERBOARD_UPDATE, { entries: msg.entries ?? [], stats: msg.stats ?? null });
         break;
     }
   }
@@ -415,7 +415,7 @@ export class MultiplayerManager {
       if (!res.ok) return null;
       const data = await res.json();
       if (Array.isArray(data.entries)) {
-        eventBus.emit(Events.GLOBAL_LEADERBOARD_UPDATE, { entries: data.entries });
+        eventBus.emit(Events.GLOBAL_LEADERBOARD_UPDATE, { entries: data.entries, stats: data.stats ?? null });
       }
       return data.entries ?? null;
     } catch (err) {
@@ -430,7 +430,7 @@ export class MultiplayerManager {
       if (!res.ok) return null;
       const data = await res.json();
       if (Array.isArray(data.entries)) {
-        eventBus.emit(Events.GLOBAL_LEADERBOARD_UPDATE, { entries: data.entries });
+        eventBus.emit(Events.GLOBAL_LEADERBOARD_UPDATE, { entries: data.entries, stats: data.stats ?? null });
       }
       return data.entries ?? null;
     } catch (err) {

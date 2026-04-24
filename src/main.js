@@ -626,15 +626,9 @@ class Game {
     const cam = this.holeScene.camera;
     if (!cam) return;
 
-    // Update local player label — hide during hole transition states
+    // Only remote players need floating name tags; the local player already has HUD context.
     const localId = gameState.players[0]?.id;
-    const hideLabel = this.holeScene._state === 'HOLE_COMPLETE'
-                   || this.holeScene._state === 'CINEMATIC';
-    if (this.holeScene.ball && !hideLabel) {
-      this.playerLabels.setWorldPos(localId, this.holeScene.ball.position);
-    } else {
-      this.playerLabels.setWorldPos(localId, null);
-    }
+    this.playerLabels.setWorldPos(localId, null);
 
     // Update remote labels — clear first so players who left the hole disappear
     for (const [id] of this.playerLabels._labels) {

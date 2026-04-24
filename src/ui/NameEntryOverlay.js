@@ -999,6 +999,53 @@ export class NameEntryOverlay {
     launchHint.textContent = 'ENTER TO LAUNCH · FIRST SHOT STARTS FAST';
     card.appendChild(launchHint);
 
+    // ── Daily Hole CTA ───────────────────────────────────────────────
+    const dailyBtn = document.createElement('button');
+    dailyBtn.id = 'cg-daily-btn';
+    dailyBtn.style.cssText = [
+      'margin-top:14px', 'width:100%',
+      'padding:13px 16px', 'border-radius:10px',
+      'border:1px solid rgba(255,210,74,0.42)',
+      'background:linear-gradient(90deg,rgba(255,210,74,0.09),rgba(255,140,40,0.11))',
+      'color:#ffe3a0',
+      "font-family:'Orbitron',sans-serif",
+      'font-size:12px', 'letter-spacing:2.5px', 'font-weight:700',
+      'cursor:pointer', 'text-transform:uppercase',
+      'transition:transform 120ms,border-color 120ms,background 120ms',
+      'display:flex','align-items:center','justify-content:space-between','gap:10px',
+    ].join(';');
+    const dailyDate = new Date().toISOString().slice(0, 10);
+    dailyBtn.innerHTML = `<span>✦ DAILY HOLE — ${dailyDate}</span><span id="cg-daily-countdown" style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:1.5px;opacity:0.7;">—</span>`;
+    dailyBtn.addEventListener('mouseenter', () => {
+      dailyBtn.style.borderColor = 'rgba(255,210,74,0.8)';
+      dailyBtn.style.background = 'linear-gradient(90deg,rgba(255,210,74,0.16),rgba(255,140,40,0.18))';
+    });
+    dailyBtn.addEventListener('mouseleave', () => {
+      dailyBtn.style.borderColor = 'rgba(255,210,74,0.42)';
+      dailyBtn.style.background = 'linear-gradient(90deg,rgba(255,210,74,0.09),rgba(255,140,40,0.11))';
+    });
+    dailyBtn.addEventListener('click', () => this._confirm(input, { mode: 'daily' }));
+    card.appendChild(dailyBtn);
+
+    const dailyHint = document.createElement('div');
+    dailyHint.style.cssText = "margin-top:6px;text-align:center;font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:1.5px;color:rgba(255,210,74,0.5);";
+    dailyHint.textContent = 'ONE HOLE · SAME FOR EVERYONE · GLOBAL LEADERBOARD';
+    card.appendChild(dailyHint);
+
+    // Live countdown
+    const updateCountdown = () => {
+      const el = dailyBtn.querySelector('#cg-daily-countdown');
+      if (!el) return;
+      const now = new Date();
+      const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+      const s = Math.max(0, Math.floor((next - now) / 1000));
+      const h = String(Math.floor(s / 3600)).padStart(2, '0');
+      const m = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
+      el.textContent = `${h}:${m} LEFT`;
+    };
+    updateCountdown();
+    this._dailyInterval = setInterval(updateCountdown, 30000);
+
     // Divider
     const divider = document.createElement('div');
     divider.style.cssText = 'display:flex;align-items:center;gap:12px;margin:18px 0;';

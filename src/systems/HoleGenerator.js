@@ -1135,6 +1135,126 @@ export const ARCHETYPE_LABELS = {
   'WORLD EATER': 'WORLD EATER',
 };
 
+// ── Daily themed holes ─────────────────────────────────────────
+// Each theme produces a dramatically over-tuned layout tied to the UTC date.
+// Themes rotate by day-of-year so the hole changes daily but is stable per day.
+
+export const DAILY_THEMES = [
+  {
+    id: 'SLINGSHOT_SUNDAY',
+    label: 'SLINGSHOT SUNDAY',
+    archetype: 'SLINGSHOT',
+    scale: 1.7,                 // stretches tee→cup distance
+    planetScale: 1.35,          // bigger, meaner gravity wells
+    wormholePairs: 0,
+    paletteIdx: 3,
+    subtitle: 'One chance. Hook around the giant.',
+  },
+  {
+    id: 'WORMHOLE_WEDNESDAY',
+    label: 'WORMHOLE WEDNESDAY',
+    archetype: 'VOID_CROSSING',
+    scale: 1.9,
+    planetScale: 1.0,
+    wormholePairs: 3,           // three wormholes on the field
+    paletteIdx: 5,
+    subtitle: 'No direct path. Find the gates.',
+  },
+  {
+    id: 'RING_WORLD',
+    label: 'RING WORLD',
+    archetype: 'GRAVITY_RING',
+    scale: 1.55,
+    planetScale: 1.25,
+    wormholePairs: 1,
+    paletteIdx: 7,
+    subtitle: 'Orbit or die trying.',
+  },
+  {
+    id: 'PINBALL_FRENZY',
+    label: 'PINBALL FRENZY',
+    archetype: 'PINBALL',
+    scale: 1.6,
+    planetScale: 1.15,
+    wormholePairs: 2,
+    paletteIdx: 6,
+    subtitle: 'Chaos. Bounce your way home.',
+  },
+  {
+    id: 'GAUNTLET_OF_GIANTS',
+    label: 'GAUNTLET OF GIANTS',
+    archetype: 'TWIN_GIANTS',
+    scale: 1.8,
+    planetScale: 1.5,
+    wormholePairs: 1,
+    paletteIdx: 2,
+    subtitle: 'Thread the needle between the giants.',
+  },
+];
+
+function dayOfYearUTC(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const start = Date.UTC(y, 0, 0);
+  const now = Date.UTC(y, m - 1, d);
+  return Math.floor((now - start) / 86400000);
+}
+
+export function getDailyTheme(dateStr) {
+  const doy = dayOfYearUTC(dateStr);
+  return DAILY_THEMES[doy % DAILY_THEMES.length];
+}
+
+function scaleVector(v, s) {
+  return new Vector3(v.x * s, v.y * s, v.z * s);
+}
+
+function generateDailyHole(dateStr) {
+  const theme = getDailyTheme(dateStr);
+  const baseSeed = hashRoomCode(`DAILY-${dateStr}`) >>> 0;
+  const palette = COLOR_PALETTES[theme.paletteIdx % COLOR_PALETTES.length];
+  const colors = palette.planets;
+
+  const rng = mulberry32(baseSeed);
+  const gen = ARCHETYPE_FNS[theme.archetype];
+  const { planets, tee, cup } = gen(rng, colors);
+
+  // Amplify the layout: stretch distances + grow planets
+  const s = theme.scale;
+  const ps = theme.planetScale;
+  const scaledTee = scaleVector(tee, s);
+  const scaledCup = scaleVector(cup, s);
+  const scaledPlanets = planets.map(p => ({
+    ...p,
+    position: scaleVector(p.position, s),
+    radius: p.radius * ps,
+    mass: Math.pow(p.radius * ps, 3) * PLANET.MASS_FACTOR,
+  }));
+
+  // Place multiple wormholes if the theme demands it.
+  let wormholes = [];
+  for (let i = 0; i < theme.wormholePairs; i++) {
+    const whRng = mulberry32(baseSeed ^ Math.imul(i + 1, 0xbf58476d));
+    const placed = placeWormholes(whRng, scaledTee, scaledCup, scaledPlanets);
+    wormholes = wormholes.concat(placed);
+  }
+
+  const analysis = analyzeHoleLayout(scaledTee, scaledCup, scaledPlanets, wormholes, theme.archetype);
+
+  return {
+    planets: scaledPlanets,
+    tee: scaledTee,
+    cup: scaledCup,
+    wormholes,
+    palette,
+    holeIndex: 0,
+    archetype: theme.archetype,
+    difficulty: analysis,
+    progression: { slot: theme.label, target: { fwdMin: 0, fwdMax: 9999, widthMin: 0, widthMax: 9999 } },
+    daily: { theme: theme.id, label: theme.label, subtitle: theme.subtitle, date: dateStr },
+    seed: baseSeed,
+  };
+}
+
 // ── Wormhole placement ─────────────────────────────────────────
 /**
  * Place exactly one wormhole within realistic shot reach of the tee.
@@ -1250,6 +1370,11 @@ function genBOSS_WORLDEATER() {
  *   in sync.  Solo mode passes a random sessionSeed so each run is unique.
  */
 export function generateHole(holeIndex, roomCode = 0) {
+  if (typeof roomCode === 'string' && roomCode.toUpperCase().startsWith('DAILY-')) {
+    const date = roomCode.slice(6);
+    return { ...generateDailyHole(date), holeIndex };
+  }
+
   if (typeof roomCode === 'string' && roomCode.toUpperCase() === 'BOSS') {
     return {
       ...genBOSS_WORLDEATER(),

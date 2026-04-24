@@ -219,6 +219,9 @@ export class EventHUD {
 
   _startTick() {
     const tick = () => {
+      const hide = gameState.isDailyChallenge;
+      this._el.style.display = hide ? 'none' : '';
+      if (hide) { this._rafId = requestAnimationFrame(tick); return; }
       if (this._bossMode) {
         this._timerEl.textContent = this._bossAwakened
           ? `RESEALS IN ${Math.ceil(this._bossResetRemaining)}s`

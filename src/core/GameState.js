@@ -55,16 +55,23 @@ class GameState {
     return this.challengeMode === 'BOSS';
   }
 
+  get isDailyChallenge() {
+    return this.challengeMode === 'DAILY';
+  }
+
   get totalHoles() {
-    return (this.isBossRoom || this.isBossChallenge) ? 1 : HOLE.COUNT;
+    if (this.isBossRoom || this.isBossChallenge) return 1;
+    if (this.isDailyChallenge) return 1;
+    return HOLE.COUNT;
   }
 
   setChallengeSeed(value) {
     const seed = String(value || '').trim().slice(0, 64);
     this.challengeSeed = seed || null;
-    this.challengeMode = seed.toUpperCase() === 'BOSS'
-      ? 'BOSS'
-      : (seed ? 'RUN' : null);
+    const upper = seed.toUpperCase();
+    if (upper === 'BOSS') this.challengeMode = 'BOSS';
+    else if (upper.startsWith('DAILY-')) this.challengeMode = 'DAILY';
+    else this.challengeMode = seed ? 'RUN' : null;
   }
 
   clearChallenge() {

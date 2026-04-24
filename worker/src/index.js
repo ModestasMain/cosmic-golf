@@ -8,6 +8,7 @@
 export { CosmicGolfRoom } from './room.js';
 import { upsertGlobalEntry } from './globalLb.js';
 import { getGlobalStats, updateGlobalStats } from './globalStats.js';
+import { getDailyBoard, submitDailyScore, isValidDate } from './dailyLb.js';
 
 export default {
   async fetch(request, env) {
@@ -73,6 +74,23 @@ async function handleRequest(request, env) {
     const stats = await updateGlobalStats(env, entry);
 
     return jsonResponse({ entries: top10, stats });
+  }
+
+  // Route: /api/daily/:date — GET board, POST score
+  const dailyMatch = url.pathname.match(/^\/api\/daily\/(\d{4}-\d{2}-\d{2})$/);
+  if (dailyMatch) {
+    const date = dailyMatch[1];
+    if (!isValidDate(date)) return textResponse('Bad date', 400);
+    if (request.method === 'GET') {
+      return jsonResponse(await getDailyBoard(env, date));
+    }
+    if (request.method === 'POST') {
+      let body;
+      try { body = await request.json(); } catch { return textResponse('Bad request', 400); }
+      const result = await submitDailyScore(env, date, body);
+      return jsonResponse(result, result.ok ? 200 : 400);
+    }
+    return textResponse('Method not allowed', 405);
   }
 
   // Route: /party/{ROOM_CODE}  (underscores allowed — used by PUBLIC_2, PUBLIC_3, etc.)

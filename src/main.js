@@ -21,6 +21,7 @@ import { AnnouncerUI } from './ui/AnnouncerUI.js';
 import { EventHUD } from './ui/EventHUD.js';
 import { LobbyPanel } from './ui/LobbyPanel.js';
 import { BallStylePicker } from './ui/BallStylePicker.js';
+import { DailyOverlay } from './ui/DailyOverlay.js';
 import { audioManager } from './audio/AudioManager.js';
 
 const LOCAL_DEV_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
@@ -219,6 +220,7 @@ class Game {
     this.inputSystem = new InputSystem(this.renderer, null, null);
     this.holeScene = new HoleScene(this.renderer, this.inputSystem);
     this.scoreboardScene = new ScoreboardScene();
+    this.dailyOverlay = new DailyOverlay();
 
     this.inputSystem.camera = this.holeScene.camera;
     this._applySceneQuality();
@@ -542,7 +544,12 @@ class Game {
 
     this.nameEntry.show().then(({ name, mode, roomCode }) => {
       gameState.players[0].name = name;
-      if (mode === 'create') {
+      if (mode === 'daily') {
+        const date = new Date().toISOString().slice(0, 10);
+        gameState.setChallengeSeed(`DAILY-${date}`);
+        this.mp.startSolo(name);
+        this._syncRoomUrl(null);
+      } else if (mode === 'create') {
         gameState.clearChallenge();
         const createdCode = this.mp.createPrivateRoom(name, undefined, roomCode);
         this._syncRoomUrl(createdCode);

@@ -22,6 +22,7 @@ export class ScoreboardScene {
     eventBus.on(Events.HOLE_COMPLETE, () => {
       this._isGameOver = false;
       this._saveScore();
+      if (gameState.isDailyChallenge) return; // DailyOverlay takes over
       this.ui.show(false);
     });
 
@@ -29,6 +30,7 @@ export class ScoreboardScene {
       this._isGameOver = true;
       this._saveScore();
       this._submitGlobal();
+      if (gameState.isDailyChallenge) return; // DailyOverlay takes over
       this.ui.show(true);
     });
 

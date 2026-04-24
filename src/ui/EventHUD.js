@@ -7,6 +7,7 @@
 
 import { eventBus, Events } from '../core/EventBus.js';
 import { SERVER_EVENTS } from '../core/Constants.js';
+import { gameState } from '../core/GameState.js';
 
 const EVENT_DISPLAY = {
   ZERO_GRAVITY:   'ZERO GRAVITY',
@@ -25,6 +26,15 @@ const EVENT_COLOR = {
 const ALL_NAMES  = Object.values(EVENT_DISPLAY);
 const ALL_COLORS = Object.values(EVENT_COLOR);
 
+function hashStr(str) {
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) {
+    h = ((h << 5) + h) + str.charCodeAt(i);
+    h |= 0;
+  }
+  return h >>> 0;
+}
+
 export class EventHUD {
   constructor() {
     this._spinning     = false;
@@ -36,6 +46,7 @@ export class EventHUD {
     this._bossBroken   = 0;
     this._bossAwakened = false;
     this._bossResetRemaining = 0;
+    this._lastDisplayMode = null;
 
     this._el = this._build();
     document.body.appendChild(this._el);
@@ -173,6 +184,8 @@ export class EventHUD {
       if (this._bossMode) return;
       if (phase === 'start') {
         this._triggerSlotMachine(type);
+      } else if (phase === 'end') {
+        this._syncServerEventDisplay();
       }
     });
 
@@ -215,22 +228,7 @@ export class EventHUD {
       }
 
       if (!this._spinning) {
-        const cycleMs = SERVER_EVENTS.CYCLE_MS;
-        const eventMs = SERVER_EVENTS.EVENT_DURATION_MS;
-        const posInCycle = Date.now() % cycleMs;
-        const inEvent = posInCycle < eventMs;
-
-        if (inEvent) {
-          // During event: show time until event ends
-          const msLeft = eventMs - posInCycle;
-          const secLeft = Math.ceil(msLeft / 1000);
-      this._timerEl.textContent = `ENDS IN  ${secLeft}s`;
-        } else {
-          // During default phase: show time until next event starts
-          const msToNext = cycleMs - posInCycle;
-          const secLeft = Math.ceil(msToNext / 1000);
-          this._timerEl.textContent = `NEXT IN  ${secLeft}s`;
-        }
+        this._syncServerEventDisplay();
       }
       this._rafId = requestAnimationFrame(tick);
     };
@@ -246,6 +244,9 @@ export class EventHUD {
     // First event on page load: display immediately, no spin
     if (this._firstEvent) {
       this._firstEvent = false;
+      this._lastDisplayMode = 'active';
+      this._currentType = targetType;
+      this._labelEl.textContent = 'CURRENT EVENT';
       const name  = EVENT_DISPLAY[targetType] ?? targetType;
       const color = EVENT_COLOR[targetType]   ?? '#aaddff';
       this._reelEl.textContent      = name;
@@ -255,6 +256,9 @@ export class EventHUD {
     }
 
     this._spinning = true;
+    this._lastDisplayMode = 'active';
+    this._currentType = targetType;
+    this._labelEl.textContent = 'CURRENT EVENT';
     this._timerEl.textContent = 'NEXT IN  —';
 
     const targetName  = EVENT_DISPLAY[targetType] ?? targetType;
@@ -280,6 +284,7 @@ export class EventHUD {
   _runSchedule(schedule, idx) {
     if (idx >= schedule.length) {
       this._spinning = false;
+      this._syncServerEventDisplay();
       return;
     }
 
@@ -341,6 +346,51 @@ export class EventHUD {
       this._reelEl.style.textShadow = 'none';
       this._timerEl.textContent = `${this._bossBroken}/${this._bossTotal} WEAK SPOTS`;
     }
+  }
+
+  _syncServerEventDisplay() {
+    const cycleMs = SERVER_EVENTS.CYCLE_MS;
+    const eventMs = SERVER_EVENTS.EVENT_DURATION_MS;
+    const now = Date.now();
+    const cycleIdx = Math.floor(now / cycleMs);
+    const posInCycle = now % cycleMs;
+    const inEvent = posInCycle < eventMs;
+
+    if (inEvent) {
+      const currentType = this._pickType(cycleIdx);
+      if (this._lastDisplayMode !== 'active' || this._currentType !== currentType) {
+        this._setEventName(currentType, 'CURRENT EVENT');
+        this._firstEvent = false;
+      }
+      const secLeft = Math.max(0, Math.ceil((eventMs - posInCycle) / 1000));
+      this._timerEl.textContent = `ENDS IN  ${secLeft}s`;
+      this._lastDisplayMode = 'active';
+      this._currentType = currentType;
+      return;
+    }
+
+    const nextType = this._pickType(cycleIdx + 1);
+    if (this._lastDisplayMode !== 'next' || this._currentType !== nextType) {
+      this._setEventName(nextType, 'NEXT EVENT');
+    }
+    const secLeft = Math.max(0, Math.ceil((cycleMs - posInCycle) / 1000));
+    this._timerEl.textContent = `NEXT IN  ${secLeft}s`;
+    this._lastDisplayMode = 'next';
+    this._currentType = nextType;
+  }
+
+  _pickType(idx) {
+    const seed = hashStr((gameState.roomCode ?? 'SOLO') + String(idx));
+    return SERVER_EVENTS.TYPES[seed % SERVER_EVENTS.TYPES.length];
+  }
+
+  _setEventName(type, label) {
+    const name = EVENT_DISPLAY[type] ?? type ?? 'UNKNOWN EVENT';
+    const color = EVENT_COLOR[type] ?? '#aaddff';
+    this._labelEl.textContent = label;
+    this._reelEl.textContent = name;
+    this._reelEl.style.color = color;
+    this._reelEl.style.textShadow = 'none';
   }
 
   destroy() {

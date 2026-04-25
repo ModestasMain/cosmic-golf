@@ -15,8 +15,8 @@ export const TRAJ_CONFIG = {
   dt:          AIM.TRAJECTORY_DT,
   pointStep:   AIM.TRAJECTORY_POINT_STEP,
   dotSize:     AIM.TRAJECTORY_DOT_SIZE,
-  voidAlpha:   0.6,   // alpha multiplier for dots in the void
-  nearAlpha:   2.8,   // alpha multiplier close to planet surface
+  voidAlpha:   2,     // alpha multiplier for dots in the void
+  nearAlpha:   5,     // alpha multiplier close to planet surface
 };
 
 const _camToPt = new Vector3();
@@ -143,6 +143,7 @@ export class TrajectoryPreview {
     this._behindPlanetIdxs = [];
 
     const camPos = camera ? camera.position : null;
+    const isFailShot = this._lastOutcome === 'oob';
 
     const STEP = TRAJ_CONFIG.pointStep;
     let count = 0;
@@ -189,10 +190,14 @@ export class TrajectoryPreview {
         ? { r: 1.0, g: 0.15, b: 0.1 }
         : d === 1
         ? { r: 1.0, g: 0.55, b: 0.1 }
+        : isFailShot
+        ? { r: 1.0, g: 0.18 - t * 0.12, b: 0.15 - t * 0.1 }
         : lerpColor(t);
 
       // Base trajectory is more transparent overall
       let alpha = Math.pow(1.0 - t, 0.3) * 0.35;
+      // Fail shots fade out harder toward the end so the line visually "dies"
+      if (isFailShot) alpha *= 1.0 - t * 0.55;
 
       // Calculate nearest distance to any planet surface
       let nearestSurfaceDist = Infinity;

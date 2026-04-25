@@ -1319,13 +1319,6 @@ export class HoleScene {
     // Update tween animations (palette background fade etc.)
     tweenUpdate();
 
-    // Hit-freeze: skip physics briefly on shot
-    if (this._hitFreezeFrames > 0) {
-      if (!this._devFreezeAll) this._hitFreezeFrames--;
-      this._updateCamera(dt);
-      return;
-    }
-
     // Broadcast position even at rest so late-joining peers can place the ghost correctly
     if (this.ball && this._state !== 'BALL_IN_FLIGHT') {
       this._syncFrameCounter++;
@@ -1342,19 +1335,8 @@ export class HoleScene {
     }
 
     if (this._state === 'BALL_IN_FLIGHT') {
-      // Grace period: ramp gravity 0→1 over LAUNCH_GRACE_FRAMES after shot
-      let gravityScale = 1.0;
-      if (this._launchGraceFrames > 0) {
-        this._launchGraceFrames--;
-        gravityScale = 1.0 - (this._launchGraceFrames / PHYSICS.LAUNCH_GRACE_FRAMES);
-      }
-
-      // Combine gravity scale from server events + collectibles + orbit boost
       const orbitBoost = this._orbitalCapture.isOrbiting ? ORBIT.GRAVITY_BOOST : 1;
-      const combinedGravityScale = gravityScale
-        * this.serverEvents.gravityScale
-        * this.collectibles.gravityScale
-        * orbitBoost;
+      const cupUnlocked = !this.worldEater || this.worldEater.canHoleBall();
 
       // In orbit mode, only the orbit planet's gravity applies, with boundary
       const physicsPlanets = this._orbitalCapture.isOrbiting
@@ -1367,14 +1349,68 @@ export class HoleScene {
       this._accumDt += Math.min(dt, 0.1);
       let result = { bounced: false, bouncePlanet: null };
       let advancedPlanetTime = false;
+      let enteredWormhole = null;
       while (this._accumDt >= AIM.TRAJECTORY_DT) {
         if (this._hasDynamicPlanetMotion()) {
           this._planetPhysicsTimeMs += AIM.TRAJECTORY_DT * 1000;
           this._applyPlanetEventEffects(this._planetPhysicsTimeMs, false, this.planets);
           advancedPlanetTime = true;
         }
+
+        if (this._hitFreezeFrames > 0) {
+          this._hitFreezeFrames--;
+          this._accumDt -= AIM.TRAJECTORY_DT;
+          continue;
+        }
+
+        // Grace period: ramp gravity 0→1 over LAUNCH_GRACE_FRAMES after shot.
+        // This must tick per fixed physics step, not per rendered frame, or
+        // low-FPS devices get a different launch curve than the trajectory preview.
+        let gravityScale = 1.0;
+        if (this._launchGraceFrames > 0) {
+          this._launchGraceFrames--;
+          gravityScale = 1.0 - (this._launchGraceFrames / PHYSICS.LAUNCH_GRACE_FRAMES);
+        }
+
+        const combinedGravityScale = gravityScale
+          * this.serverEvents.gravityScale
+          * this.collectibles.gravityScale
+          * orbitBoost;
+
         result = stepBall(this.ball, physicsPlanets, AIM.TRAJECTORY_DT, combinedGravityScale, orbitPlanet);
+
+        // Black-hole cup pull is part of the deterministic flight path, so it
+        // also has to run at the same fixed timestep as simulateTrajectory().
+        if (this.cup && cupUnlocked) {
+          const cupDist = this.ball.position.distanceTo(this.cup.position);
+          if (cupDist < HOLE.BLACK_HOLE_PULL_RADIUS && cupDist > HOLE.CUP_RADIUS) {
+            const t = 1 - cupDist / HOLE.BLACK_HOLE_PULL_RADIUS;
+            const distSq = Math.max(cupDist * cupDist, HOLE.CUP_RADIUS * HOLE.CUP_RADIUS);
+            const strength = HOLE.BLACK_HOLE_GRAVITY * t * t / distSq;
+            const toCup = new Vector3().subVectors(this.cup.position, this.ball.position).normalize();
+            this.ball.velocity.addScaledVector(toCup, strength * AIM.TRAJECTORY_DT * 60);
+          }
+        }
+
+        // Wormhole suction changes velocity, so keep it fixed-step too. Visual
+        // debris deflection remains frame-based below because the preview does
+        // not include debris collisions.
+        for (const worm of this.wormholes) {
+          const distToWorm = this.ball.position.distanceTo(worm.position);
+          if (distToWorm < WORMHOLE_CAPTURE_RADIUS) {
+            worm.applySuction(this.ball, AIM.TRAJECTORY_DT);
+            if (worm.checkBallEntered(this.ball.position)) {
+              enteredWormhole = worm;
+              break;
+            }
+          }
+        }
+
         this._accumDt -= AIM.TRAJECTORY_DT;
+        if (enteredWormhole) {
+          this._accumDt = 0;
+          break;
+        }
         if (result.bounced) {
           this._accumDt = 0;
           this._trajNeedsRecompute = true; // recompute trajectory post-bounce
@@ -1386,6 +1422,12 @@ export class HoleScene {
         this._applyPlanetEventEffects(this._planetPhysicsTimeMs);
       } else {
         this._planetPhysicsTimeMs = frameNowMs;
+      }
+
+      if (enteredWormhole) {
+        this.ball.syncMesh();
+        this._onWormholeEnter(enteredWormhole);
+        return;
       }
 
       // ZERO_GRAVITY sticky: ball touches a planet → kill velocity, stay on surface
@@ -1510,8 +1552,6 @@ export class HoleScene {
         }
       }
 
-      const cupUnlocked = !this.worldEater || this.worldEater.canHoleBall();
-
       // Black hole: proximity shake + gravitational pull within radius
       if (this.cup) {
         const cupDist = this.ball.position.distanceTo(this.cup.position);
@@ -1531,14 +1571,6 @@ export class HoleScene {
           eventBus.emit(Events.BLACK_HOLE_PROXIMITY, { proximity: 0 });
         }
 
-        // Gravity pull — hard cutoff at BLACK_HOLE_PULL_RADIUS, smooth falloff inside
-        if (cupUnlocked && cupDist < HOLE.BLACK_HOLE_PULL_RADIUS && cupDist > HOLE.CUP_RADIUS) {
-          const t = 1 - cupDist / HOLE.BLACK_HOLE_PULL_RADIUS; // 0 at edge, 1 at cup
-          const distSq = Math.max(cupDist * cupDist, HOLE.CUP_RADIUS * HOLE.CUP_RADIUS);
-          const strength = HOLE.BLACK_HOLE_GRAVITY * t * t / distSq;
-          const toCup = new Vector3().subVectors(this.cup.position, this.ball.position).normalize();
-          this.ball.velocity.addScaledVector(toCup, strength * dt * 60);
-        }
       }
 
       if (this.worldEater) {
@@ -1591,13 +1623,9 @@ export class HoleScene {
       // Wormhole: debris deflection (always), suction + entry (when close)
       for (const worm of this.wormholes) {
         worm.applyDebrisDeflection(this.ball);
-        const distToWorm = this.ball.position.distanceTo(worm.position);
-        if (distToWorm < WORMHOLE_CAPTURE_RADIUS) {
-          worm.applySuction(this.ball, dt);
-          if (worm.checkBallEntered(this.ball.position)) {
-            this._onWormholeEnter(worm);
-            return;
-          }
+        if (worm.checkBallEntered(this.ball.position)) {
+          this._onWormholeEnter(worm);
+          return;
         }
       }
 

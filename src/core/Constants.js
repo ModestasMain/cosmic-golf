@@ -25,7 +25,7 @@ export const AIM = {
   TRAJECTORY_DT: 0.016,
   // Trajectory visual tuning — adjust these to change line density/dot size
   TRAJECTORY_POINT_STEP: 4,     // Higher = more space between dots (1=every point, 5=every 5th)
-  TRAJECTORY_DOT_SIZE: 3.0,     // Size of each dot in pixels
+  TRAJECTORY_DOT_SIZE: 5,       // Size of each dot in pixels
 };
 
 export const HOLE = {

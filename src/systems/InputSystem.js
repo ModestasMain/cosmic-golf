@@ -112,6 +112,13 @@ export class InputSystem {
           0%,100% { filter:drop-shadow(0 0 8px var(--bloom)) drop-shadow(0 0 20px var(--bloom)); }
           50%     { filter:drop-shadow(0 0 18px var(--bloom)) drop-shadow(0 0 40px var(--bloom)); }
         }
+        #power-drag-demo {
+          opacity:1;
+          transition:opacity .18s ease;
+        }
+        #power-drag-demo.is-hidden {
+          opacity:0;
+        }
         @media (max-width: 720px), (pointer: coarse) {
           #power-pyramid-wrap { transform: scale(0.5); transform-origin: bottom center; }
           #power-ring-wrap { gap: 4px !important; }
@@ -212,6 +219,72 @@ export class InputSystem {
     bgTri.setAttribute('stroke-width', '1.5');
     bgTri.setAttribute('stroke-linejoin', 'round');
     svg.appendChild(bgTri);
+
+    const demoGroup = document.createElementNS(NS, 'g');
+    demoGroup.setAttribute('id', 'power-drag-demo');
+    demoGroup.setAttribute('clip-path', 'url(#py-clip)');
+
+    const demoFill = document.createElementNS(NS, 'rect');
+    demoFill.setAttribute('x', '0');
+    demoFill.setAttribute('y', String(this._pyTipY));
+    demoFill.setAttribute('width', String(this._pyW));
+    demoFill.setAttribute('height', '0');
+    demoFill.setAttribute('fill', 'url(#py-fill-grad)');
+    demoFill.setAttribute('opacity', '0.28');
+    demoFill.setAttribute('filter', 'drop-shadow(0 0 8px rgba(84,210,255,0.45))');
+    const demoFillY = document.createElementNS(NS, 'animate');
+    demoFillY.setAttribute('attributeName', 'y');
+    demoFillY.setAttribute('values', `${this._pyTipY};86;86;${this._pyTipY}`);
+    demoFillY.setAttribute('keyTimes', '0;0.55;0.72;1');
+    demoFillY.setAttribute('dur', '2.05s');
+    demoFillY.setAttribute('repeatCount', 'indefinite');
+    demoFillY.setAttribute('calcMode', 'spline');
+    demoFillY.setAttribute('keySplines', '.2 .8 .2 1;0 0 1 1;.6 0 .8 .2');
+    const demoFillH = document.createElementNS(NS, 'animate');
+    demoFillH.setAttribute('attributeName', 'height');
+    demoFillH.setAttribute('values', `0;${this._pyTipY - 86};${this._pyTipY - 86};0`);
+    demoFillH.setAttribute('keyTimes', '0;0.55;0.72;1');
+    demoFillH.setAttribute('dur', '2.05s');
+    demoFillH.setAttribute('repeatCount', 'indefinite');
+    demoFillH.setAttribute('calcMode', 'spline');
+    demoFillH.setAttribute('keySplines', '.2 .8 .2 1;0 0 1 1;.6 0 .8 .2');
+    demoFill.appendChild(demoFillY);
+    demoFill.appendChild(demoFillH);
+    demoGroup.appendChild(demoFill);
+
+    const demoArrow = document.createElementNS(NS, 'g');
+    demoArrow.setAttribute('opacity', '0.58');
+    demoArrow.setAttribute('filter', 'drop-shadow(0 0 4px rgba(84,210,255,0.46))');
+    const arrowAnim = document.createElementNS(NS, 'animateTransform');
+    arrowAnim.setAttribute('attributeName', 'transform');
+    arrowAnim.setAttribute('type', 'translate');
+    arrowAnim.setAttribute('values', '0 38;0 -42;0 -42;0 38');
+    arrowAnim.setAttribute('keyTimes', '0;0.55;0.72;1');
+    arrowAnim.setAttribute('dur', '2.05s');
+    arrowAnim.setAttribute('repeatCount', 'indefinite');
+    arrowAnim.setAttribute('calcMode', 'spline');
+    arrowAnim.setAttribute('keySplines', '.2 .8 .2 1;0 0 1 1;.6 0 .8 .2');
+    demoArrow.appendChild(arrowAnim);
+    const arrowStem = document.createElementNS(NS, 'line');
+    arrowStem.setAttribute('x1', String(this._pyTipX));
+    arrowStem.setAttribute('y1', '128');
+    arrowStem.setAttribute('x2', String(this._pyTipX));
+    arrowStem.setAttribute('y2', '180');
+    arrowStem.setAttribute('stroke', 'rgba(116,225,255,0.62)');
+    arrowStem.setAttribute('stroke-width', '2.5');
+    arrowStem.setAttribute('stroke-linecap', 'round');
+    demoArrow.appendChild(arrowStem);
+    const arrowHead = document.createElementNS(NS, 'polyline');
+    arrowHead.setAttribute('points', `${this._pyTipX - 15},143 ${this._pyTipX},128 ${this._pyTipX + 15},143`);
+    arrowHead.setAttribute('fill', 'none');
+    arrowHead.setAttribute('stroke', 'rgba(116,225,255,0.68)');
+    arrowHead.setAttribute('stroke-width', '2.5');
+    arrowHead.setAttribute('stroke-linecap', 'round');
+    arrowHead.setAttribute('stroke-linejoin', 'round');
+    demoArrow.appendChild(arrowHead);
+    demoGroup.appendChild(demoArrow);
+    this._dragDemo = demoGroup;
+    svg.appendChild(demoGroup);
 
     // Fill rect — grows from bottom-tip upward, clipped to triangle
     const fillRect = document.createElementNS(NS, 'rect');
@@ -502,7 +575,14 @@ export class InputSystem {
     }
   }
 
+  _setPowerHintActive(active) {
+    if (!this._dragDemo) return;
+    this._dragDemo.classList.toggle('is-hidden', !active);
+  }
+
   _setBarPower(p) {
+    this._setPowerHintActive(p <= 0.02 && this._pwrPtr === null && !this._freecamActive);
+
     // Geometry: triangle from y=4 (top, full width) to y=206 (tip, width=0)
     const innerH   = this._pyTipY - this._pyTopY; // 202
     const fillH    = p * innerH;
@@ -640,6 +720,7 @@ export class InputSystem {
       this._pwrDownY   = e.clientY;
       this._pwrStartY  = e.clientY + this._power * AIM.MAX_DRAG_DISTANCE;
       this._pwrMaxMove = 0;
+      this._setPowerHintActive(false);
       return;
     }
 
@@ -720,6 +801,7 @@ export class InputSystem {
         } else if (this._power <= 0.02) {
           // Nudge: no power yet
           this._label.textContent = 'DRAG PYRAMID UP FOR POWER';
+          this._setPowerHintActive(true);
         }
       }
       // Large movement → power was dragged; just keep the value, stay in AIMING
@@ -852,6 +934,9 @@ export class InputSystem {
     if (v) {
       this._wrap.style.display = 'flex';
       this._label.textContent = 'FREECAM: WASD QE, DRAG TO LOOK';
+      this._setPowerHintActive(false);
+    } else {
+      this._setBarPower(this._power);
     }
   }
   isInPowerPhase()     { return this._power > 0.02; }

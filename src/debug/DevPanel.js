@@ -277,8 +277,8 @@ export class DevPanel {
       hemiSky:        '#' + hemi.color.getHexString(),
       hemiGround:     '#' + hemi.groundColor.getHexString(),
       hemiIntensity:  hemi.intensity,
-      atmoGlowPower:  1,
-      atmoGlowMult:   0,
+      atmoGlowPower:  PLANET.ATMOSPHERE_GLOW_POWER,
+      atmoGlowMult:   PLANET.ATMOSPHERE_GLOW_MULT,
       planetRoughness: 0.7,
       planetMetalness: 0.34,
       lockLighting:   false,
@@ -389,7 +389,7 @@ export class DevPanel {
 
     const p = {
       atmosphereVisible:  true,
-      atmosphereStrength: 1.0,
+      atmosphereStrength: PLANET.ATMOSPHERE_GLOW_MULT,
       ringOpacity:        1.0,
       ringScale:          PLANET.RING_SCALE,
       ringBandsMin:       2,

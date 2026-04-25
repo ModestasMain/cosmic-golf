@@ -384,11 +384,11 @@ export class DevPanel {
     const p = {
       atmosphereVisible:  true,
       atmosphereStrength: 1.0,
-      ringOpacity:        0.45,
+      ringOpacity:        0.1,
       ringScale:          0.65,
       ringBandsMin:       2,
       ringBandsMax:       4,
-      planetScale:        1.25,
+      planetScale:        1.6,
       textureBrightness:  1.0,
       activeTexture:      'procedural',
       texturePath:        '/textures/planets/',

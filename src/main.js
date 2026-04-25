@@ -23,6 +23,23 @@ import { LobbyPanel } from './ui/LobbyPanel.js';
 import { BallStylePicker } from './ui/BallStylePicker.js';
 import { DailyOverlay } from './ui/DailyOverlay.js';
 import { audioManager } from './audio/AudioManager.js';
+import { MULTIPLAYER } from './core/Constants.js';
+
+function _getCgPlayerId() {
+  const key = 'cosmic-golf-player-id';
+  let id = localStorage.getItem(key);
+  if (!id) {
+    id = `cg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+    localStorage.setItem(key, id);
+  }
+  return id;
+}
+function _getCgSessionId() {
+  if (!gameState.leaderboardSessionId) {
+    gameState.leaderboardSessionId = `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+  }
+  return gameState.leaderboardSessionId;
+}
 
 const LOCAL_DEV_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 const QUALITY_MODE_ORDER = ['auto', 'high', 'medium', 'performance'];
@@ -273,6 +290,20 @@ class Game {
 
     eventBus.on(Events.BALL_HOLED, ({ strokes, timeMs }) => {
       this.mp.broadcastHoleComplete(strokes, timeMs);
+      if (!gameState.isDailyChallenge) {
+        const payload = {
+          sessionId: _getCgSessionId(),
+          playerId: _getCgPlayerId(),
+          holeIndex: gameState.currentHole,
+          strokes,
+        };
+        fetch(`https://${MULTIPLAYER.MP_HOST}/hole-completed`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ entry: payload }),
+          keepalive: true,
+        }).catch(() => {});
+      }
     });
 
 
@@ -385,35 +416,48 @@ class Game {
       '-webkit-user-select:none',
     ].join(';');
 
+    const backdrop = document.createElement('div');
+    backdrop.id = 'settings-backdrop';
+    backdrop.style.cssText = [
+      'position:fixed','inset:0','z-index:202','display:none',
+      'align-items:stretch','justify-content:center',
+      'background:radial-gradient(ellipse at center, rgba(14,8,32,0.92), rgba(3,2,10,0.97))',
+      'backdrop-filter:blur(18px)','-webkit-backdrop-filter:blur(18px)',
+      'overflow:auto',
+    ].join(';');
+
     const panel = document.createElement('div');
     panel.id = 'settings-panel';
     panel.style.cssText = [
-      'position:fixed',
-      'left:max(20px, calc(env(safe-area-inset-left, 0px) + 12px))',
-      'bottom:max(74px, calc(env(safe-area-inset-bottom, 0px) + 68px))',
+      'position:relative',
       'z-index:203',
-      'display:none',
+      'display:flex',
       'flex-direction:column',
-      'gap:10px',
-      'width:min(280px, calc(100vw - 36px))',
-      'padding:12px',
-      'border-radius:22px',
-      'background:linear-gradient(180deg, rgba(10, 8, 24, 0.92), rgba(7, 5, 18, 0.9))',
-      'border:1px solid rgba(124, 92, 255, 0.32)',
-      'box-shadow:0 24px 64px rgba(3, 2, 10, 0.5)',
-      'backdrop-filter:blur(14px)',
-      '-webkit-backdrop-filter:blur(14px)',
+      'gap:14px',
+      'width:100%',
+      'max-width:560px',
+      'margin:auto',
+      'padding:36px 32px',
+      'box-sizing:border-box',
+      'min-height:100%',
+      'justify-content:center',
+      'background:transparent',
+      'border:none',
     ].join(';');
 
     const header = document.createElement('div');
     header.textContent = 'SETTINGS';
     header.style.cssText = [
       'font-family:Orbitron, sans-serif',
-      'font-size:10px',
-      'letter-spacing:0.22em',
-      'color:rgba(173, 118, 255, 0.95)',
+      'font-size:28px',
+      'letter-spacing:0.42em',
+      'color:#e9ddff',
       'text-transform:uppercase',
-      'padding:0 2px 2px',
+      'text-align:center',
+      'padding:8px 2px 22px',
+      'border-bottom:1px solid rgba(124,92,255,0.24)',
+      'margin-bottom:10px',
+      'text-shadow:0 0 24px rgba(132,92,255,0.45)',
     ].join(';');
     panel.appendChild(header);
 
@@ -496,28 +540,99 @@ class Game {
     resetBtn.addEventListener('pointerup',   () => { resetBtn.style.background = 'linear-gradient(180deg, rgba(11, 8, 22, 0.86), rgba(8, 5, 18, 0.84))'; });
     panel.appendChild(resetBtn);
 
+    const menuBtn = document.createElement('button');
+    menuBtn.id = 'main-menu-btn';
+    menuBtn.textContent = '⌂ BACK TO MAIN MENU';
+    menuBtn.style.cssText = [
+      'width:100%',
+      'background:linear-gradient(180deg, rgba(40, 22, 74, 0.92), rgba(22, 12, 46, 0.92))',
+      'color:#ffd24a',
+      'font-family:Orbitron, sans-serif',
+      'font-size:12px',
+      'letter-spacing:0.16em',
+      'border:1px solid rgba(255,210,74,0.44)',
+      'border-radius:16px',
+      'padding:12px 14px',
+      'cursor:pointer',
+      'text-transform:uppercase',
+    ].join(';');
+    menuBtn.addEventListener('click', () => {
+      window.location.href = window.location.origin + window.location.pathname;
+    });
+    panel.appendChild(menuBtn);
+
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = 'CLOSE';
+    closeBtn.style.cssText = [
+      'width:100%',
+      'background:transparent',
+      'color:rgba(200,190,230,0.7)',
+      'font-family:Orbitron, sans-serif',
+      'font-size:10px',
+      'letter-spacing:0.2em',
+      'border:1px solid rgba(132, 92, 255, 0.24)',
+      'border-radius:14px',
+      'padding:9px 12px',
+      'cursor:pointer',
+      'text-transform:uppercase',
+      'margin-top:2px',
+    ].join(';');
+    panel.appendChild(closeBtn);
+
+    const closeX = document.createElement('button');
+    closeX.setAttribute('aria-label', 'Close settings');
+    closeX.innerHTML = '✕';
+    closeX.style.cssText = [
+      'position:absolute',
+      'top:max(18px, env(safe-area-inset-top, 0px))',
+      'right:max(18px, env(safe-area-inset-right, 0px))',
+      'z-index:204',
+      'width:44px','height:44px',
+      'display:flex','align-items:center','justify-content:center',
+      'background:rgba(11,8,22,0.7)',
+      'color:rgba(231,226,255,0.92)',
+      'font-family:Orbitron, sans-serif',
+      'font-size:18px',
+      'border:1px solid rgba(132,92,255,0.44)',
+      'border-radius:50%',
+      'cursor:pointer',
+    ].join(';');
+    backdrop.appendChild(closeX);
+    backdrop.appendChild(panel);
+
     const closePanel = () => {
-      panel.style.display = 'none';
+      backdrop.style.display = 'none';
       button.dataset.open = '0';
+      const eh = document.getElementById('event-hud');
+      if (eh) eh.style.visibility = '';
     };
     const openPanel = () => {
-      panel.style.display = 'flex';
+      backdrop.style.display = 'flex';
       button.dataset.open = '1';
+      const eh = document.getElementById('event-hud');
+      if (eh) eh.style.visibility = 'hidden';
     };
 
     button.addEventListener('pointerdown', (e) => {
       e.preventDefault();
-      if (panel.style.display === 'flex') closePanel();
+      if (backdrop.style.display === 'flex') closePanel();
       else openPanel();
     });
 
-    document.addEventListener('pointerdown', (e) => {
-      if (!panel.contains(e.target) && !button.contains(e.target)) {
-        closePanel();
+    closeBtn.addEventListener('click', closePanel);
+    closeX.addEventListener('click', closePanel);
+    backdrop.addEventListener('pointerdown', (e) => {
+      if (e.target === backdrop) closePanel();
+    });
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        if (backdrop.style.display === 'flex') closePanel();
+        else openPanel();
       }
     });
 
-    document.body.appendChild(panel);
+    document.body.appendChild(backdrop);
     document.body.appendChild(button);
   }
 

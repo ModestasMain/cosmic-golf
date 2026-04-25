@@ -112,6 +112,10 @@ export class InputSystem {
           0%,100% { filter:drop-shadow(0 0 8px var(--bloom)) drop-shadow(0 0 20px var(--bloom)); }
           50%     { filter:drop-shadow(0 0 18px var(--bloom)) drop-shadow(0 0 40px var(--bloom)); }
         }
+        @media (max-width: 720px), (pointer: coarse) {
+          #power-pyramid-wrap { transform: scale(0.5); transform-origin: bottom center; }
+          #power-ring-wrap { gap: 4px !important; }
+        }
       `;
       document.head.appendChild(s);
     }

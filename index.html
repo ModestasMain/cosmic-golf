@@ -192,6 +192,23 @@
       text-transform: uppercase;
     }
     @media (min-width: 640px) { #aim-hint { white-space: nowrap; } }
+    @media (max-width: 720px), (pointer: coarse) {
+      #power-bar-wrap {
+        width: min(150px, 38vw);
+        padding: 4px 8px 6px;
+        border-radius: 12px;
+        bottom: max(54px, calc(env(safe-area-inset-bottom, 0px) + 38px));
+      }
+      #power-bar-wrap::after {
+        border-left-width: 9px;
+        border-right-width: 9px;
+        border-top-width: 12px;
+        bottom: -12px;
+      }
+      #power-label { font-size: 8px; margin-bottom: 4px; letter-spacing: 0.12em; }
+      #power-bar-bg { height: 7px; }
+      #aim-hint { font-size: 8px; bottom: max(14px, calc(env(safe-area-inset-bottom, 0px) + 6px)); }
+    }
     #room-code-ui {
       position: absolute;
       top: var(--hud-top-gap);

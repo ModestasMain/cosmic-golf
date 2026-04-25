@@ -133,6 +133,39 @@ async function zipFiles(zipPath, files, cwd) {
   await run('zip', ['-q', '-j', zipPath, ...files], { cwd });
 }
 
+const WRAP_PAD_FRACTION = 0.05;
+
+async function wrapPadEquirect(inputPath, outputPath) {
+  // Prepend the right edge and append the left edge so the AI upscaler sees
+  // longitude continuity across the meridian. After upscale the padding is
+  // cropped back off — the result is wrap-seamless equirect.
+  const f = WRAP_PAD_FRACTION;
+  const filter = [
+    `[0:v]split=3[a][b][c]`,
+    `[a]crop=iw*${f}:ih:iw-iw*${f}:0[rightStrip]`,
+    `[c]crop=iw*${f}:ih:0:0[leftStrip]`,
+    `[rightStrip][b][leftStrip]hstack=inputs=3`,
+  ].join(';');
+  await run('ffmpeg', [
+    '-y', '-hide_banner', '-loglevel', 'error',
+    '-i', inputPath,
+    '-filter_complex', filter,
+    outputPath,
+  ]);
+}
+
+async function unwrapEquirect(inputPath, outputPath) {
+  // Crop the wrap padding back off. After AI upscale + final scale, padding
+  // occupies the same fractional width on each side as the input.
+  const f = WRAP_PAD_FRACTION;
+  await run('ffmpeg', [
+    '-y', '-hide_banner', '-loglevel', 'error',
+    '-i', inputPath,
+    '-vf', `crop=iw*(1-${2 * f}):ih:iw*${f}:0`,
+    outputPath,
+  ]);
+}
+
 async function convertToCubemapFaces(inputPath, outputDir, faceSize) {
   const stripPath = path.join(outputDir, 'cubemap-strip.png');
   const stripWidth = faceSize * 6;
@@ -212,7 +245,9 @@ async function handleUpscale(req, res) {
   const jobId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const base = sanitizeName(file.name);
   const inputPath = path.join(TMP_DIR, `${jobId}-input${extensionFor(file)}`);
+  const paddedInputPath = path.join(TMP_DIR, `${jobId}-padded.png`);
   const aiPath = path.join(TMP_DIR, `${jobId}-ai.png`);
+  const aiUnwrappedPath = path.join(TMP_DIR, `${jobId}-ai-unwrapped.png`);
   const outputPath = path.join(TMP_DIR, `${jobId}-output.png`);
   const cubemapDir = path.join(TMP_DIR, `${jobId}-cubemap`);
   const zipPath = path.join(TMP_DIR, `${jobId}-cubemap.zip`);
@@ -223,8 +258,10 @@ async function handleUpscale(req, res) {
     const source = await probeDimensions(inputPath);
     const aiScale = chooseAiScale(source, target);
 
+    await wrapPadEquirect(inputPath, paddedInputPath);
+
     await run(REALESRGAN_BIN, [
-      '-i', inputPath,
+      '-i', paddedInputPath,
       '-o', aiPath,
       '-s', String(aiScale),
       '-n', 'realesrgan-x4plus',
@@ -233,11 +270,13 @@ async function handleUpscale(req, res) {
       '-f', 'png',
     ], { cwd: VENDOR_DIR });
 
+    await unwrapEquirect(aiPath, aiUnwrappedPath);
+
     await run('ffmpeg', [
       '-y',
       '-hide_banner',
       '-loglevel', 'error',
-      '-i', aiPath,
+      '-i', aiUnwrappedPath,
       '-vf', finalScaleFilter(target),
       outputPath,
     ]);
@@ -282,7 +321,9 @@ async function handleUpscale(req, res) {
   } finally {
     await Promise.allSettled([
       inputPath,
+      paddedInputPath,
       aiPath,
+      aiUnwrappedPath,
       outputPath,
       zipPath,
     ].map((filePath) => fs.rm(filePath, { force: true })));

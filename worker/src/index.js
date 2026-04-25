@@ -7,7 +7,7 @@
 
 export { CosmicGolfRoom } from './room.js';
 import { upsertGlobalEntry } from './globalLb.js';
-import { getGlobalStats, updateGlobalStats } from './globalStats.js';
+import { getGlobalStats, updateGlobalStats, recordHoleCompletion } from './globalStats.js';
 import { getDailyBoard, submitDailyScore, isValidDate } from './dailyLb.js';
 
 export default {
@@ -74,6 +74,22 @@ async function handleRequest(request, env) {
     const stats = await updateGlobalStats(env, entry);
 
     return jsonResponse({ entries: top10, stats });
+  }
+
+  // Route: POST /hole-completed — per-hole stats increment
+  if (url.pathname === '/hole-completed' && request.method === 'POST') {
+    let body;
+    try { body = await request.json(); } catch {
+      return textResponse('Bad request', 400);
+    }
+    const e = body?.entry ?? body;
+    const stats = await recordHoleCompletion(env, {
+      sessionId: typeof e?.sessionId === 'string' ? e.sessionId.slice(0, 48) : null,
+      playerId: typeof e?.playerId === 'string' ? e.playerId.slice(0, 80) : null,
+      holeIndex: typeof e?.holeIndex === 'number' ? e.holeIndex : -1,
+      strokes: typeof e?.strokes === 'number' ? e.strokes : 0,
+    });
+    return jsonResponse({ stats });
   }
 
   // Route: /api/daily/:date — GET board, POST score

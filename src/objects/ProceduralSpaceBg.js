@@ -8,8 +8,8 @@
 // ============================================================
 
 import {
-  SphereGeometry, MeshBasicMaterial, Mesh, BackSide, Color, Vector3,
-  TextureLoader, CubeTextureLoader, SRGBColorSpace, LinearFilter, ClampToEdgeWrapping, EquirectangularReflectionMapping,
+  SphereGeometry, MeshBasicMaterial, ShaderMaterial, Mesh, BackSide, Color, Vector3,
+  TextureLoader, CubeTextureLoader, SRGBColorSpace, LinearFilter, LinearMipmapLinearFilter, ClampToEdgeWrapping, EquirectangularReflectionMapping,
 } from 'three';
 
 const VOID_BG_RADIUS = 6000;
@@ -296,6 +296,83 @@ diffuseColor.rgb = applyVoidImageGrade(diffuseColor.rgb, vMapUv);
     return material;
   }
 
+  _createCubemapMaterial(cubeTex) {
+    const p = this.params;
+    const u = {
+      uCube:                       { value: cubeTex },
+      uImageExposure:              { value: p.imageExposure },
+      uImageContrast:              { value: p.imageContrast },
+      uImageSaturation:            { value: p.imageSaturation },
+      uImageBlackPoint:            { value: p.imageBlackPoint },
+      uImageHighlightCompression:  { value: p.imageHighlightCompression },
+      uImagePoleFadeStart:         { value: p.imagePoleFadeStart },
+      uImagePoleFadeStrength:      { value: p.imagePoleFadeStrength },
+      uImagePoleFadeColor:         { value: hexToV3(p.voidColor) },
+      uImageSeamBlur:              { value: p.imageSeamBlur },
+    };
+    this._u = u;
+    return new ShaderMaterial({
+      uniforms: u,
+      side: BackSide,
+      depthWrite: false,
+      fog: false,
+      toneMapped: false,
+      vertexShader: `
+        varying vec3 vDir;
+        void main() {
+          vDir = normalize(position);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        precision highp float;
+        uniform samplerCube uCube;
+        uniform float uImageExposure;
+        uniform float uImageContrast;
+        uniform float uImageSaturation;
+        uniform float uImageBlackPoint;
+        uniform float uImageHighlightCompression;
+        uniform float uImagePoleFadeStart;
+        uniform float uImagePoleFadeStrength;
+        uniform vec3  uImagePoleFadeColor;
+        uniform float uImageSeamBlur;
+        varying vec3 vDir;
+
+        vec3 sampleBlurred(vec3 d, float blur) {
+          if (blur < 0.0001) return textureCube(uCube, d).rgb;
+          // 6 perpendicular taps around the direction; magnitude controls blur radius
+          vec3 up = abs(d.y) < 0.95 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+          vec3 t = normalize(cross(up, d));
+          vec3 b = cross(d, t);
+          float r = blur * 1.4;
+          vec3 c = textureCube(uCube, d).rgb * 0.40;
+          c += textureCube(uCube, normalize(d +  t * r)).rgb * 0.10;
+          c += textureCube(uCube, normalize(d -  t * r)).rgb * 0.10;
+          c += textureCube(uCube, normalize(d +  b * r)).rgb * 0.10;
+          c += textureCube(uCube, normalize(d -  b * r)).rgb * 0.10;
+          c += textureCube(uCube, normalize(d + (t+b) * r * 0.7)).rgb * 0.10;
+          c += textureCube(uCube, normalize(d - (t+b) * r * 0.7)).rgb * 0.10;
+          return c;
+        }
+
+        void main() {
+          vec3 d = normalize(vDir);
+          vec3 col = sampleBlurred(d, uImageSeamBlur * 30.0);
+          col *= uImageExposure;
+          float lum = dot(col, vec3(0.299, 0.587, 0.114));
+          col = mix(vec3(lum), col, uImageSaturation);
+          col = (col - 0.5) * uImageContrast + 0.5;
+          col = max(col - uImageBlackPoint, 0.0) / max(1.0 - uImageBlackPoint, 0.0001);
+          col = col / (1.0 + col * uImageHighlightCompression * 2.0);
+          float pole = smoothstep(uImagePoleFadeStart, 1.0, abs(d.y));
+          col = mix(col, uImagePoleFadeColor, pole * uImagePoleFadeStrength);
+          col = clamp(col, 0.0, 1.0);
+          gl_FragColor = vec4(col, 1.0);
+        }
+      `,
+    });
+  }
+
   _prepareTexture(tex, name) {
     tex.name = name || 'uploaded void';
     tex.colorSpace = SRGBColorSpace;
@@ -383,6 +460,11 @@ diffuseColor.rgb = applyVoidImageGrade(diffuseColor.rgb, vMapUv);
         (cubeTexture) => {
           cubeTexture.colorSpace = SRGBColorSpace;
           cubeTexture.name = name;
+          cubeTexture.generateMipmaps = true;
+          cubeTexture.minFilter = LinearMipmapLinearFilter;
+          cubeTexture.magFilter = LinearFilter;
+          cubeTexture.anisotropy = 8;
+          cubeTexture.needsUpdate = true;
           this.useCubeTexture(cubeTexture);
           resolve(cubeTexture);
         },
@@ -411,10 +493,10 @@ diffuseColor.rgb = applyVoidImageGrade(diffuseColor.rgb, vMapUv);
     this._cubeTexture = cubeTexture;
     this._backgroundMode = 'cubemap';
     this.textureName = cubeTexture?.name || 'cubemap';
-    this._u = null;
-    if (this._mesh) this._mesh.visible = false;
+    this._scene.background = null;
     this._scene.backgroundBlurriness = 0;
-    this._scene.background = cubeTexture;
+    this._swapMaterial(this._createCubemapMaterial(cubeTexture));
+    if (this._mesh) this._mesh.visible = true;
     this.applyParams();
   }
 
@@ -443,11 +525,13 @@ diffuseColor.rgb = applyVoidImageGrade(diffuseColor.rgb, vMapUv);
         p.rotationY * Math.PI / 180,
         p.rotationZ * Math.PI / 180,
       );
-      this._mesh.visible = this._backgroundMode === 'procedural';
+      this._mesh.visible =
+        this._backgroundMode === 'procedural' ||
+        this._backgroundMode === 'cubemap';
     }
 
-    if (this._backgroundMode !== 'procedural' && (this._texture || this._cubeTexture)) {
-      this._scene.background = this._cubeTexture || this._texture;
+    if (this._backgroundMode === 'equirect' && this._texture) {
+      this._scene.background = this._texture;
       this._scene.backgroundBlurriness = 0;
       this._scene.backgroundIntensity = p.imageExposure;
       this._scene.backgroundRotation.set(
@@ -488,17 +572,16 @@ diffuseColor.rgb = applyVoidImageGrade(diffuseColor.rgb, vMapUv);
       u.uImagePoleFadeStart.value = p.imagePoleFadeStart;
       u.uImagePoleFadeStrength.value = p.imagePoleFadeStrength;
       u.uImagePoleFadeColor.value.set(fadeColor.x, fadeColor.y, fadeColor.z);
-      u.uImageSeamBlendWidth.value = p.imageSeamBlendWidth;
-      u.uImageSeamBlendStrength.value = p.imageSeamBlendStrength;
-      u.uImageSeamBlur.value = p.imageSeamBlur;
+      if (u.uImageSeamBlendWidth) u.uImageSeamBlendWidth.value = p.imageSeamBlendWidth;
+      if (u.uImageSeamBlendStrength) u.uImageSeamBlendStrength.value = p.imageSeamBlendStrength;
+      if (u.uImageSeamBlur) u.uImageSeamBlur.value = p.imageSeamBlur;
     }
   }
 
   update(dt, camera = null) {
     this._clock += dt;
-    if (this._backgroundMode !== 'procedural') {
-      const bg = this._cubeTexture || this._texture;
-      if (bg && this._scene.background !== bg) this._scene.background = bg;
+    if (this._backgroundMode === 'equirect' && this._texture && this._scene.background !== this._texture) {
+      this._scene.background = this._texture;
     }
     if (camera && this._mesh) {
       this._mesh.position.copy(camera.position);

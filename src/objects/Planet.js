@@ -584,15 +584,15 @@ export class Planet {
 
     const sharedProps = {
       map:               texture,
-      roughness:         isIce ? 0.1 : isGas ? 0.55 : 0.78,
-      metalness:         isIce ? 0.15 : 0.0,
+      roughness:         0.7,
+      metalness:         0.34,
       emissive:          isLava ? new Color(0xff2200) : col,
       emissiveIntensity: emissiveInt,
     };
 
     if (this._hasCustomTexture) {
-      this._matOpaque = new MeshStandardMaterial({ map: texture, roughness: 0.55, metalness: 0.05, emissive: 0x111111, emissiveIntensity: 0.06 });
-      this._matTransparent = new MeshStandardMaterial({ map: texture, roughness: 0.55, metalness: 0.05, transparent: true, depthWrite: false, opacity: 0.3 });
+      this._matOpaque = new MeshStandardMaterial({ map: texture, roughness: 0.7, metalness: 0.34, emissive: 0x111111, emissiveIntensity: 0.06 });
+      this._matTransparent = new MeshStandardMaterial({ map: texture, roughness: 0.7, metalness: 0.34, transparent: true, depthWrite: false, opacity: 0.3 });
       this._baseEmissiveIntensity = 0.08;
     } else {
       // Opaque material — default, writes depth, fully solid
@@ -630,13 +630,13 @@ export class Planet {
       baseCol = isLava ? new Color(0xff4400) : new Color(this.color);
     }
     // High power = very tight fresnel rim only, no interior glow
-    const power    = isIce ? 4.0 : isGas ? 4.5 : 5.5;
-    const strength = isLava ? 1.2 : isGas ? 0.9 : isIce ? 0.7 : 0.8;
+    const power    = 1;
+    const strength = 0;
 
     this._baseGlowOpacity = strength;
 
     // Sun direction — matches dirLight.position in HoleScene (normalised once)
-    const SUN_DIR = new Vector3(50, 80, 60).normalize();
+    const SUN_DIR = new Vector3(-33, 64, 61).normalize();
 
     const mat = new ShaderMaterial({
       uniforms: {
@@ -811,6 +811,15 @@ export class Planet {
   setTrajectoryHighlight(type, intensity = 0) {
     this._trajHighlight = type;
     this._trajHighlightIntensity = intensity;
+  }
+
+  setAtmosphereGlow(power = null, mult = null) {
+    const uniforms = this.glowMesh?.material?.uniforms;
+    if (uniforms?.power && power !== null) uniforms.power.value = power;
+    if (uniforms?.glowMult && mult !== null) {
+      this._baseGlowOpacity = mult;
+      uniforms.glowMult.value = mult;
+    }
   }
 
   setOpacity(v) {

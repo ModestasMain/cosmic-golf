@@ -198,9 +198,9 @@ export class DevPanel {
   _buildStars(gui) {
     const { starField } = this._refs;
     const p = {
-      brightness: 7.75,
-      heroScale:  3.7,
-      shimmerAmp: 0.0,
+      brightness: 8,
+      heroScale:  6.7,
+      shimmerAmp: 0,
     };
     const apply = () => starField.setStarParams(p);
 
@@ -253,10 +253,16 @@ export class DevPanel {
     const syncAtmo = (power, mult) => {
       if (!holeScene.planetObjects) return;
       for (const planet of holeScene.planetObjects) {
-        if (!planet.glowMesh) continue;
-        const u = planet.glowMesh.material.uniforms;
-        if (u?.power)    u.power.value    = power;
-        if (u?.glowMult) u.glowMult.value = mult;
+        if (planet.setAtmosphereGlow) {
+          planet.setAtmosphereGlow(power, mult);
+          continue;
+        }
+        const u = planet.glowMesh?.material?.uniforms;
+        if (u?.power) u.power.value = power;
+        if (u?.glowMult) {
+          planet._baseGlowOpacity = mult;
+          u.glowMult.value = mult;
+        }
       }
     };
 
@@ -271,8 +277,8 @@ export class DevPanel {
       hemiSky:        '#' + hemi.color.getHexString(),
       hemiGround:     '#' + hemi.groundColor.getHexString(),
       hemiIntensity:  hemi.intensity,
-      atmoGlowPower:  1.0,
-      atmoGlowMult:   0.0,
+      atmoGlowPower:  1,
+      atmoGlowMult:   0,
       planetRoughness: 0.7,
       planetMetalness: 0.34,
       lockLighting:   false,
@@ -305,7 +311,7 @@ export class DevPanel {
     hF.add(p, 'hemiIntensity',  0, 5,  0.05) .name('Intensity')  .onChange(v => { hemi.intensity = v; });
 
     const atF = f.addFolder('Atmosphere Glow');
-    atF.add(p, 'atmoGlowPower',  1, 12, 0.1) .name('Fresnel power (tightness)') .onChange(v => syncAtmo(v, p.atmoGlowMult));
+    atF.add(p, 'atmoGlowPower',  1, 12, 1) .name('Fresnel power (tightness)') .onChange(v => syncAtmo(v, p.atmoGlowMult));
     atF.add(p, 'atmoGlowMult',   0, 3,  0.05).name('Glow strength')              .onChange(v => syncAtmo(p.atmoGlowPower, v));
 
     const pmF = f.addFolder('Planet Surface');
@@ -399,10 +405,11 @@ export class DevPanel {
     const applyAtmosphere = () => {
       for (const planet of planets()) {
         if (planet.glowMesh) planet.glowMesh.visible = p.atmosphereVisible;
-        if (planet._glowMult) {
-          planet._glowMult.value = p.atmosphereVisible
-            ? (planet._baseGlowOpacity ?? 1) * p.atmosphereStrength
-            : 0;
+        if (planet.setAtmosphereGlow) {
+          planet.setAtmosphereGlow(null, p.atmosphereVisible ? p.atmosphereStrength : 0);
+        } else if (planet._glowMult) {
+          planet._baseGlowOpacity = p.atmosphereVisible ? p.atmosphereStrength : 0;
+          planet._glowMult.value = planet._baseGlowOpacity;
         }
       }
     };

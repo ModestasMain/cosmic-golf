@@ -63,7 +63,7 @@ const QUALITY_PROFILES = {
     bloomSmoothing: 0,
     vignetteDarkness: 0.73,
     scene: {
-      stars:  { visible: true, brightness: 1.0, heroScale: 1.0, shimmerAmp: 0.12 },
+      stars:  { visible: true, brightness: 8, heroScale: 6.7, shimmerAmp: 0 },
       nebula: { visible: true, opacityScale: 1.0, sizeScale: 1.0 },
       comets: { enabled: true, maxActive: 4, intervalScale: 1.0 },
       trails: { density: 1.0, sizeScale: 1.0, opacityScale: 1.0 },

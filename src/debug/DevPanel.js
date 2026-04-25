@@ -8,7 +8,7 @@
 
 import GUI from 'lil-gui';
 import { MeshBasicMaterial, Vector3 } from 'three';
-import { PLANET, WORLDEATER } from '../core/Constants.js';
+import { PLANET, STAR_TUNING, WORLDEATER } from '../core/Constants.js';
 import { textureManager } from '../core/TextureManager.js';
 import { eventBus, Events } from '../core/EventBus.js';
 import { Planet } from '../objects/Planet.js';
@@ -198,9 +198,9 @@ export class DevPanel {
   _buildStars(gui) {
     const { starField } = this._refs;
     const p = {
-      brightness: 8,
-      heroScale:  6.7,
-      shimmerAmp: 0,
+      brightness: STAR_TUNING.BRIGHTNESS,
+      heroScale:  STAR_TUNING.HERO_SCALE,
+      shimmerAmp: STAR_TUNING.SHIMMER_AMP,
     };
     const apply = () => starField.setStarParams(p);
 
@@ -279,8 +279,8 @@ export class DevPanel {
       hemiIntensity:  hemi.intensity,
       atmoGlowPower:  PLANET.ATMOSPHERE_GLOW_POWER,
       atmoGlowMult:   PLANET.ATMOSPHERE_GLOW_MULT,
-      planetRoughness: 0.7,
-      planetMetalness: 0.34,
+      planetRoughness: PLANET.ROUGHNESS,
+      planetMetalness: PLANET.METALNESS,
       lockLighting:   false,
     };
     holeScene._devLightLock = false;
@@ -390,12 +390,12 @@ export class DevPanel {
     const p = {
       atmosphereVisible:  true,
       atmosphereStrength: PLANET.ATMOSPHERE_GLOW_MULT,
-      ringOpacity:        1.0,
+      ringOpacity:        PLANET.RING_OPACITY_MULT,
       ringScale:          PLANET.RING_SCALE,
-      ringBandsMin:       2,
-      ringBandsMax:       4,
-      planetScale:        1.6,
-      textureBrightness:  1.0,
+      ringBandsMin:       PLANET.RING_BANDS_MIN,
+      ringBandsMax:       PLANET.RING_BANDS_MAX,
+      planetScale:        PLANET.VISUAL_SCALE,
+      textureBrightness:  PLANET.TEXTURE_BRIGHTNESS,
       activeTexture:      'procedural',
       texturePath:        '/textures/planets/',
     };
@@ -417,12 +417,7 @@ export class DevPanel {
     const applyRings = () => {
       for (const planet of planets()) {
         if (!planet._ringGroup) continue;
-        planet._ringGroup.scale.setScalar(p.ringScale);
-        planet._ringGroup.traverse(c => {
-          if (!c.isMesh) return;
-          if (c.material._origOpacity === undefined) c.material._origOpacity = c.material.opacity;
-          c.material.opacity = c.material._origOpacity * p.ringOpacity;
-        });
+        if (planet.setRingStyle) planet.setRingStyle(p.ringScale, p.ringOpacity);
       }
     };
 

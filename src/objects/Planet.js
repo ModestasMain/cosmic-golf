@@ -426,7 +426,10 @@ function buildRings(group, radius, color, seed) {
 
   const iceWhite = new Color(0xfff0dd);
   const baseInner = 1.16 + seq() * 0.24;
-  const bandCount = 2 + Math.floor(seq() * 4);
+  const ringParams = Planet.ringParams ?? {};
+  const minBands = Math.max(1, Math.floor(ringParams.minBands ?? PLANET.RING_BANDS_MIN));
+  const maxBands = Math.max(minBands, Math.floor(ringParams.maxBands ?? PLANET.RING_BANDS_MAX));
+  const bandCount = minBands + Math.floor(seq() * (maxBands - minBands + 1));
   let cursor = baseInner;
   for (let i = 0; i < bandCount; i++) {
     const gap = 0.045 + seq() * 0.16;
@@ -434,7 +437,7 @@ function buildRings(group, radius, color, seed) {
     const inner = cursor + gap;
     const outer = inner + width;
     const tint = 0.12 + seq() * 0.5;
-    const opacity = (0.26 + seq() * 0.48) * PLANET.RING_OPACITY_MULT;
+    const opacity = 0.26 + seq() * 0.48;
     const c = col.clone().lerp(iceWhite, tint);
     const geo = new RingGeometry(radius * inner, radius * outer, 128);
     const mat = new MeshBasicMaterial({
@@ -449,7 +452,6 @@ function buildRings(group, radius, color, seed) {
     cursor = outer;
   }
 
-  ringGroup.scale.setScalar(PLANET.RING_SCALE);
   group.add(ringGroup);
   return ringGroup;
 }
@@ -586,15 +588,15 @@ export class Planet {
 
     const sharedProps = {
       map:               texture,
-      roughness:         0.7,
-      metalness:         0.34,
+      roughness:         PLANET.ROUGHNESS,
+      metalness:         PLANET.METALNESS,
       emissive:          isLava ? new Color(0xff2200) : col,
       emissiveIntensity: emissiveInt,
     };
 
     if (this._hasCustomTexture) {
-      this._matOpaque = new MeshStandardMaterial({ map: texture, roughness: 0.7, metalness: 0.34, emissive: 0x111111, emissiveIntensity: 0.06 });
-      this._matTransparent = new MeshStandardMaterial({ map: texture, roughness: 0.7, metalness: 0.34, transparent: true, depthWrite: false, opacity: 0.3 });
+      this._matOpaque = new MeshStandardMaterial({ map: texture, roughness: PLANET.ROUGHNESS, metalness: PLANET.METALNESS, emissive: 0x111111, emissiveIntensity: 0.06 });
+      this._matTransparent = new MeshStandardMaterial({ map: texture, roughness: PLANET.ROUGHNESS, metalness: PLANET.METALNESS, transparent: true, depthWrite: false, opacity: 0.3 });
       this._baseEmissiveIntensity = 0.08;
     } else {
       // Opaque material — default, writes depth, fully solid
@@ -822,6 +824,18 @@ export class Planet {
       this._baseGlowOpacity = mult;
       uniforms.glowMult.value = mult;
     }
+  }
+
+  setRingStyle(scale = PLANET.RING_SCALE, opacityMult = PLANET.RING_OPACITY_MULT) {
+    if (!this._ringGroup) return;
+    this._ringGroup.scale.setScalar(scale);
+    this._ringGroup.traverse((child) => {
+      if (!child.isMesh || !child.material) return;
+      if (child.material._origOpacity === undefined) {
+        child.material._origOpacity = child.material.opacity;
+      }
+      child.material.opacity = child.material._origOpacity * opacityMult;
+    });
   }
 
   setOpacity(v) {

@@ -23,7 +23,7 @@ import { LobbyPanel } from './ui/LobbyPanel.js';
 import { BallStylePicker } from './ui/BallStylePicker.js';
 import { DailyOverlay } from './ui/DailyOverlay.js';
 import { audioManager } from './audio/AudioManager.js';
-import { MULTIPLAYER } from './core/Constants.js';
+import { MULTIPLAYER, STAR_TUNING } from './core/Constants.js';
 
 function _getCgPlayerId() {
   const key = 'cosmic-golf-player-id';
@@ -79,7 +79,7 @@ const QUALITY_PROFILES = {
     bloomSmoothing: 0,
     vignetteDarkness: 0.73,
     scene: {
-      stars:  { visible: true, brightness: 8, heroScale: 6.7, shimmerAmp: 0 },
+      stars:  { visible: true, brightness: STAR_TUNING.BRIGHTNESS, heroScale: STAR_TUNING.HERO_SCALE, shimmerAmp: STAR_TUNING.SHIMMER_AMP },
       nebula: { visible: true, opacityScale: 1.0, sizeScale: 1.0 },
       comets: { enabled: true, maxActive: 4, intervalScale: 1.0 },
       trails: { density: 1.0, sizeScale: 1.0, opacityScale: 1.0 },
@@ -94,7 +94,7 @@ const QUALITY_PROFILES = {
     bloomSmoothing: 0.04,
     vignetteDarkness: 0.58,
     scene: {
-      stars:  { visible: true, brightness: 0.86, heroScale: 0.9, shimmerAmp: 0.07 },
+      stars:  { visible: true, brightness: STAR_TUNING.BRIGHTNESS, heroScale: STAR_TUNING.HERO_SCALE, shimmerAmp: STAR_TUNING.SHIMMER_AMP },
       nebula: { visible: true, opacityScale: 0.72, sizeScale: 0.88 },
       comets: { enabled: true, maxActive: 2, intervalScale: 1.45 },
       trails: { density: 0.72, sizeScale: 0.88, opacityScale: 0.9 },
@@ -109,7 +109,7 @@ const QUALITY_PROFILES = {
     bloomSmoothing: 0.08,
     vignetteDarkness: 0.42,
     scene: {
-      stars:  { visible: true, brightness: 0.7, heroScale: 0.78, shimmerAmp: 0.04 },
+      stars:  { visible: true, brightness: STAR_TUNING.BRIGHTNESS, heroScale: STAR_TUNING.HERO_SCALE, shimmerAmp: STAR_TUNING.SHIMMER_AMP },
       nebula: { visible: false, opacityScale: 0.0, sizeScale: 0.72 },
       comets: { enabled: false, maxActive: 0, intervalScale: 2.2 },
       trails: { density: 0.42, sizeScale: 0.78, opacityScale: 0.78 },

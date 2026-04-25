@@ -12,7 +12,7 @@ import {
 import { update as tweenUpdate } from '@tweenjs/tween.js';
 import { eventBus, Events } from '../core/EventBus.js';
 import { gameState } from '../core/GameState.js';
-import { CAMERA, HOLE, AIM, PHYSICS, BALL, ORBIT, WORLDEATER } from '../core/Constants.js';
+import { CAMERA, HOLE, AIM, PHYSICS, BALL, ORBIT, PLANET, WORLDEATER } from '../core/Constants.js';
 import { generateHole } from '../systems/HoleGenerator.js';
 import { stepBall } from '../systems/GravitySystem.js';
 import { TrajectoryPreview } from '../systems/TrajectoryPreview.js';
@@ -640,6 +640,7 @@ export class HoleScene {
       this.planetObjects.push(pObj);
       this._planetBasePos.push(p.position.clone());
     }
+    this._applyPlanetRuntimeDefaults();
 
     // TEST: Earth planet on hole 1 — commented out while EarthPlanet is WIP
     // if (holeIndex === 0) {
@@ -1792,6 +1793,20 @@ export class HoleScene {
     }
 
     this._updateCamera(dt);
+  }
+
+  _applyPlanetRuntimeDefaults() {
+    const scale = PLANET.VISUAL_SCALE ?? 1;
+    for (let i = 0; i < this.planetObjects.length; i++) {
+      const planetObj = this.planetObjects[i];
+      planetObj.group.scale.setScalar(scale);
+      planetObj.setRingStyle?.(PLANET.RING_SCALE, PLANET.RING_OPACITY_MULT);
+      const raw = this.planets[i];
+      if (raw) {
+        if (raw._baseRadius === undefined) raw._baseRadius = raw.radius;
+        raw.radius = raw._baseRadius * scale;
+      }
+    }
   }
 
   _updatePlanetOcclusion() {

@@ -72,7 +72,7 @@ export class ScoreboardScene {
     this.ui.sessionId = gameState.leaderboardSessionId;
 
     const holesCompleted = strokes.filter(v => v != null).length;
-    const bossDefeated = (gameState.isBossRoom || gameState.isBossChallenge) && holesCompleted >= gameState.totalHoles;
+    const bossDefeated = holesCompleted >= gameState.totalHoles;
 
     if (this._mp) {
       this._mp.submitLeaderboardEntry({
@@ -137,6 +137,7 @@ export class ScoreboardScene {
         totalStrokes: gameState.totalStrokes(player.id),
         totalTime:    gameState.totalTime(player.id),
         holesCompleted,
+        bossDefeated: holesCompleted === gameState.totalHoles,
       });
     }
   }

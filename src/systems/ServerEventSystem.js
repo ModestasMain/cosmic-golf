@@ -64,11 +64,15 @@ export class ServerEventSystem {
     this._enabled = enabled;
     if (!enabled) {
       this._warningShown = false;
-      if (this._activeType) this._endEvent();
+      this._activeType = null;
+      this._eventPhase = false;
+      this._lastCycleIdx = -1;
       this.gravityScale = 1.0;
       this._mapFlipTarget = 0;
       this.mapFlipProgress = 0;
       this.planetsMoving = false;
+      this._clearAsteroids();
+      eventBus.emit(Events.SERVER_EVENT, { type: null, phase: 'end' });
     }
   }
 
@@ -110,12 +114,24 @@ export class ServerEventSystem {
       this._eventPhase = inEventPhase;
 
       if (inEventPhase) {
-        // Event phase started (first 30s of cycle)
+        // Make sure any prior event's effects are cleared before starting the
+        // new one — protects against tab-backgrounded skips where _endEvent
+        // never ran for the previous cycle's event.
+        if (this._activeType) this._endEvent();
         this._startEvent(this._pickType(cycleIdx));
       } else {
-        // Default phase started (remaining 90s)
         this._endEvent();
       }
+    }
+
+    // Defensive: if we're not in the event window, no event effects may persist.
+    // Catches any state desync (visibility, hot reload, missed phase change).
+    if (!inEventPhase) {
+      if (this._activeType) this._endEvent();
+      if (this.gravityScale !== 1.0) this.gravityScale = 1.0;
+      if (this._mapFlipTarget !== 0) this._mapFlipTarget = 0;
+      if (this.planetsMoving) this.planetsMoving = false;
+      if (this._asteroids.length) this._clearAsteroids();
     }
 
     // Tick active event during event phase
@@ -170,7 +186,17 @@ export class ServerEventSystem {
     // Reset all event effects back to default
     this.gravityScale   = 1.0;
     this._mapFlipTarget = 0;
-    this.planetsMoving  = false; // NEW: back to static
+    this.planetsMoving  = false;
+    this._clearAsteroids();
+  }
+
+  _clearAsteroids() {
+    for (const a of this._asteroids) {
+      this._scene.remove(a.mesh);
+      a.mesh.geometry.dispose();
+      a.mesh.material.dispose();
+    }
+    this._asteroids = [];
   }
 
   // ── Asteroid Storm ────────────────────────

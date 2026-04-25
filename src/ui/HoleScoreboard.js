@@ -79,7 +79,7 @@ export class HoleScoreboard {
   }
 
   _listen() {
-    eventBus.on(Events.HOLE_COMPLETE, () => this._show());
+    eventBus.on(Events.HOLE_COMPLETE, ({ holeIndex } = {}) => this._show(holeIndex));
     eventBus.on(Events.HOLE_LOADED,   () => this._hide());
 
     // Live-update when a remote player finishes
@@ -88,9 +88,10 @@ export class HoleScoreboard {
     });
   }
 
-  _show() {
+  _show(holeIndex) {
     this._visible  = true;
     this._expanded = false;
+    this._displayHole = holeIndex;
     this._render();
     this._el.style.display = 'flex';
   }
@@ -111,7 +112,7 @@ export class HoleScoreboard {
   }
 
   _render() {
-    const hole    = gameState.currentHole;
+    const hole    = this._displayHole ?? gameState.currentHole;
     const players = [...gameState.players].sort((a, b) => {
       const ta = a.strokes.reduce((s, v) => s + (v || 0), 0);
       const tb = b.strokes.reduce((s, v) => s + (v || 0), 0);

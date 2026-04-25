@@ -609,7 +609,12 @@ export class HoleScene {
     this._bossIntroPending = this._holeData.boss?.kind === 'WORLDEATER';
     this._bossWarningShown = false;
     this._worldEaterBounceCooldown = 0;
-    this.serverEvents.setEnabled(!gameState.isDailyChallenge);
+    const isBossHole =
+      gameState.isBossRoom ||
+      gameState.isBossChallenge ||
+      this._holeData.boss?.kind === 'WORLDEATER' ||
+      (gameState.totalHoles === 10 && holeIndex === 9);
+    this.serverEvents.setEnabled(!gameState.isDailyChallenge && !isBossHole);
 
     // Let the active void background mode restore itself (procedural sphere or uploaded pano).
     if (this.spaceBg) this.spaceBg.applyParams();

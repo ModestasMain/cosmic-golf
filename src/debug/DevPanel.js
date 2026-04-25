@@ -8,7 +8,7 @@
 
 import GUI from 'lil-gui';
 import { MeshBasicMaterial, Vector3 } from 'three';
-import { WORLDEATER } from '../core/Constants.js';
+import { PLANET, WORLDEATER } from '../core/Constants.js';
 import { textureManager } from '../core/TextureManager.js';
 import { eventBus, Events } from '../core/EventBus.js';
 import { Planet } from '../objects/Planet.js';
@@ -390,8 +390,8 @@ export class DevPanel {
     const p = {
       atmosphereVisible:  true,
       atmosphereStrength: 1.0,
-      ringOpacity:        0.1,
-      ringScale:          0.65,
+      ringOpacity:        1.0,
+      ringScale:          PLANET.RING_SCALE,
       ringBandsMin:       2,
       ringBandsMax:       4,
       planetScale:        1.6,

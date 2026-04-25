@@ -8,6 +8,8 @@ import {
   AdditiveBlending, NormalBlending, CanvasTexture, Vector3, BufferGeometry, Float32BufferAttribute,
   Points, PointsMaterial, RepeatWrapping,
 } from 'three';
+import { PLANET } from '../core/Constants.js';
+import { textureManager } from '../core/TextureManager.js';
 
 // Maps texture filename keywords → atmosphere hex color
 const TEXTURE_ATMO_COLORS = {
@@ -31,7 +33,6 @@ const TEXTURE_ATMO_COLORS = {
   superstorm:  0x6644cc,
   toxic:       0x88ff00,
 };
-import { textureManager } from '../core/TextureManager.js';
 
 // ── Seeded RNG (no global state) ─────────────────────────────
 function rng(seed) {
@@ -433,7 +434,7 @@ function buildRings(group, radius, color, seed) {
     const inner = cursor + gap;
     const outer = inner + width;
     const tint = 0.12 + seq() * 0.5;
-    const opacity = 0.26 + seq() * 0.48;
+    const opacity = (0.26 + seq() * 0.48) * PLANET.RING_OPACITY_MULT;
     const c = col.clone().lerp(iceWhite, tint);
     const geo = new RingGeometry(radius * inner, radius * outer, 128);
     const mat = new MeshBasicMaterial({
@@ -448,6 +449,7 @@ function buildRings(group, radius, color, seed) {
     cursor = outer;
   }
 
+  ringGroup.scale.setScalar(PLANET.RING_SCALE);
   group.add(ringGroup);
   return ringGroup;
 }
@@ -630,8 +632,8 @@ export class Planet {
       baseCol = isLava ? new Color(0xff4400) : new Color(this.color);
     }
     // High power = very tight fresnel rim only, no interior glow
-    const power    = 1;
-    const strength = 0;
+    const power    = PLANET.ATMOSPHERE_GLOW_POWER;
+    const strength = PLANET.ATMOSPHERE_GLOW_MULT;
 
     this._baseGlowOpacity = strength;
 

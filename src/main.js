@@ -41,6 +41,22 @@ function _getCgSessionId() {
   return gameState.leaderboardSessionId;
 }
 
+let _holeStatsEndpointAvailable = true;
+
+function _recordHoleStats(payload) {
+  if (!_holeStatsEndpointAvailable) return;
+  fetch(`https://${MULTIPLAYER.MP_HOST}/hole-completed`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ entry: payload }),
+    keepalive: true,
+  }).then((res) => {
+    if (res.status === 404 || res.status === 405) {
+      _holeStatsEndpointAvailable = false;
+    }
+  }).catch(() => {});
+}
+
 const LOCAL_DEV_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 const QUALITY_MODE_ORDER = ['auto', 'high', 'medium', 'performance'];
 const MANUAL_QUALITY_KEYS = {
@@ -297,12 +313,7 @@ class Game {
           holeIndex: gameState.currentHole,
           strokes,
         };
-        fetch(`https://${MULTIPLAYER.MP_HOST}/hole-completed`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ entry: payload }),
-          keepalive: true,
-        }).catch(() => {});
+        _recordHoleStats(payload);
       }
     });
 

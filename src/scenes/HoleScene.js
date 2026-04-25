@@ -23,6 +23,7 @@ import { HoleCup } from '../objects/HoleCup.js';
 import { TeeMarker } from '../objects/TeeMarker.js';
 import { StarField } from '../objects/StarField.js';
 import { NebulaField } from '../objects/NebulaField.js';
+import { BackgroundPlanets } from '../objects/BackgroundPlanets.js';
 import { ProceduralSpaceBg } from '../objects/ProceduralSpaceBg.js';
 import { PortalSystem } from '../portal/PortalSystem.js';
 import { BallTrail } from '../effects/BallTrail.js';
@@ -61,6 +62,7 @@ export class HoleScene {
     this.cup = null;
     this.tee = null;
     this.starField = null;
+    this.backgroundPlanets = null;
     this.wormholes = [];
     this.worldEater = null;
     this._bossIntroWormhole = null;
@@ -198,6 +200,7 @@ export class HoleScene {
 
     this.starField  = new StarField(this.scene);
     this.nebulaField = new NebulaField(this.scene);
+    this.backgroundPlanets = new BackgroundPlanets(this.scene);
 
     // Shader-based space backdrop — infinite resolution, full 360° coverage, no seams
     this.spaceBg = new ProceduralSpaceBg(this.scene);
@@ -1150,6 +1153,7 @@ export class HoleScene {
       if (this._bossIntroWormhole) this._bossIntroWormhole.update(simDt);
       if (this.worldEater) this.worldEater.update(simDt);
       if (this.starField)   this.starField.update(simDt);
+      if (this.backgroundPlanets) this.backgroundPlanets.update(simDt, this.camera);
       if (this.cometSystem) this.cometSystem.update(simDt);
       this.cinematic.update(simDt);
       tweenUpdate();
@@ -1296,6 +1300,7 @@ export class HoleScene {
     // Update background ambiance
     if (this.spaceBg)    this.spaceBg.update(simDt, this.camera);
     if (this.starField)  this.starField.update(simDt);
+    if (this.backgroundPlanets) this.backgroundPlanets.update(simDt, this.camera);
     if (this.cometSystem) this.cometSystem.update(simDt);
 
     // Update planet gravity fields
@@ -2433,6 +2438,7 @@ export class HoleScene {
     if (!this._visualQuality) return;
     const { stars, nebula, comets, trails } = this._visualQuality;
     if (stars && this.starField) this.starField.setQuality(stars);
+    if (stars && this.backgroundPlanets) this.backgroundPlanets.setQuality(stars);
     if (nebula && this.nebulaField) this.nebulaField.setQuality(nebula);
     if (comets && this.cometSystem) this.cometSystem.setQuality(comets);
     if (trails) {
@@ -2461,6 +2467,7 @@ export class HoleScene {
     this.trajectoryPreview.dispose();
     if (this._aimArrow) { this.scene.remove(this._aimArrow); this._aimArrow = null; }
     if (this.starField)   this.starField.dispose();
+    if (this.backgroundPlanets) this.backgroundPlanets.dispose();
     if (this.nebulaField) this.nebulaField.dispose();
     // ball trail disposed inside ball.removeFromScene()
     this.launchBurst.dispose();

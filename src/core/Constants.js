@@ -71,6 +71,16 @@ export const STARFIELD = {
   RADIUS: 9000,
 };
 
+export const BACKDROP_PLANETS = {
+  ENABLED: true,
+  COUNT: 9,
+  RADIUS: 4300,
+  MIN_SIZE: 90,
+  MAX_SIZE: 360,
+  FOLLOW_CAMERA: 1.0,
+  OPACITY: 0.92,
+};
+
 export const MULTIPLAYER = {
   MP_HOST: 'cosmic-golf-mp.cosmicgolf.workers.dev',
   PUBLIC_ROOM: 'PUBLIC',

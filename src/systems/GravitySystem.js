@@ -13,6 +13,9 @@ const _normal = new Vector3();
 const _radial = new Vector3();
 const _tangent = new Vector3();
 const _toCup = new Vector3();
+const _biasDir = new Vector3();
+const _surfaceDir = new Vector3();
+const _gravityFocus = new Vector3();
 const _stickNormal = new Vector3();
 const _bounceNormal = new Vector3();
 const _toWormhole = new Vector3();
@@ -26,9 +29,24 @@ const _toWormhole = new Vector3();
 export function computeGravityForce(position, planets) {
   const force = new Vector3();
   for (const planet of planets) {
-    _diff.subVectors(planet.position, position);
+    _gravityFocus.copy(planet.position);
+    let sideBoost = 1;
+    if (planet.gravityBiasTarget && (PHYSICS.CUP_SIDE_GRAVITY_BOOST > 0 || PHYSICS.CUP_SIDE_GRAVITY_FOCUS > 0)) {
+      _biasDir.subVectors(planet.gravityBiasTarget, planet.position);
+      if (_biasDir.lengthSq() > 0.001) {
+        _biasDir.normalize();
+        _gravityFocus.addScaledVector(_biasDir, planet.radius * Math.max(0, PHYSICS.CUP_SIDE_GRAVITY_FOCUS ?? 0));
+        _surfaceDir.subVectors(position, planet.position);
+        if (_surfaceDir.lengthSq() > 0.001) {
+          const facing = Math.max(0, _surfaceDir.normalize().dot(_biasDir));
+          const eased = facing * facing * (3 - 2 * facing);
+          sideBoost += PHYSICS.CUP_SIDE_GRAVITY_BOOST * eased;
+        }
+      }
+    }
+    _diff.subVectors(_gravityFocus, position);
     const distSq = Math.max(_diff.lengthSq(), planet.radius * planet.radius * 4);
-    const strength = PHYSICS.GRAVITY_STRENGTH * planet.mass / distSq;
+    const strength = PHYSICS.GRAVITY_STRENGTH * planet.mass * sideBoost / distSq;
     force.addScaledVector(_diff.normalize(), strength);
   }
   return force;

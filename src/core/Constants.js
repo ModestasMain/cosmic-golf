@@ -6,6 +6,8 @@ export const PHYSICS = {
   GRAVITY_STRENGTH: 260,   // reduced — ball can navigate around planets without getting trapped
   BALL_MASS: 1,
   FLIGHT_TIME_SCALE: 1.35, // speeds up travel time without changing launch velocity or trajectory shape
+  CUP_SIDE_GRAVITY_BOOST: 0.45, // extra pull on each planet hemisphere facing the black hole/cup
+  CUP_SIDE_GRAVITY_FOCUS: 0.28, // shifts each planet's gravity focus toward the black hole/cup side
   BOUNCE_DAMPING: 0.25,    // 25% velocity retained on bounce — settles fast
   VELOCITY_DAMPING: 0.994, // stronger drag — orbital energy decays quickly
   MAX_SPEED: 780,

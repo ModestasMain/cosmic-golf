@@ -596,10 +596,14 @@ export class DevPanel {
     f.add(SHAKE_CONFIG, 'freqY',     5, 80,  0.5  ).name('Shake freq Y');
     f.add(SHAKE_CONFIG, 'freqZ',     5, 80,  0.5  ).name('Shake freq Z');
     f.add(PHYSICS, 'FLIGHT_TIME_SCALE', 0.5, 3, 0.05).name('Flight time scale');
+    f.add(PHYSICS, 'CUP_SIDE_GRAVITY_BOOST', 0, 1.5, 0.05).name('Cup-side gravity');
+    f.add(PHYSICS, 'CUP_SIDE_GRAVITY_FOCUS', 0, 0.8, 0.02).name('Gravity focus shift');
     f.add({
       copy: () => this._copy('BallFeel', {
         ...SHAKE_CONFIG,
         flightTimeScale: PHYSICS.FLIGHT_TIME_SCALE,
+        cupSideGravityBoost: PHYSICS.CUP_SIDE_GRAVITY_BOOST,
+        cupSideGravityFocus: PHYSICS.CUP_SIDE_GRAVITY_FOCUS,
       }),
     }, 'copy').name('📋 Copy JSON');
   }

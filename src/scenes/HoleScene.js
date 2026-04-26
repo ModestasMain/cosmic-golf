@@ -633,6 +633,7 @@ export class HoleScene {
 
     // Place planets
     this.planets = planets;
+    this._applyPlanetGravityBias();
     this._planetBasePos = [];  // base positions for server event effects
     for (const p of planets) {
       const pObj = new Planet(p);
@@ -1807,6 +1808,14 @@ export class HoleScene {
         if (raw._baseRadius === undefined) raw._baseRadius = raw.radius;
         raw.radius = raw._baseRadius * scale;
       }
+    }
+  }
+
+  _applyPlanetGravityBias() {
+    const target = this._holeData?.cup;
+    if (!target) return;
+    for (const planet of this.planets) {
+      planet.gravityBiasTarget = target;
     }
   }
 

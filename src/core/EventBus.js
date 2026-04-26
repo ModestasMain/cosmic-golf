@@ -87,6 +87,8 @@ export const Events = {
   // Audio
   AUDIO_MUTE_TOGGLE:      'audio:mute_toggle',
   AUDIO_VOLUME_CHANGE:    'audio:volume_change',        // { volume: 0-1 }
+  AUDIO_MUSIC_VOLUME_CHANGE: 'audio:music_volume_change', // { volume: 0-1 }
+  AUDIO_FX_VOLUME_CHANGE:    'audio:fx_volume_change',    // { volume: 0-1 }
   BLACK_HOLE_PROXIMITY:   'audio:black_hole_proximity', // { proximity: 0-1 }
   AIM_POWER_LOCKED:       'aim:power_locked',           // { power: 0-1 }
 

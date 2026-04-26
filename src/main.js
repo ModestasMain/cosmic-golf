@@ -72,12 +72,12 @@ function isLocalDevHost() {
 const QUALITY_PROFILES = {
   high: {
     label: 'Cinematic',
-    pixelRatioCap: 1.5,
+    pixelRatioCap: 1.1,
     composerMode: 'full',
-    bloomIntensity: 0.9,
-    bloomThreshold: 0.85,
-    bloomSmoothing: 0,
-    vignetteDarkness: 0.73,
+    bloomIntensity: 0.62,
+    bloomThreshold: 0.88,
+    bloomSmoothing: 0.04,
+    vignetteDarkness: 0.66,
     scene: {
       stars:  { visible: true, brightness: STAR_TUNING.BRIGHTNESS, heroScale: STAR_TUNING.HERO_SCALE, shimmerAmp: STAR_TUNING.SHIMMER_AMP },
       nebula: { visible: true, opacityScale: 1.0, sizeScale: 1.0 },
@@ -123,7 +123,7 @@ class Game {
     this._hiddenInterval = null;
     this._launchTutorialTimer = null;
     this._firstShotTakenThisRun = false;
-    this._qualityMode = this._normalizeQualityMode(localStorage.getItem('cosmic_quality_mode') || 'auto');
+    this._qualityMode = this._normalizeQualityMode(localStorage.getItem('cosmic_quality_mode') || 'high');
     this._qualityKey = null;
     this._quality = null;
     this._gpuTier = null;
@@ -476,18 +476,21 @@ class Game {
     perfBtn.id = 'quality-toggle-btn';
     perfBtn.style.cssText = [
       'width:100%',
+      'min-height:46px',
       'display:flex',
       'align-items:center',
       'justify-content:space-between',
-      'gap:10px',
+      'flex-wrap:wrap',
+      'gap:4px 10px',
+      'box-sizing:border-box',
       'background:linear-gradient(180deg, rgba(11, 8, 22, 0.86), rgba(8, 5, 18, 0.84))',
       'color:rgba(231, 226, 255, 0.92)',
       'font-family:Orbitron, sans-serif',
-      'font-size:10px',
+      'font-size:11px',
       'letter-spacing:0.14em',
-      'border:1px solid rgba(132, 92, 255, 0.34)',
+      'border:1px solid rgba(132, 92, 255, 0.44)',
       'border-radius:16px',
-      'padding:10px 12px',
+      'padding:12px 16px',
       'cursor:pointer',
       'box-shadow:0 16px 42px rgba(3,2,10,0.2)',
       'text-transform:uppercase',
@@ -506,8 +509,10 @@ class Game {
       volumeControl.style.bottom = 'auto';
       volumeControl.style.zIndex = '1';
       volumeControl.style.width = '100%';
-      volumeControl.style.padding = '8px 10px';
+      volumeControl.style.boxSizing = 'border-box';
+      volumeControl.style.padding = '12px 16px';
       volumeControl.style.borderRadius = '16px';
+      volumeControl.style.border = '1px solid rgba(132,92,255,0.44)';
       panel.appendChild(volumeControl);
     }
 
@@ -527,18 +532,17 @@ class Game {
     resetBtn.textContent = '↩ RESTART';
     resetBtn.style.cssText = [
       'width:100%',
+      'min-height:46px',
       'background:linear-gradient(180deg, rgba(11, 8, 22, 0.86), rgba(8, 5, 18, 0.84))',
       'color:rgba(231, 226, 255, 0.92)',
       'font-family:Orbitron, sans-serif',
-      'font-size:12px',
+      'font-size:11px',
       'letter-spacing:0.16em',
       'border:1px solid rgba(132, 92, 255, 0.44)',
       'border-radius:16px',
-      'padding:12px 14px',
+      'padding:12px 16px',
       'cursor:pointer',
-      'box-shadow:0 16px 42px rgba(3,2,10,0.24)',
-      'backdrop-filter:blur(12px)',
-      '-webkit-backdrop-filter:blur(12px)',
+      'box-sizing:border-box',
       'touch-action:manipulation',
       'user-select:none',
       '-webkit-user-select:none',
@@ -556,15 +560,17 @@ class Game {
     menuBtn.textContent = '⌂ BACK TO MAIN MENU';
     menuBtn.style.cssText = [
       'width:100%',
+      'min-height:46px',
       'background:linear-gradient(180deg, rgba(40, 22, 74, 0.92), rgba(22, 12, 46, 0.92))',
       'color:#ffd24a',
       'font-family:Orbitron, sans-serif',
-      'font-size:12px',
+      'font-size:11px',
       'letter-spacing:0.16em',
       'border:1px solid rgba(255,210,74,0.44)',
       'border-radius:16px',
-      'padding:12px 14px',
+      'padding:12px 16px',
       'cursor:pointer',
+      'box-sizing:border-box',
       'text-transform:uppercase',
     ].join(';');
     menuBtn.addEventListener('click', () => {
@@ -576,17 +582,18 @@ class Game {
     closeBtn.textContent = 'CLOSE';
     closeBtn.style.cssText = [
       'width:100%',
+      'min-height:46px',
       'background:transparent',
       'color:rgba(200,190,230,0.7)',
       'font-family:Orbitron, sans-serif',
-      'font-size:10px',
+      'font-size:11px',
       'letter-spacing:0.2em',
       'border:1px solid rgba(132, 92, 255, 0.24)',
-      'border-radius:14px',
-      'padding:9px 12px',
+      'border-radius:16px',
+      'padding:12px 16px',
       'cursor:pointer',
+      'box-sizing:border-box',
       'text-transform:uppercase',
-      'margin-top:2px',
     ].join(';');
     panel.appendChild(closeBtn);
 
@@ -965,7 +972,7 @@ class Game {
           medium: 'Balanced FX',
           performance: 'Low FX',
         }[this._qualityMode] ?? `Auto · ${this._quality.label}`;
-    this._qualityToggleBtn.innerHTML = `<span>Quality</span><strong style="font-weight:700;color:rgba(159,247,255,0.92);letter-spacing:0.08em;">${modeLabel}</strong>`;
+    this._qualityToggleBtn.innerHTML = `<span style="min-width:0;">Quality</span><strong style="font-weight:700;color:rgba(159,247,255,0.92);letter-spacing:0.08em;min-width:0;text-align:right;overflow-wrap:anywhere;">${modeLabel}</strong>`;
   }
 
   _clearLaunchAssistTutorial() {

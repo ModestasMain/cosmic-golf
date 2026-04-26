@@ -726,15 +726,27 @@ export class NameEntryOverlay {
         }
         #cg-private-room[open] summary::after { transform: rotate(180deg); }
         @media (max-width: 680px) {
-          #cg-tabs { gap: 16px !important; }
           #cg-callsign-pill { display: none !important; }
-          #cg-launch-title { font-size: clamp(30px, 13vw, 46px) !important; }
-          #cg-launch-card { padding: 18px 16px 16px !important; }
+          #cg-launch-title { font-size: clamp(28px, 11vw, 46px) !important; }
+          #cg-launch-card { padding-left: 14px !important; padding-right: 14px !important; }
           #cg-launch-stats { display: none !important; }
+          #cg-nav { padding-left: 16px !important; padding-right: 16px !important; }
+          #cg-content { padding-left: 14px !important; padding-right: 14px !important; }
+          #cg-daily-btn { flex-wrap: wrap !important; }
         }
         @media (max-width: 480px) {
-          #cg-tabs { gap: 10px !important; }
           #cg-nav-logo span { display: none; }
+          #cg-tabs button { font-size: 9px !important; letter-spacing: 1.5px !important; }
+          #cg-launch-title { font-size: clamp(24px, 9vw, 38px) !important; }
+          #cg-launch-card { padding-left: 12px !important; padding-right: 12px !important; }
+          #cg-content { padding-left: 12px !important; padding-right: 12px !important; }
+          .cg-quick-btn { flex: 1 1 auto !important; text-align: center !important; }
+        }
+        @media (max-width: 380px) {
+          #cg-nav { padding-left: 10px !important; padding-right: 10px !important; }
+          #cg-content { padding-left: 10px !important; padding-right: 10px !important; }
+          #cg-launch-card { padding-left: 10px !important; padding-right: 10px !important; }
+          #cg-launch-title { font-size: clamp(22px, 8vw, 32px) !important; }
         }
       `;
       document.head.appendChild(style);
@@ -755,7 +767,8 @@ export class NameEntryOverlay {
 
     // ── Top nav ──────────────────────────────────────────────
     const nav = document.createElement('div');
-    nav.style.cssText = 'flex-shrink:0;display:flex;align-items:center;justify-content:space-between;padding:18px 32px 0;';
+    nav.id = 'cg-nav';
+    nav.style.cssText = 'flex-shrink:0;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:18px 32px 0;';
 
     // Logo
     const logo = document.createElement('div');
@@ -771,10 +784,10 @@ export class NameEntryOverlay {
       <span style="font-family:'Orbitron',sans-serif;font-size:13px;font-weight:700;letter-spacing:3px;color:#fff;">COSMIC<span style="color:#AA00FF;">·</span>GOLF</span>
     `;
 
-    // Tabs
+    // Tabs (center column — always centered regardless of pill visibility)
     const tabsWrap = document.createElement('div');
     tabsWrap.id = 'cg-tabs';
-    tabsWrap.style.cssText = 'display:flex;gap:28px;';
+    tabsWrap.style.cssText = 'display:flex;gap:28px;justify-content:center;';
 
     const TABS = [
       { id: 'LAUNCH',       label: '⊕ LAUNCH'       },
@@ -817,7 +830,7 @@ export class NameEntryOverlay {
     // Callsign pill
     const pill = document.createElement('div');
     pill.id = 'cg-callsign-pill';
-    pill.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px 16px;border-radius:999px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);';
+    pill.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px 16px;border-radius:999px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);justify-self:end;';
     pill.innerHTML = `<div style="width:7px;height:7px;border-radius:50%;background:#5cff9a;box-shadow:0 0 8px #5cff9a;"></div><span id="cg-pill-name" style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:2px;color:rgba(255,255,255,0.7);">ANONYMOUS</span>`;
     this._pillName = pill.querySelector('#cg-pill-name');
 
@@ -831,7 +844,8 @@ export class NameEntryOverlay {
 
     // Scrollable content area
     const content = document.createElement('div');
-    content.style.cssText = 'flex:1;overflow-y:auto;overflow-x:hidden;padding:32px 32px 40px;display:flex;justify-content:center;';
+    content.id = 'cg-content';
+    content.style.cssText = 'flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;touch-action:pan-y;padding:32px 32px 40px;display:flex;justify-content:center;';
     this._contentArea = content;
 
     layout.appendChild(nav);

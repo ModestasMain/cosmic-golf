@@ -1187,6 +1187,7 @@ export class HoleScene {
 
     // Planet occlusion: fade planets between camera and ball
     this._updatePlanetOcclusion();
+    this._updateAudioAmbience();
 
     if (this._bossIntroPreviewHold && this.worldEater) {
       this.previewWorldEaterIntro(this._bossIntroPreviewProgress, false);
@@ -1821,6 +1822,45 @@ export class HoleScene {
     for (const planet of this.planets) {
       planet.gravityBiasTarget = target;
     }
+  }
+
+  _updateAudioAmbience() {
+    if (!this.ball || !this._holeData) return;
+
+    let nearestPlanet = null;
+    let nearestSurfaceDist = Infinity;
+    for (const planet of this.planets) {
+      const surfaceDist = this.ball.position.distanceTo(planet.position) - planet.radius;
+      if (surfaceDist < nearestSurfaceDist) {
+        nearestSurfaceDist = surfaceDist;
+        nearestPlanet = planet;
+      }
+    }
+
+    const planetProximity = 1 - Math.min(Math.max(nearestSurfaceDist, 0) / 260, 1);
+
+    let blackHoleProximity = 0;
+    if (this.cup) {
+      const cupDist = this.ball.position.distanceTo(this.cup.position);
+      blackHoleProximity = cupDist < HOLE.BLACK_HOLE_PULL_RADIUS
+        ? 1 - Math.min(cupDist / HOLE.BLACK_HOLE_PULL_RADIUS, 1)
+        : 0;
+    }
+
+    let wormholeProximity = 0;
+    for (const worm of this.wormholes) {
+      const dist = this.ball.position.distanceTo(worm.position);
+      wormholeProximity = Math.max(wormholeProximity, 1 - Math.min(dist / WORMHOLE_CAPTURE_RADIUS, 1));
+    }
+
+    audioManager.setAmbienceContext({
+      planetType: nearestPlanet?.type ?? 'ROCKY',
+      planetProximity,
+      blackHoleProximity,
+      wormholeProximity,
+      zeroGravity: this.serverEvents.gravityScale === 0.0,
+      inFlight: this._state === 'BALL_IN_FLIGHT',
+    });
   }
 
   _updatePlanetOcclusion() {

@@ -265,21 +265,24 @@ export class AimUI {
   }
 
   _setupVolumeSlider() {
-    const saved = parseFloat(localStorage.getItem('masterVolume') ?? '1');
-    const initVol = isNaN(saved) ? 1 : Math.min(1, Math.max(0, saved));
+    const legacy = localStorage.getItem('masterVolume');
+    const savedMusic = parseFloat(localStorage.getItem('musicVolume') ?? legacy ?? '1');
+    const savedFx = parseFloat(localStorage.getItem('fxVolume') ?? legacy ?? '1');
+    const initMusicVol = isNaN(savedMusic) ? 1 : Math.min(1, Math.max(0, savedMusic));
+    const initFxVol = isNaN(savedFx) ? 1 : Math.min(1, Math.max(0, savedFx));
 
     if (!document.getElementById('volume-slider-style')) {
       const s = document.createElement('style');
       s.id = 'volume-slider-style';
       s.textContent = `
-        #volume-slider{-webkit-appearance:none;appearance:none;width:104px;height:4px;
+        .volume-slider{-webkit-appearance:none;appearance:none;width:100%;height:4px;
           background:rgba(100,160,255,0.3);border-radius:999px;outline:none;cursor:pointer;}
-        #volume-slider::-webkit-slider-runnable-track{height:4px;background:rgba(100,160,255,0.3);border-radius:999px;}
-        #volume-slider::-moz-range-track{height:4px;background:rgba(100,160,255,0.3);border-radius:999px;}
-        #volume-slider::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;
+        .volume-slider::-webkit-slider-runnable-track{height:4px;background:rgba(100,160,255,0.3);border-radius:999px;}
+        .volume-slider::-moz-range-track{height:4px;background:rgba(100,160,255,0.3);border-radius:999px;}
+        .volume-slider::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;
           border-radius:50%;background:rgba(160,200,255,0.9);border:1px solid rgba(100,160,255,0.5);
           cursor:pointer;margin-top:-5px;}
-        #volume-slider::-moz-range-thumb{width:14px;height:14px;border-radius:50%;
+        .volume-slider::-moz-range-thumb{width:14px;height:14px;border-radius:50%;
           background:rgba(160,200,255,0.9);border:1px solid rgba(100,160,255,0.5);
           cursor:pointer;box-sizing:border-box;}
       `;
@@ -294,9 +297,9 @@ export class AimUI {
       'left:max(18px, calc(env(safe-area-inset-left, 0px) + 12px))',
       'z-index:200',
       'display:flex',
-      'flex-direction:row',
-      'align-items:center',
-      'gap:10px',
+      'flex-direction:column',
+      'align-items:stretch',
+      'gap:8px',
       'touch-action:none',
       'padding:10px 12px',
       'border-radius:18px',
@@ -307,40 +310,46 @@ export class AimUI {
       '-webkit-backdrop-filter:blur(12px)',
     ].join(';');
 
-    const icon = document.createElement('div');
-    icon.style.cssText = [
-      'font-family:Orbitron,sans-serif',
-      'font-size:10px',
-      'letter-spacing:0.18em',
-      'text-transform:uppercase',
-      'line-height:1',
-      'color:rgba(224,216,255,0.88)',
-      'user-select:none',
-    ].join(';');
-    icon.dataset.iconState = initVol === 0 ? 'mute' : 'sound';
-    icon.textContent = initVol === 0 ? 'MUTE' : 'SOUND';
+    const makeRow = (label, value, eventName) => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:10px;';
 
-    const sliderBox = document.createElement('div');
-    sliderBox.style.cssText = 'width:104px;height:20px;display:flex;align-items:center;justify-content:center;overflow:visible;';
+      const icon = document.createElement('div');
+      icon.style.cssText = [
+        'font-family:Orbitron,sans-serif',
+        'font-size:10px',
+        'letter-spacing:0.18em',
+        'text-transform:uppercase',
+        'line-height:1',
+        'min-width:46px',
+        'color:rgba(224,216,255,0.88)',
+        'user-select:none',
+      ].join(';');
+      icon.textContent = label;
 
-    const slider = document.createElement('input');
-    slider.type = 'range';
-    slider.id = 'volume-slider';
-    slider.min = '0';
-    slider.max = '1';
-    slider.step = '0.02';
-    slider.value = String(initVol);
+      const sliderBox = document.createElement('div');
+      sliderBox.style.cssText = 'flex:1;min-width:0;height:20px;display:flex;align-items:center;overflow:hidden;';
 
-    slider.addEventListener('input', () => {
-      const v = parseFloat(slider.value);
-      icon.dataset.iconState = v === 0 ? 'mute' : 'sound';
-      icon.textContent = v === 0 ? 'MUTE' : 'SOUND';
-      eventBus.emit(Events.AUDIO_VOLUME_CHANGE, { volume: v });
-    });
+      const slider = document.createElement('input');
+      slider.type = 'range';
+      slider.className = 'volume-slider';
+      slider.min = '0';
+      slider.max = '1';
+      slider.step = '0.02';
+      slider.value = String(value);
 
-    sliderBox.appendChild(slider);
-    wrap.appendChild(icon);
-    wrap.appendChild(sliderBox);
+      slider.addEventListener('input', () => {
+        eventBus.emit(eventName, { volume: parseFloat(slider.value) });
+      });
+
+      sliderBox.appendChild(slider);
+      row.appendChild(icon);
+      row.appendChild(sliderBox);
+      return row;
+    };
+
+    wrap.appendChild(makeRow('Music', initMusicVol, Events.AUDIO_MUSIC_VOLUME_CHANGE));
+    wrap.appendChild(makeRow('FX', initFxVol, Events.AUDIO_FX_VOLUME_CHANGE));
     document.body.appendChild(wrap);
     this._volumeWrap = wrap;
   }
@@ -431,10 +440,7 @@ export class AimUI {
   }
 
   _showAimHint() {
-    const text = this._shotTakenThisHole
-      ? 'DRAG NEAR BALL TO AIM'
-      : 'DRAG NEAR BALL TO AIM  •  THEN DRAG PYRAMID FOR POWER';
-    this._setHint(text, 'rgba(100,220,255,0.58)');
+    this._setHint('', '');
   }
 
   _showPenalty() {

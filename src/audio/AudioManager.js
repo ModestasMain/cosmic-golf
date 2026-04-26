@@ -7,6 +7,8 @@
 import { eventBus, Events } from '../core/EventBus.js';
 import { gameState } from '../core/GameState.js';
 
+const FX_VOLUME_MULT = 1;
+
 // ── AudioContext singleton ─────────────────────────────────
 
 let _ctx = null;
@@ -19,6 +21,8 @@ function ctx() {
 // ── Master gain (mute/volume control) ─────────────────────
 
 let _master = null;
+let _musicBus = null;
+let _fxBus = null;
 
 function master() {
   if (!_master) {
@@ -27,6 +31,24 @@ function master() {
     _master.connect(ctx().destination);
   }
   return _master;
+}
+
+function musicBus() {
+  if (!_musicBus) {
+    _musicBus = ctx().createGain();
+    _musicBus.gain.value = 1;
+    _musicBus.connect(master());
+  }
+  return _musicBus;
+}
+
+function fxBus() {
+  if (!_fxBus) {
+    _fxBus = ctx().createGain();
+    _fxBus.gain.value = 1;
+    _fxBus.connect(master());
+  }
+  return _fxBus;
 }
 
 // ── Utility: one-shot oscillator ──────────────────────────
@@ -76,7 +98,7 @@ function oneShot({
     osc.connect(gain);
   }
 
-  gain.connect(master());
+  gain.connect(fxBus());
 
   osc.start(now);
   osc.stop(now + attack + decay + 0.05);
@@ -108,7 +130,7 @@ function noiseBurst({ duration = 0.08, volume = 0.15, cutoff = 400, delay = 0 })
 
   src.connect(filt);
   filt.connect(gain);
-  gain.connect(master());
+  gain.connect(fxBus());
 
   src.start(now);
   src.stop(now + duration + 0.01);
@@ -118,19 +140,23 @@ function noiseBurst({ duration = 0.08, volume = 0.15, cutoff = 400, delay = 0 })
 
 const sfx = {
 
-  // SHOT_TAKEN — deep whoosh + impact thud
-  // A sawtooth swoops up (the launch whoosh) while a sine sub-bass thud
-  // punches through simultaneously, giving a sense of real mass being launched.
+  // SHOT_TAKEN — crisp golf strike
+  // Short club click + ball snap, with only a tiny airy tail. Avoids the old
+  // sub-bass "womp" so the release feels more like a golf hit.
   launch() {
-    // Sub-bass thud (the "weight" of the shot)
-    oneShot({ freq: 80, freqEnd: 35, type: 'sine',     volume: 0.55, attack: 0.004, decay: 0.22 });
-    // Mid whoosh
-    oneShot({ freq: 180, freqEnd: 520, type: 'sawtooth', volume: 0.18, attack: 0.008, decay: 0.18,
-      filterType: 'lowpass', filterFreq: 900, filterQ: 1.2 });
-    // High airy tail
-    oneShot({ freq: 800, freqEnd: 2200, type: 'sine',   volume: 0.07, attack: 0.01,  decay: 0.14, delay: 0.02 });
-    // Noise transient
-    noiseBurst({ duration: 0.07, volume: 0.12, cutoff: 600 });
+    // Club-face tick
+    oneShot({ freq: 1450, freqEnd: 920, type: 'triangle', volume: 0.72, attack: 0.001, decay: 0.055,
+      filterType: 'bandpass', filterFreq: 1600, filterQ: 5 });
+    // Ball compression pop
+    oneShot({ freq: 360, freqEnd: 210, type: 'triangle', volume: 0.78, attack: 0.001, decay: 0.09,
+      filterType: 'bandpass', filterFreq: 520, filterQ: 2.4 });
+    // Very short wooden/metal body, no subby tail
+    oneShot({ freq: 180, freqEnd: 120, type: 'sine', volume: 0.34, attack: 0.002, decay: 0.075,
+      filterType: 'highpass', filterFreq: 120, filterQ: 0.7 });
+    // Tiny contact scratch
+    noiseBurst({ duration: 0.026, volume: 0.24, cutoff: 3200 });
+    // Light cosmic air after the strike
+    oneShot({ freq: 980, freqEnd: 1450, type: 'sine', volume: 0.08, attack: 0.012, decay: 0.13, delay: 0.018 });
   },
 
   // BALL_BOUNCED — meteor impact: shared sub-bass boom + shockwave, then planet flavor
@@ -274,7 +300,7 @@ const sfx = {
 
     noiseSrc.connect(bandpass);
     bandpass.connect(noiseGain);
-    noiseGain.connect(master());
+    noiseGain.connect(fxBus());
     noiseSrc.start(now);
     noiseSrc.stop(now + duration + 0.05);
 
@@ -298,7 +324,7 @@ const sfx = {
 
     dopOsc.connect(dopFilt);
     dopFilt.connect(dopGain);
-    dopGain.connect(master());
+    dopGain.connect(fxBus());
     dopOsc.start(now);
     dopOsc.stop(now + duration);
 
@@ -312,7 +338,7 @@ const sfx = {
     subGain.gain.linearRampToValueAtTime(0.30 + p * 0.25, now + 0.03);
     subGain.gain.exponentialRampToValueAtTime(0.0001, now + duration * 0.65);
     subOsc.connect(subGain);
-    subGain.connect(master());
+    subGain.connect(fxBus());
     subOsc.start(now);
     subOsc.stop(now + duration * 0.7);
 
@@ -327,7 +353,7 @@ const sfx = {
       shimGain.gain.linearRampToValueAtTime((p - 0.3) * 0.08, now + 0.25);
       shimGain.gain.exponentialRampToValueAtTime(0.0001, now + duration * 0.75);
       shimOsc.connect(shimGain);
-      shimGain.connect(master());
+      shimGain.connect(fxBus());
       shimOsc.start(now + 0.1);
       shimOsc.stop(now + duration * 0.8);
     }
@@ -364,7 +390,7 @@ const sfx = {
     // Master gain for this swish — fade here to stop everything at once
     const swishMaster = c.createGain();
     swishMaster.gain.setValueAtTime(1, now);
-    swishMaster.connect(master());
+    swishMaster.connect(fxBus());
 
     // 1. Whoosh body — white noise through lowpass sweeping open then settling
     //    Sustain holds until t=4.0s, then LINEAR fade to 0 at exactly t=5.0s
@@ -520,7 +546,7 @@ class PowerDrone {
 
     this._gainNode = c.createGain();
     this._gainNode.gain.value = 0;
-    this._gainNode.connect(master());
+    this._gainNode.connect(fxBus());
 
     this._sub = c.createOscillator();
     this._sub.type = 'sine';
@@ -632,7 +658,7 @@ class BlackHoleDrone {
     this._osc1.connect(filt);
     this._osc2.connect(filt);
     filt.connect(this._gainNode);
-    this._gainNode.connect(master());
+    this._gainNode.connect(fxBus());
 
     this._osc1.start();
     this._osc2.start();
@@ -690,7 +716,7 @@ class FlightDrone {
 
     this._gainNode = c.createGain();
     this._gainNode.gain.value = 0;
-    this._gainNode.connect(master());
+    this._gainNode.connect(fxBus());
 
     // ── Noise source — full white noise, sculpted by filters ────────
     const bufLen = c.sampleRate * 4;
@@ -765,6 +791,195 @@ class FlightDrone {
   }
 }
 
+// ── Space ambience ─────────────────────────────────────────
+//
+// Quiet, persistent atmosphere bed. It reacts to nearby planets, wormholes,
+// black-hole proximity, and zero-gravity events without adding per-frame nodes.
+
+class SpaceAmbience {
+  constructor() {
+    this._running = false;
+    this._gainNode = null;
+    this._bedGain = null;
+    this._noiseGain = null;
+    this._noiseFilter = null;
+    this._planetGain = null;
+    this._eventGain = null;
+    this._bedOscA = null;
+    this._bedOscB = null;
+    this._planetOscA = null;
+    this._planetOscB = null;
+    this._planetFilter = null;
+    this._eventOsc = null;
+    this._eventFilter = null;
+  }
+
+  static planetTone(type = 'ROCKY') {
+    switch (type) {
+      case 'ICE': return { freq: 520, type: 'sine', filter: 1600 };
+      case 'LAVA': return { freq: 58, type: 'sawtooth', filter: 260 };
+      case 'GAS': return { freq: 105, type: 'triangle', filter: 420 };
+      case 'RINGED': return { freq: 330, type: 'triangle', filter: 1100 };
+      case 'SAND': return { freq: 135, type: 'sine', filter: 360 };
+      case 'TERRAN': return { freq: 178, type: 'triangle', filter: 520 };
+      case 'ROCKY':
+      default: return { freq: 92, type: 'sine', filter: 340 };
+    }
+  }
+
+  _ensure() {
+    if (this._running) return;
+    const c = ctx();
+
+    this._gainNode = c.createGain();
+    this._gainNode.gain.value = 0;
+    this._gainNode.connect(fxBus());
+
+    this._bedGain = c.createGain();
+    this._bedGain.gain.value = 0.16;
+    this._bedGain.connect(this._gainNode);
+
+    this._bedOscA = c.createOscillator();
+    this._bedOscA.type = 'sine';
+    this._bedOscA.frequency.value = 36;
+    this._bedOscB = c.createOscillator();
+    this._bedOscB.type = 'triangle';
+    this._bedOscB.frequency.value = 54.4;
+
+    const bedFilter = c.createBiquadFilter();
+    bedFilter.type = 'lowpass';
+    bedFilter.frequency.value = 180;
+    bedFilter.Q.value = 0.7;
+
+    const lfo = c.createOscillator();
+    lfo.type = 'sine';
+    lfo.frequency.value = 0.045;
+    const lfoGain = c.createGain();
+    lfoGain.gain.value = 5;
+    lfo.connect(lfoGain);
+    lfoGain.connect(this._bedOscA.frequency);
+    lfoGain.connect(this._bedOscB.frequency);
+
+    this._bedOscA.connect(bedFilter);
+    this._bedOscB.connect(bedFilter);
+    bedFilter.connect(this._bedGain);
+
+    const bufLen = c.sampleRate * 4;
+    const noiseBuf = c.createBuffer(1, bufLen, c.sampleRate);
+    const noiseData = noiseBuf.getChannelData(0);
+    for (let i = 0; i < bufLen; i++) noiseData[i] = Math.random() * 2 - 1;
+    const noise = c.createBufferSource();
+    noise.buffer = noiseBuf;
+    noise.loop = true;
+
+    this._noiseFilter = c.createBiquadFilter();
+    this._noiseFilter.type = 'bandpass';
+    this._noiseFilter.frequency.value = 520;
+    this._noiseFilter.Q.value = 0.35;
+
+    this._noiseGain = c.createGain();
+    this._noiseGain.gain.value = 0.036;
+
+    noise.connect(this._noiseFilter);
+    this._noiseFilter.connect(this._noiseGain);
+    this._noiseGain.connect(this._gainNode);
+
+    this._planetGain = c.createGain();
+    this._planetGain.gain.value = 0;
+    this._planetFilter = c.createBiquadFilter();
+    this._planetFilter.type = 'bandpass';
+    this._planetFilter.frequency.value = 340;
+    this._planetFilter.Q.value = 2.2;
+    this._planetFilter.connect(this._planetGain);
+    this._planetGain.connect(this._gainNode);
+
+    this._planetOscA = c.createOscillator();
+    this._planetOscA.type = 'sine';
+    this._planetOscA.frequency.value = 92;
+    this._planetOscB = c.createOscillator();
+    this._planetOscB.type = 'sine';
+    this._planetOscB.frequency.value = 138;
+    this._planetOscA.connect(this._planetFilter);
+    this._planetOscB.connect(this._planetFilter);
+
+    this._eventGain = c.createGain();
+    this._eventGain.gain.value = 0;
+    this._eventFilter = c.createBiquadFilter();
+    this._eventFilter.type = 'lowpass';
+    this._eventFilter.frequency.value = 240;
+    this._eventFilter.Q.value = 1.4;
+    this._eventFilter.connect(this._eventGain);
+    this._eventGain.connect(this._gainNode);
+
+    this._eventOsc = c.createOscillator();
+    this._eventOsc.type = 'sawtooth';
+    this._eventOsc.frequency.value = 44;
+    this._eventOsc.connect(this._eventFilter);
+
+    this._bedOscA.start();
+    this._bedOscB.start();
+    this._planetOscA.start();
+    this._planetOscB.start();
+    this._eventOsc.start();
+    noise.start();
+    lfo.start();
+
+    this._running = true;
+  }
+
+  start() {
+    this._ensure();
+    if (gameState.isMuted) return;
+    this._gainNode.gain.setTargetAtTime(0.22, ctx().currentTime, 1.8);
+  }
+
+  setContext({
+    planetType = 'ROCKY',
+    planetProximity = 0,
+    blackHoleProximity = 0,
+    wormholeProximity = 0,
+    zeroGravity = false,
+    inFlight = false,
+  } = {}) {
+    if (gameState.isMuted) {
+      if (this._gainNode) this._gainNode.gain.setTargetAtTime(0, ctx().currentTime, 0.25);
+      return;
+    }
+    this._ensure();
+    const c = ctx();
+    const now = c.currentTime;
+    this._gainNode.gain.setTargetAtTime(0.20 + (inFlight ? 0.03 : 0), now, 0.8);
+    const noiseLift = Math.max(0, Math.min(1, blackHoleProximity)) * 0.006
+      + Math.max(0, Math.min(1, wormholeProximity)) * 0.006
+      + (zeroGravity ? 0.008 : 0);
+    this._noiseFilter.frequency.setTargetAtTime(zeroGravity ? 900 : 520 + blackHoleProximity * 320, now, 0.8);
+    this._noiseGain.gain.setTargetAtTime(0.032 + noiseLift * 2, now, 0.8);
+
+    const tone = SpaceAmbience.planetTone(planetType);
+    const p = Math.max(0, Math.min(1, planetProximity));
+    this._planetOscA.type = tone.type;
+    this._planetOscB.type = tone.type === 'sawtooth' ? 'triangle' : 'sine';
+    this._planetOscA.frequency.setTargetAtTime(tone.freq, now, 0.45);
+    this._planetOscB.frequency.setTargetAtTime(tone.freq * 1.505, now, 0.55);
+    this._planetFilter.frequency.setTargetAtTime(tone.filter, now, 0.4);
+    this._planetGain.gain.setTargetAtTime(p * p * 0.105, now, 0.35);
+
+    const eventT = Math.max(
+      zeroGravity ? 0.45 : 0,
+      Math.max(0, Math.min(1, blackHoleProximity)) * 0.65,
+      Math.max(0, Math.min(1, wormholeProximity)) * 0.55,
+    );
+    const eventFreq = zeroGravity ? 72 : 42 + blackHoleProximity * 62 + wormholeProximity * 90;
+    this._eventOsc.frequency.setTargetAtTime(eventFreq, now, 0.25);
+    this._eventFilter.frequency.setTargetAtTime(zeroGravity ? 520 : 220 + eventT * 900, now, 0.35);
+    this._eventGain.gain.setTargetAtTime(eventT * 0.11, now, 0.35);
+  }
+
+  silence() {
+    if (this._gainNode) this._gainNode.gain.setTargetAtTime(0, ctx().currentTime, 0.5);
+  }
+}
+
 class FileBGM {
   constructor() {
     this._running = false;
@@ -799,7 +1014,7 @@ class FileBGM {
     this._gainNode.gain.value = 0.0001;
     this._srcNode = c.createMediaElementSource(el);
     this._srcNode.connect(this._gainNode);
-    this._gainNode.connect(master());
+    this._gainNode.connect(musicBus());
 
     this._unlock = () => {
       if (this._el && this._el.paused && !gameState.isMuted) {
@@ -854,6 +1069,7 @@ export class AudioManager {
     this._bhDrone           = new BlackHoleDrone();
     this._pwrDrone          = new PowerDrone();
     this._flightDrone       = new FlightDrone();
+    this._ambience          = new SpaceAmbience();
     this._bgm               = new FileBGM();
     this._stopCinematicSwish = null;
   }
@@ -869,13 +1085,16 @@ export class AudioManager {
     const c = ctx();
     if (c.state === 'suspended') c.resume();
 
-    // Apply saved volume preference
-    const savedVol = parseFloat(localStorage.getItem('masterVolume') ?? '1');
-    if (!isNaN(savedVol)) {
-      const v = Math.min(1, Math.max(0, savedVol));
-      master().gain.value = v * 0.7;
-      gameState.isMuted = v === 0;
-    }
+    // Apply saved volume preferences. masterVolume is kept as a legacy fallback.
+    master().gain.value = 0.7;
+    const legacyVol = localStorage.getItem('masterVolume');
+    const savedMusic = parseFloat(localStorage.getItem('musicVolume') ?? legacyVol ?? '1');
+    const savedFx = parseFloat(localStorage.getItem('fxVolume') ?? legacyVol ?? '1');
+    const musicVol = isNaN(savedMusic) ? 1 : Math.min(1, Math.max(0, savedMusic));
+    const fxVol = isNaN(savedFx) ? 1 : Math.min(1, Math.max(0, savedFx));
+    musicBus().gain.value = musicVol;
+    fxBus().gain.value = fxVol * FX_VOLUME_MULT;
+    gameState.isMuted = musicVol === 0 && fxVol === 0;
 
     this._bgm.prepare();
 
@@ -883,6 +1102,7 @@ export class AudioManager {
     eventBus.once(Events.GAME_LAUNCHED, () => {
       this._bgm.start();
       this._bgm.setMuted(!!gameState.isMuted);
+      this._ambience.start();
     });
 
     // ── Event wiring ──────────────────────────────────────
@@ -942,22 +1162,47 @@ export class AudioManager {
     eventBus.on(Events.AUDIO_MUTE_TOGGLE, () => {
       gameState.isMuted = !gameState.isMuted;
       this._bgm.setMuted(gameState.isMuted);
-      if (gameState.isMuted) this._bhDrone.silence();
+      if (gameState.isMuted) {
+        this._bhDrone.silence();
+        this._ambience.silence();
+      } else {
+        this._ambience.start();
+      }
     });
 
-    // Volume slider
+    // Volume sliders
     eventBus.on(Events.AUDIO_VOLUME_CHANGE, ({ volume }) => this.setVolume(volume));
+    eventBus.on(Events.AUDIO_MUSIC_VOLUME_CHANGE, ({ volume }) => this.setMusicVolume(volume));
+    eventBus.on(Events.AUDIO_FX_VOLUME_CHANGE, ({ volume }) => this.setFxVolume(volume));
   }
 
-  /** Set master volume (0–1). Persists to localStorage. Safe to call before init(). */
+  /** Legacy setter: keeps old callers working by setting both music and FX. */
   setVolume(v) {
+    this.setMusicVolume(v);
+    this.setFxVolume(v);
+  }
+
+  setMusicVolume(v) {
     const clamped = Math.min(1, Math.max(0, v));
-    gameState.isMuted = clamped === 0;
-    localStorage.setItem('masterVolume', String(clamped));
+    localStorage.setItem('musicVolume', String(clamped));
     if (!this._wired) return;
-    master().gain.value = clamped * 0.7;
+    musicBus().gain.value = clamped;
     this._bgm.setMuted(clamped === 0);
-    if (clamped === 0) this._bhDrone.silence();
+    gameState.isMuted = musicBus().gain.value === 0 && fxBus().gain.value === 0;
+  }
+
+  setFxVolume(v) {
+    const clamped = Math.min(1, Math.max(0, v));
+    localStorage.setItem('fxVolume', String(clamped));
+    if (!this._wired) return;
+    fxBus().gain.value = clamped * FX_VOLUME_MULT;
+    gameState.isMuted = musicBus().gain.value === 0 && fxBus().gain.value === 0;
+    if (clamped === 0) {
+      this._bhDrone.silence();
+      this._ambience.silence();
+    } else {
+      this._ambience.start();
+    }
   }
 
   /** Play the 5-second cosmic travel sound for the hole-intro cinematic. */
@@ -988,6 +1233,10 @@ export class AudioManager {
    */
   setFlightSpeed(t) {
     this._flightDrone.setSpeed(t);
+  }
+
+  setAmbienceContext(context) {
+    this._ambience.setContext(context);
   }
 }
 

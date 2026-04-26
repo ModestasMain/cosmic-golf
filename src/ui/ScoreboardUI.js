@@ -621,6 +621,8 @@ export class ScoreboardUI {
       const sorted = [...top10, { holesCompleted, totalStrokes: playerTotalStrokes, totalTime: playerTotalTime }].sort(sortEntries);
       const rank = sorted.findIndex(e => e.holesCompleted === holesCompleted && e.totalStrokes === playerTotalStrokes && e.totalTime === playerTotalTime) + 1;
 
+      const spacerCols = 4 + holeCount;
+      bodyHTML += `<tr aria-hidden="true"><td colspan="${spacerCols}" style="padding:0;border:none;background:transparent;"><div style="height:18px;"></div></td></tr>`;
       bodyHTML += `<tr style="background:linear-gradient(90deg, rgba(23,36,88,0.92), rgba(9,17,54,0.92)); box-shadow:inset 0 0 0 1px rgba(59,194,255,0.72), 0 0 0 1px rgba(59,194,255,0.22);">`;
       bodyHTML += `<td style="color:rgba(160,210,255,0.7)">${this._rankBadge(rank)}</td>`;
       bodyHTML += `<td style="text-align:left;font-weight:700;letter-spacing:0.02em;color:#3bc2ff;">${this._playerCell(player, true)}</td>`;
@@ -659,6 +661,6 @@ export class ScoreboardUI {
       3: { bg: 'linear-gradient(180deg, #ffb46a, #8b4d21)', glow: 'rgba(255,165,98,0.26)', fg: '#241108' },
     };
     const theme = themes[rank] ?? { bg: 'linear-gradient(180deg, #432c7a, #1f153d)', glow: 'rgba(122,76,255,0.18)', fg: '#b39cff' };
-    return `<span style="display:inline-grid;place-items:center;width:30px;height:30px;border-radius:50%;background:${theme.bg};color:${theme.fg};font-family:Orbitron,sans-serif;font-weight:800;font-size:13px;box-shadow:0 0 0 1px rgba(255,255,255,0.06), 0 0 12px ${theme.glow};">${rank}</span>`;
+    return `<span style="display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:${theme.bg};color:${theme.fg};font-family:Orbitron,sans-serif;font-weight:800;font-size:10px;box-shadow:0 0 0 1px rgba(255,255,255,0.06), 0 0 10px ${theme.glow};">${rank}</span>`;
   }
 }

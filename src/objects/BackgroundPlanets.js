@@ -137,7 +137,7 @@ export class BackgroundPlanets {
     const ringMat = new MeshBasicMaterial({
       color,
       transparent: true,
-      opacity: 0.32,
+      opacity: 0.22,
       side: DoubleSide,
       depthWrite: false,
     });
@@ -156,7 +156,7 @@ export class BackgroundPlanets {
       map: tex,
       color,
       transparent: true,
-      opacity: 0.16,
+      opacity: 0.11,
       depthWrite: false,
       blending: AdditiveBlending,
     });

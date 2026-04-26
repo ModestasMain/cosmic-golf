@@ -176,22 +176,8 @@
       box-shadow: 0 0 20px rgba(157, 92, 255, 0.4), inset 0 0 14px rgba(255,255,255,0.12);
     }
     #aim-hint {
-      position: absolute;
-      bottom: max(20px, calc(env(safe-area-inset-bottom, 0px) + 10px));
-      left: 50%;
-      transform: translateX(-50%);
-      color: rgba(184, 136, 255, 0.86);
-      font-family: 'JetBrains Mono', monospace;
-      font-size: clamp(8px, 1.2vw, 10px);
-      letter-spacing: clamp(0.05em, 0.5vw, 0.18em);
-      pointer-events: none;
-      max-width: calc(100vw - 40px);
-      text-align: center;
-      text-shadow: 0 0 20px rgba(127, 74, 255, 0.22);
-      transition: color 0.3s ease, opacity 0.3s ease;
-      text-transform: uppercase;
+      display: none !important;
     }
-    @media (min-width: 640px) { #aim-hint { white-space: nowrap; } }
     @media (max-width: 720px), (pointer: coarse) {
       #power-bar-wrap {
         width: min(150px, 38vw);
@@ -207,7 +193,6 @@
       }
       #power-label { font-size: 8px; margin-bottom: 4px; letter-spacing: 0.12em; }
       #power-bar-bg { height: 7px; }
-      #aim-hint { font-size: 8px; bottom: max(14px, calc(env(safe-area-inset-bottom, 0px) + 6px)); }
     }
     #room-code-ui {
       position: absolute;
@@ -396,10 +381,10 @@
       z-index: 1;
       color: #f7f4ff;
       font-family: 'Orbitron', sans-serif;
-      font-size: clamp(20px, 4.4vw, 46px);
+      font-size: clamp(15px, 3.3vw, 34px);
       line-height: 1;
-      letter-spacing: clamp(0.14em, 0.6vw, 0.18em);
-      margin-bottom: clamp(4px, 1vw, 10px);
+      letter-spacing: clamp(0.12em, 0.5vw, 0.16em);
+      margin-bottom: clamp(3px, 0.8vw, 8px);
       text-transform: uppercase;
       text-shadow: 0 0 18px rgba(154, 126, 255, 0.2);
     }
@@ -411,11 +396,11 @@
       gap: clamp(8px, 1.6vw, 18px);
       color: #ffd24a;
       font-family: Georgia, 'Times New Roman', serif;
-      font-size: clamp(16px, 4.2vw, 52px);
+      font-size: clamp(12px, 3.1vw, 38px);
       line-height: 1;
       letter-spacing: clamp(0.05em, 0.4vw, 0.06em);
       text-transform: uppercase;
-      margin-bottom: clamp(14px, 2.4vw, 24px);
+      margin-bottom: clamp(10px, 1.8vw, 18px);
     }
     #scoreboard-subtitle::before,
     #scoreboard-subtitle::after {
@@ -427,11 +412,11 @@
     #scoreboard-table {
       position: relative;
       z-index: 1;
-      width: min(1280px, calc(100vw - clamp(16px, 6vw, 72px)));
+      width: min(960px, calc(100vw - clamp(16px, 6vw, 72px)));
       color: #fff;
-      font-size: clamp(8.5px, 1.4vw, 12px);
+      font-size: clamp(6.5px, 1.05vw, 9px);
       border-collapse: collapse;
-      margin-bottom: clamp(14px, 2.6vw, 28px);
+      margin-bottom: clamp(10px, 2vw, 20px);
       background: linear-gradient(180deg, rgba(15, 9, 35, 0.84), rgba(8, 5, 20, 0.78));
       border: 1px solid rgba(122, 76, 255, 0.42);
       border-radius: clamp(14px, 2.2vw, 22px);
@@ -441,20 +426,20 @@
       -webkit-backdrop-filter: blur(14px);
     }
     #scoreboard-table th, #scoreboard-table td {
-      padding: clamp(6px, 1.2vw, 12px) clamp(4px, 1vw, 12px);
+      padding: clamp(4px, 0.9vw, 9px) clamp(3px, 0.75vw, 9px);
       text-align: center;
       border-bottom: 1px solid rgba(164, 132, 255, 0.12);
       white-space: nowrap;
     }
     #scoreboard-table th {
       color: rgba(191, 152, 255, 0.9);
-      font-size: clamp(7px, 1.2vw, 11px);
+      font-size: clamp(5.5px, 0.9vw, 8px);
       font-family: 'Orbitron', sans-serif;
-      letter-spacing: clamp(0.05em, 0.5vw, 0.14em);
+      letter-spacing: clamp(0.04em, 0.4vw, 0.1em);
       text-transform: uppercase;
       font-weight: 700;
-      padding-top: clamp(8px, 1.4vw, 14px);
-      padding-bottom: clamp(8px, 1.4vw, 14px);
+      padding-top: clamp(6px, 1.05vw, 10px);
+      padding-bottom: clamp(6px, 1.05vw, 10px);
     }
     #scoreboard-table tbody tr:last-child td { border-bottom: none; }
     #score-share-card {

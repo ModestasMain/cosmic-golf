@@ -120,8 +120,15 @@ export class InputSystem {
           opacity:0;
         }
         @media (max-width: 720px), (pointer: coarse) {
-          #power-pyramid-wrap { transform: scale(0.5); transform-origin: bottom center; }
-          #power-ring-wrap { gap: 4px !important; }
+          #power-pyramid-wrap {
+            transform: scale(0.5);
+            transform-origin: top center;
+            margin-bottom: -90px;
+          }
+          #power-ring-wrap {
+            gap: 4px !important;
+            bottom: max(16px, calc(env(safe-area-inset-bottom, 0px) + 12px)) !important;
+          }
         }
       `;
       document.head.appendChild(s);

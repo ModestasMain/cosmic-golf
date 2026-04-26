@@ -98,7 +98,7 @@ export const BACKDROP_PLANETS = {
   MIN_SIZE: 90,
   MAX_SIZE: 360,
   FOLLOW_CAMERA: 1.0,
-  OPACITY: 0.92,
+  OPACITY: 0.62,
 };
 
 export const MULTIPLAYER = {

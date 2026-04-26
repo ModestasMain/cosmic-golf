@@ -8,7 +8,7 @@
 
 import GUI from 'lil-gui';
 import { MeshBasicMaterial, Vector3 } from 'three';
-import { PLANET, STAR_TUNING, WORLDEATER } from '../core/Constants.js';
+import { PHYSICS, PLANET, STAR_TUNING, WORLDEATER } from '../core/Constants.js';
 import { textureManager } from '../core/TextureManager.js';
 import { eventBus, Events } from '../core/EventBus.js';
 import { Planet } from '../objects/Planet.js';
@@ -595,7 +595,13 @@ export class DevPanel {
     f.add(SHAKE_CONFIG, 'freqX',     5, 80,  0.5  ).name('Shake freq X');
     f.add(SHAKE_CONFIG, 'freqY',     5, 80,  0.5  ).name('Shake freq Y');
     f.add(SHAKE_CONFIG, 'freqZ',     5, 80,  0.5  ).name('Shake freq Z');
-    f.add({ copy: () => this._copy('BallFeel', SHAKE_CONFIG) }, 'copy').name('📋 Copy JSON');
+    f.add(PHYSICS, 'FLIGHT_TIME_SCALE', 0.5, 3, 0.05).name('Flight time scale');
+    f.add({
+      copy: () => this._copy('BallFeel', {
+        ...SHAKE_CONFIG,
+        flightTimeScale: PHYSICS.FLIGHT_TIME_SCALE,
+      }),
+    }, 'copy').name('📋 Copy JSON');
   }
 
   // ── TRAJECTORY ───────────────────────────────────────────────

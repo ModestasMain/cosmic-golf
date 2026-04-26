@@ -1349,10 +1349,11 @@ export class HoleScene {
         ? [this.planets[this._orbitalCapture.planetIdx]]
         : this._holeData.planets;
       const orbitPlanet = this._orbitalCapture.isOrbiting ? physicsPlanets[0] : null;
+      const flightTimeScale = Math.max(0.1, PHYSICS.FLIGHT_TIME_SCALE ?? 1);
 
       // Fixed-timestep accumulator: physics always advances in exact TRAJECTORY_DT
       // chunks so Euler integration matches the trajectory simulation step-for-step.
-      this._accumDt += Math.min(dt, 0.1);
+      this._accumDt += Math.min(simDt, 0.1) * flightTimeScale;
       let result = { bounced: false, bouncePlanet: null };
       let advancedPlanetTime = false;
       let enteredWormhole = null;
@@ -1459,7 +1460,7 @@ export class HoleScene {
       if (speed > 2) this._facingDir.lerp(this.ball.velocity.clone().normalize(), 0.15);
 
       // Spin ball mesh based on velocity
-      this.ball.updateSpin(dt);
+      this.ball.updateSpin(simDt * flightTimeScale);
 
 
       // Update input system with current ball position

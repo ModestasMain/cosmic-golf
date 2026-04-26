@@ -4,6 +4,7 @@
 // ============================================================
 
 import { eventBus, Events } from '../core/EventBus.js';
+import { leaderboardStore } from '../core/LeaderboardStore.js';
 
 const QUICK_NAMES = ['VEGA', 'NOVA', 'ORION', 'PULSAR'];
 
@@ -677,6 +678,10 @@ export class NameEntryOverlay {
     this._activeTab = 'LAUNCH';
     this._howToPlay = new HowToPlayPanel();
     this._statsData = null;
+    this._leaderboardEntries = null;
+    this._leaderboardEl = null;
+    this._leaderboardLoading = false;
+    this._leaderboardError = false;
     this._build();
     setTimeout(() => this._fetchStats(), 1400);
   }
@@ -713,6 +718,11 @@ export class NameEntryOverlay {
           to   { width: var(--w, 0%); }
         }
         .cg-tab-content { animation: fadeUp 0.3s cubic-bezier(0.2,0.8,0.2,1) both; }
+        .cg-front-leaderboard table { width:100%; border-collapse:separate; border-spacing:0 8px; font-size:12px; }
+        .cg-front-leaderboard th { padding:0 8px 6px; font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:2px; font-weight:400; color:rgba(160,210,255,0.52); text-align:center; white-space:nowrap; }
+        .cg-front-leaderboard td { padding:10px 8px; text-align:center; background:rgba(13,8,28,0.72); border-top:1px solid rgba(255,255,255,0.06); border-bottom:1px solid rgba(255,255,255,0.06); color:rgba(247,244,255,0.92); white-space:nowrap; }
+        .cg-front-leaderboard td:first-child { border-left:1px solid rgba(255,255,255,0.06); border-radius:10px 0 0 10px; }
+        .cg-front-leaderboard td:last-child { border-right:1px solid rgba(255,255,255,0.06); border-radius:0 10px 10px 0; }
         #name-entry-overlay input::placeholder { color: rgba(255,255,255,0.25); }
         #name-entry-overlay input:focus { outline: none; }
         .cg-quick-btn:hover { border-color: #BFFF00 !important; color: #BFFF00 !important; box-shadow: 0 0 10px rgba(191,255,0,0.3) !important; }
@@ -731,11 +741,13 @@ export class NameEntryOverlay {
           #cg-launch-card { padding-left: 14px !important; padding-right: 14px !important; }
           #cg-launch-stats { display: none !important; }
           #cg-nav { padding-left: 16px !important; padding-right: 16px !important; }
+          #cg-tabs { gap: 14px !important; }
           #cg-content { padding-left: 14px !important; padding-right: 14px !important; }
           #cg-daily-btn { flex-wrap: wrap !important; }
         }
         @media (max-width: 480px) {
           #cg-nav-logo span { display: none; }
+          #cg-tabs { gap: 10px !important; }
           #cg-tabs button { font-size: 9px !important; letter-spacing: 1.5px !important; }
           #cg-launch-title { font-size: clamp(24px, 9vw, 38px) !important; }
           #cg-launch-card { padding-left: 12px !important; padding-right: 12px !important; }
@@ -793,6 +805,7 @@ export class NameEntryOverlay {
       { id: 'LAUNCH',       label: '⊕ LAUNCH'       },
       { id: 'HOW_TO_PLAY',  label: '▶ HOW TO PLAY'  },
       { id: 'ACHIEVEMENTS', label: '⟡ ACHIEVEMENTS'  },
+      { id: 'LEADERBOARDS', label: '★ LEADERBOARDS' },
     ];
 
     this._tabBtns = {};
@@ -869,6 +882,9 @@ export class NameEntryOverlay {
     } else {
       this._howToPlay.stop();
     }
+    if (tabId === 'LEADERBOARDS' && !this._leaderboardEntries && !this._leaderboardLoading) {
+      this._fetchStats();
+    }
   }
 
   _updateTabStyles() {
@@ -893,6 +909,9 @@ export class NameEntryOverlay {
     } else if (tabId === 'ACHIEVEMENTS') {
       wrap.style.cssText = 'width:100%;max-width:900px;';
       wrap.appendChild(this._buildAchievementsTab());
+    } else if (tabId === 'LEADERBOARDS') {
+      wrap.style.cssText = 'width:100%;max-width:980px;';
+      wrap.appendChild(this._buildLeaderboardsTab());
     }
 
     this._contentArea.appendChild(wrap);
@@ -1244,10 +1263,17 @@ export class NameEntryOverlay {
   }
 
   async _fetchStats() {
+    if (this._leaderboardLoading) return;
+    this._leaderboardLoading = true;
+    this._leaderboardError = false;
     try {
       const res = await fetch(`https://${WORKER_HOST}/global-leaderboard`);
-      if (!res.ok) return;
-      const { stats } = await res.json();
+      if (!res.ok) throw new Error(`Leaderboard fetch failed: ${res.status}`);
+      const { entries, stats } = await res.json();
+      if (Array.isArray(entries)) {
+        this._leaderboardEntries = entries;
+        if (this._leaderboardEl) this._renderLeaderboards(this._leaderboardEl);
+      }
       if (!stats || typeof stats !== 'object') return;
       this._statsData = {
         timesPlayed: Math.max(0, Math.round(stats.timesPlayed ?? 0)),
@@ -1256,7 +1282,102 @@ export class NameEntryOverlay {
         bossDefeats: Math.max(0, Math.round(stats.bossDefeats ?? 0)),
       };
       if (this._statsEl) this._renderStats(this._statsEl);
-    } catch {}
+    } catch {
+      this._leaderboardError = true;
+      if (this._leaderboardEl) this._renderLeaderboards(this._leaderboardEl);
+    } finally {
+      this._leaderboardLoading = false;
+    }
+  }
+
+  _buildLeaderboardsTab() {
+    const container = document.createElement('div');
+
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;justify-content:space-between;align-items:flex-end;gap:18px;margin-bottom:24px;';
+    header.innerHTML = `
+      <div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:5px;color:rgba(255,255,255,0.4);margin-bottom:8px;">VOID RUN RECORDS</div>
+        <div style="font-family:'Orbitron',sans-serif;font-size:24px;font-weight:700;letter-spacing:2px;color:#fff;">LEADERBOARDS</div>
+      </div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:3px;color:rgba(160,210,255,0.62);text-align:right;">NORMAL GAME<br><span style="color:rgba(255,255,255,0.34);">GLOBAL TOP 10</span></div>
+    `;
+    container.appendChild(header);
+
+    const panel = document.createElement('div');
+    panel.className = 'cg-front-leaderboard';
+    panel.style.cssText = [
+      'border-radius:14px',
+      'border:1px solid rgba(100,180,255,0.18)',
+      'background:linear-gradient(180deg,rgba(10,6,26,0.74),rgba(7,4,18,0.62))',
+      'box-shadow:0 18px 60px rgba(3,2,10,0.28)',
+      'backdrop-filter:blur(14px)',
+      '-webkit-backdrop-filter:blur(14px)',
+      'padding:14px',
+      'overflow-x:auto',
+    ].join(';');
+    this._leaderboardEl = panel;
+    this._renderLeaderboards(panel);
+    container.appendChild(panel);
+
+    return container;
+  }
+
+  _renderLeaderboards(panel) {
+    const entries = this._leaderboardEntries;
+    if (this._leaderboardError) {
+      panel.innerHTML = `<div style="text-align:center;padding:54px 20px;color:rgba(255,255,255,0.36);font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:3px;">LEADERBOARD UNAVAILABLE</div>`;
+      return;
+    }
+    if (!entries) {
+      panel.innerHTML = `<div style="text-align:center;padding:54px 20px;color:rgba(255,255,255,0.36);font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:3px;">LOADING LEADERBOARDS...</div>`;
+      return;
+    }
+    if (entries.length === 0) {
+      panel.innerHTML = `<div style="text-align:center;padding:54px 20px;color:rgba(255,255,255,0.36);font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:3px;">NO SCORES YET</div>`;
+      return;
+    }
+
+    let header = '<th>RANK</th><th style="text-align:left;">PLAYER</th>';
+    for (let h = 0; h < 10; h++) header += `<th>H${h + 1}</th>`;
+    header += '<th>STROKES</th><th>TIME</th>';
+
+    const rows = entries.slice(0, 10).map((entry, index) => {
+      const rank = index + 1;
+      const rankBadge = this._frontRankBadge(rank);
+      const holes = Array.from({ length: 10 }, (_, h) => `<td style="color:rgba(224,216,255,0.72);">${entry.strokes?.[h] ?? '—'}</td>`).join('');
+      return `
+        <tr>
+          <td>${rankBadge}</td>
+          <td style="text-align:left;font-weight:700;letter-spacing:0.02em;color:#f7f4ff;">${this._escapeHTML(entry.name || 'ANONYMOUS')}</td>
+          ${holes}
+          <td style="font-weight:800;color:#fff;">${entry.totalStrokes ?? '—'}</td>
+          <td style="color:rgba(160,210,255,0.86);">${leaderboardStore.formatTime(entry.totalTime)}</td>
+        </tr>
+      `;
+    }).join('');
+
+    panel.innerHTML = `<table><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table>`;
+  }
+
+  _frontRankBadge(rank) {
+    const themes = {
+      1: { bg: 'linear-gradient(180deg,#ffdd71,#cc8a00)', fg: '#251200', glow: 'rgba(255,198,64,0.35)' },
+      2: { bg: 'linear-gradient(180deg,#dbe4ff,#6e7b9f)', fg: '#162033', glow: 'rgba(196,208,255,0.28)' },
+      3: { bg: 'linear-gradient(180deg,#ffb46a,#8b4d21)', fg: '#241108', glow: 'rgba(255,165,98,0.26)' },
+    };
+    const theme = themes[rank] ?? { bg: 'linear-gradient(180deg,#432c7a,#1f153d)', fg: '#b39cff', glow: 'rgba(122,76,255,0.18)' };
+    return `<span style="display:inline-grid;place-items:center;width:30px;height:30px;border-radius:50%;background:${theme.bg};color:${theme.fg};font-family:Orbitron,sans-serif;font-weight:800;font-size:13px;box-shadow:0 0 0 1px rgba(255,255,255,0.06),0 0 12px ${theme.glow};">${rank}</span>`;
+  }
+
+  _escapeHTML(value) {
+    return String(value).replace(/[&<>"']/g, (ch) => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    }[ch]));
   }
 
   _buildAchievementsTab() {

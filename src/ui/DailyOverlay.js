@@ -82,7 +82,7 @@ export class DailyOverlay {
       gameState.clearChallenge();
       gameState.leaderboardSessionId = null;
       this.hide();
-      eventBus.emit('game:restart');
+      eventBus.emit('game:freeplay');
     });
     actions.appendChild(exitBtn);
 

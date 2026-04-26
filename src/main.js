@@ -355,6 +355,13 @@ class Game {
   }
 
   _setupEventListeners() {
+    eventBus.on('game:freeplay', () => {
+      const savedName = gameState.players[0]?.name ?? localStorage.getItem('cg_callsign') ?? 'PLAYER';
+      this.mp.joinPublic(savedName);
+      this._syncRoomUrl('');
+      eventBus.emit('game:restart');
+    });
+
     eventBus.on('game:restart', () => {
       this.mp.broadcastGameRestart();
       const savedColor = this.mp.localColor ?? gameState.players[0]?.color ?? 0xff6600;

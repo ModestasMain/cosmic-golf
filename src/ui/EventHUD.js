@@ -23,6 +23,8 @@ const EVENT_COLOR = {
   ASTEROID_STORM: '#ff8844',
 };
 
+
+
 const ALL_NAMES  = Object.values(EVENT_DISPLAY);
 const ALL_COLORS = Object.values(EVENT_COLOR);
 
@@ -47,9 +49,12 @@ export class EventHUD {
     this._bossAwakened = false;
     this._bossResetRemaining = 0;
     this._lastDisplayMode = null;
+    this._popupTimeout = null;
 
     this._el = this._build();
+    this._popup = this._buildPopup();
     document.body.appendChild(this._el);
+    document.body.appendChild(this._popup);
     this._setupListeners();
     this._startTick();
   }
@@ -168,6 +173,83 @@ export class EventHUD {
     return root;
   }
 
+  // ── Event popup ───────────────────────────────────────────
+
+  _buildPopup() {
+    const el = document.createElement('div');
+    el.id = 'event-popup';
+    Object.assign(el.style, {
+      position:      'fixed',
+      top:           '38%',
+      left:          '50%',
+      transform:     'translate(-50%, -50%) scale(0.85)',
+      zIndex:        '460',
+      pointerEvents: 'none',
+      userSelect:    'none',
+      opacity:       '0',
+      textAlign:     'center',
+      whiteSpace:    'nowrap',
+      willChange:    'opacity, transform',
+    });
+
+    this._popupName = document.createElement('div');
+    Object.assign(this._popupName.style, {
+      fontFamily:    '"Orbitron", sans-serif',
+      fontSize:      'clamp(18px, 5vw, 32px)',
+      fontWeight:    '900',
+      letterSpacing: '0.18em',
+      textTransform: 'uppercase',
+      lineHeight:    '1',
+    });
+
+    this._popupSub = document.createElement('div');
+    Object.assign(this._popupSub.style, {
+      fontFamily:    '"JetBrains Mono", monospace',
+      fontSize:      'clamp(9px, 1.6vw, 11px)',
+      letterSpacing: '0.22em',
+      textTransform: 'uppercase',
+      color:         'rgba(255,255,255,0.5)',
+      marginTop:     '7px',
+    });
+
+    el.appendChild(this._popupName);
+    el.appendChild(this._popupSub);
+    return el;
+  }
+
+  _showPopup(type, phase) {
+    if (this._bossMode) return;
+    if (this._popupTimeout) { clearTimeout(this._popupTimeout); this._popupTimeout = null; }
+
+    const isWarning = phase === 'warning';
+    const name  = EVENT_DISPLAY[type] ?? type;
+    const color = EVENT_COLOR[type]   ?? '#aaddff';
+
+    this._popupName.textContent      = name;
+    this._popupName.style.color      = color;
+    this._popupName.style.textShadow = `0 0 24px ${color}99, 0 0 55px ${color}44`;
+    this._popupSub.textContent       = isWarning ? 'INCOMING' : '';
+
+    // Pop in
+    this._popup.style.transition = 'none';
+    this._popup.style.transform  = 'translate(-50%, -50%) scale(0.75)';
+    this._popup.style.opacity    = '0';
+
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      this._popup.style.transition = 'opacity 0.15s ease, transform 0.2s cubic-bezier(0.34,1.56,0.64,1)';
+      this._popup.style.transform  = 'translate(-50%, -50%) scale(1)';
+      this._popup.style.opacity    = '1';
+    }));
+
+    const holdMs = isWarning ? 2200 : 2000;
+    this._popupTimeout = setTimeout(() => {
+      this._popup.style.transition = 'opacity 0.35s ease, transform 0.35s ease';
+      this._popup.style.transform  = 'translate(-50%, -50%) scale(1.08)';
+      this._popup.style.opacity    = '0';
+      this._popupTimeout = null;
+    }, holdMs);
+  }
+
   // ── Listeners ─────────────────────────────────────────────
 
   _setupListeners() {
@@ -184,6 +266,9 @@ export class EventHUD {
       if (this._bossMode) return;
       if (phase === 'start') {
         this._triggerSlotMachine(type);
+        this._showPopup(type, 'start');
+      } else if (phase === 'warning') {
+        this._showPopup(type, 'warning');
       } else if (phase === 'end') {
         this._syncServerEventDisplay();
       }
@@ -404,6 +489,8 @@ export class EventHUD {
 
   destroy() {
     if (this._rafId) cancelAnimationFrame(this._rafId);
+    if (this._popupTimeout) clearTimeout(this._popupTimeout);
     document.body.removeChild(this._el);
+    document.body.removeChild(this._popup);
   }
 }

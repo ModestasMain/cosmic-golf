@@ -1133,6 +1133,7 @@ export class HoleScene {
     this._lastBounceTime = 0;
     this._launchGraceFrames = PHYSICS.LAUNCH_GRACE_FRAMES;
     this._voidFrames = 0;
+    this._zeroGFlightFrames = 0;    // frames since last planet contact in zero-g
     this._trajNeedsRecompute = true; // compute trajectory once after hit-freeze clears
     this._accumDt = 0;
   }
@@ -1705,6 +1706,13 @@ export class HoleScene {
 
       // Zero-gravity void: gravity is off so the ball never decelerates or curves back.
       if (this.serverEvents.gravityScale === 0.0) {
+        const nearPlanet = nearestSafeDist < BALL.RADIUS * 4;
+        if (nearPlanet) {
+          this._zeroGFlightFrames = 0;
+        } else {
+          this._zeroGFlightFrames = (this._zeroGFlightFrames ?? 0) + 1;
+        }
+
         // Slow drift far from any planet → OOB immediately
         if (nearestSafeDist > HOLE.VOID_ZERO_G_SLOW_DIST && ballSpeed < HOLE.VOID_ZERO_G_SLOW_SPEED) {
           this._onOutOfBounds();
@@ -1720,8 +1728,16 @@ export class HoleScene {
         } else {
           this._voidFrames = 0;
         }
+        // Ball never touched a planet within ~4 seconds → OOB regardless of current distance.
+        // Catches fast shots heading into open space that stay just within VOID_ZERO_G_SURFACE_DIST
+        // via a grazing path but never actually land.
+        if (this._zeroGFlightFrames > 240) {
+          this._onOutOfBounds();
+          return;
+        }
       } else {
         this._voidFrames = 0;
+        this._zeroGFlightFrames = 0;
       }
 
       // Settle: ball at rest ON a planet, OR stuck near a planet surface too long

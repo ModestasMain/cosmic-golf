@@ -62,6 +62,7 @@ const ACHIEVEMENTS = {
   BILLIARD_PRO:      { id: 'BILLIARD_PRO',        name: 'Billiard Pro',         desc: 'Hit 3 different players',              icon: '🏆' },
   COMEBACK_KING:     { id: 'COMEBACK_KING',       name: 'Comeback King',        desc: 'Complete a hole after 3+ OOBs',       icon: '👑' },
   SHARPSHOOTER:      { id: 'SHARPSHOOTER',        name: 'Sharpshooter',         desc: '3 hole-in-ones in one game',          icon: '🎖️' },
+  WORLDEATER_DEFEATED: { id: 'WORLDEATER_DEFEATED', name: 'Worldeater Defeated', desc: 'Defeat the Worldeater boss',           icon: '🐉' },
 };
 
 export class AchievementManager {
@@ -100,6 +101,7 @@ export class AchievementManager {
     if (this._unlocked.has(id)) return false;
     const def = ACHIEVEMENTS[id];
     if (!def) return false;
+    if (id !== 'WORLDEATER_DEFEATED' && gameState.isBossRoom) return false;
     this._unlocked.add(id);
     this._save();
     if (this._toastCallback) this._toastCallback(def);
@@ -188,6 +190,10 @@ export class AchievementManager {
     eventBus.on(Events.SHOT_TAKEN, () => {
       this._bounceCountThisShot = 0;
       this._billiardHitsThisShot.clear();
+    });
+
+    eventBus.on(Events.WORLDEATER_DEFEATED, () => {
+      this.tryUnlock('WORLDEATER_DEFEATED');
     });
 
     eventBus.on('game:restart', () => {

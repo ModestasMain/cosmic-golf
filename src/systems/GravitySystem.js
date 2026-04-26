@@ -427,6 +427,10 @@ export function simulateTrajectory(startPos, startVel, planets, allPlanets, step
           stopReason = 'oob';
           break;
         }
+        // In zero-g, mark all void-path dots red immediately — no grace buffer in preview.
+        // The ball will never be pulled back by gravity so these dots ARE the OOB path.
+        danger.push(2);
+        continue;
       } else {
         voidSteps = 0;
       }
@@ -450,6 +454,21 @@ export function simulateTrajectory(startPos, startVel, planets, allPlanets, step
         stopReason = 'oob';
         break;
       }
+    }
+  }
+
+  // Post-loop: if simulation hit step limit in zero-g and final position is in the void,
+  // upgrade to oob — the ball has no gravity to pull it back so it will never land.
+  if (stopReason === 'limit' && zeroGravity && points.length > 0) {
+    const finalPos = points[points.length - 1];
+    let finalNearest = Infinity;
+    for (const p of (simAllPlanets ?? [])) {
+      finalNearest = Math.min(finalNearest, finalPos.distanceTo(p.position) - p.radius);
+    }
+    if (tee) finalNearest = Math.min(finalNearest, finalPos.distanceTo(tee));
+    if (cup) finalNearest = Math.min(finalNearest, finalPos.distanceTo(cup));
+    if (finalNearest > HOLE.VOID_ZERO_G_SURFACE_DIST) {
+      stopReason = 'oob';
     }
   }
 

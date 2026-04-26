@@ -934,7 +934,7 @@ export class NameEntryOverlay {
     // Callsign label
     const label = document.createElement('div');
     label.style.cssText = "display:block;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:4px;color:rgba(255,255,255,0.45);margin-bottom:8px;";
-    label.textContent = 'YOUR CALLSIGN';
+    label.textContent = 'USERNAME';
     card.appendChild(label);
 
     // Input
@@ -1232,7 +1232,6 @@ export class NameEntryOverlay {
     const d = this._statsData;
     const items = [
       { label: 'TIMES PLAYED',   val: d ? String(d.timesPlayed)   : '—',  color: '#00DDFF' },
-      { label: 'UNIQUE PLAYERS', val: d ? String(d.uniquePlayers) : '—',  color: '#9FF7FF' },
       { label: 'HOLES IN ONE',   val: d ? String(d.holeInOnes)    : '—',  color: '#FF00CC' },
       { label: 'BOSS DEFEATS',   val: d ? String(d.bossDefeats)   : '—',  color: '#FFAA44' },
     ];

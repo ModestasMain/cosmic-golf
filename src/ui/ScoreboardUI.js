@@ -240,6 +240,7 @@ export class ScoreboardUI {
     const timeText = leaderboardStore.formatTime(totalTime);
     const url = this._buildChallengeUrl();
     const seed = this._challengeSeed();
+    const isRoomChallenge = !!(gameState.roomCode && gameState.roomCode !== 'PUBLIC');
     const name = player.name || 'PLAYER';
     const bossChallenge = gameState.isBossRoom || gameState.isBossChallenge;
 
@@ -261,7 +262,7 @@ export class ScoreboardUI {
         eyebrow: 'SHARE RESULTS',
         headline: `${totalStrokes} STROKES`,
         meta: `${name} · ${timeText} · ${gameState.totalHoles} holes`,
-        seedLabel: `CHALLENGE SEED ${seed}`,
+        seedLabel: isRoomChallenge ? `ROOM CODE ${seed}` : `CHALLENGE SEED ${seed}`,
         url,
         text,
       };
@@ -292,7 +293,12 @@ export class ScoreboardUI {
 
   _buildChallengeUrl() {
     const url = new URL(window.location.pathname || '/', window.location.origin);
-    url.searchParams.set('challenge', this._challengeSeed());
+    const roomCode = gameState.roomCode;
+    if (roomCode && roomCode !== 'PUBLIC') {
+      url.searchParams.set('room', roomCode);
+    } else {
+      url.searchParams.set('challenge', this._challengeSeed());
+    }
     return url.toString();
   }
 

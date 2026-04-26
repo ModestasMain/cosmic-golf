@@ -146,23 +146,12 @@ export class CosmicGolfRoom {
       await this._saveLeaderboard();
       this._broadcast(JSON.stringify({ type: 'leaderboard', entries: this._leaderboard }));
 
-      if (safeEntry.holesCompleted === 10) {
-        const globalEntry = {
-          sessionId:    safeEntry.sessionId,
-          playerId:     safeEntry.playerId,
-          name:         safeEntry.name,
-          totalStrokes: safeEntry.totalStrokes,
-          totalTime:    safeEntry.totalTime,
-          holesCompleted: 10,
-          strokes:      safeEntry.strokes,
-        };
-        const top10 = await this._updateGlobalKV(globalEntry);
-        const stats = await updateGlobalStats(this.env, globalEntry);
-        this._broadcast(JSON.stringify({ type: 'global_leaderboard', entries: top10, stats }));
-      } else if (safeEntry.bossDefeated) {
+      const top10 = await this._updateGlobalKV(safeEntry);
+      if (safeEntry.holesCompleted === 10 || safeEntry.bossDefeated) {
         const stats = await updateGlobalStats(this.env, safeEntry);
-        const globalEntries = (await this.env.GLOBAL_LB.get(GLOBAL_KV_KEY, { type: 'json' })) ?? [];
-        this._broadcast(JSON.stringify({ type: 'global_leaderboard', entries: globalEntries, stats }));
+        this._broadcast(JSON.stringify({ type: 'global_leaderboard', entries: top10, stats }));
+      } else {
+        this._broadcast(JSON.stringify({ type: 'global_leaderboard', entries: top10 }));
       }
       return;
     }

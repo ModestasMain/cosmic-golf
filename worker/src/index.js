@@ -33,7 +33,13 @@ async function handleRequest(request, env) {
 
   // Route: GET /global-leaderboard
   if (url.pathname === '/global-leaderboard' && request.method === 'GET') {
-    const entries = (await env.GLOBAL_LB.get('top10', { type: 'json' })) ?? [];
+    const raw = (await env.GLOBAL_LB.get('top10', { type: 'json' })) ?? [];
+    const entries = raw.map(e => ({
+      ...e,
+      strokes: Array.isArray(e.strokes) && e.strokes.length > 0
+        ? e.strokes
+        : Array(10).fill(null),
+    }));
     const stats = await getGlobalStats(env);
     return jsonResponse({ entries, stats });
   }
@@ -45,8 +51,8 @@ async function handleRequest(request, env) {
       return textResponse('Bad request', 400);
     }
     const e = body?.entry;
-    if (!e || (e.holesCompleted !== 10 && e.bossDefeated !== true)) {
-      return textResponse('Incomplete game', 400);
+    if (!e || typeof e.totalStrokes !== 'number') {
+      return textResponse('Invalid entry', 400);
     }
 
     const name = (typeof e.name === 'string'
@@ -67,10 +73,8 @@ async function handleRequest(request, env) {
 
     const entry = { sessionId, playerId, name, totalStrokes, totalTime, holesCompleted: e.holesCompleted, strokes, bossDefeated: e.bossDefeated === true };
     let top10 = (await env.GLOBAL_LB.get('top10', { type: 'json' })) ?? [];
-    if (e.holesCompleted === 10) {
-      top10 = upsertGlobalEntry(top10, { sessionId, name, totalStrokes, totalTime, holesCompleted: 10 });
-      await env.GLOBAL_LB.put('top10', JSON.stringify(top10));
-    }
+    top10 = upsertGlobalEntry(top10, entry);
+    await env.GLOBAL_LB.put('top10', JSON.stringify(top10));
     const stats = await updateGlobalStats(env, entry);
 
     return jsonResponse({ entries: top10, stats });

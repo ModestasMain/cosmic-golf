@@ -87,57 +87,27 @@ export class ScoreboardScene {
         bossDefeated,
       });
 
-      if (bossDefeated) {
-        this._mp.submitGlobalHTTP({
-          sessionId: gameState.leaderboardSessionId,
-          playerId: getAnonymousPlayerId(),
-          name: player.name,
-          strokes: padArray(strokes, 10),
-          totalStrokes: strokes.reduce((s, v) => s + (v || 0), 0),
-          totalTime: holeTimes.reduce((s, v) => s + (v || 0), 0),
-          holesCompleted,
-          bossDefeated: true,
-        });
-      }
     }
   }
 
   _submitGlobal() {
     const player = gameState.players[0];
     if (!player) return;
+    const strokes = padArray(player.strokes.slice(), 10);
     const holesCompleted = player.strokes.filter(v => v != null).length;
+    const bossDefeated = (gameState.isBossRoom || gameState.isBossChallenge) && holesCompleted >= gameState.totalHoles;
 
-    if (gameState.isBossRoom || gameState.isBossChallenge) {
-      if (holesCompleted < gameState.totalHoles) return;
-      if (this._mp) {
-        this._mp.submitGlobalHTTP({
-          sessionId: gameState.leaderboardSessionId,
-          playerId: getAnonymousPlayerId(),
-          name: player.name,
-          strokes: padArray(player.strokes.slice(), 10),
-          totalStrokes: gameState.totalStrokes(player.id),
-          totalTime: gameState.totalTime(player.id),
-          holesCompleted,
-          bossDefeated: true,
-        });
-      }
-      return;
-    }
-
-    if (holesCompleted < gameState.totalHoles) return;
-
-    // Solo mode: submit via HTTP (no WebSocket available)
-    // Multiplayer: room.js handles global KV update when it receives leaderboard_submit
+    // Solo mode: submit via HTTP (multiplayer room.js handles it via WebSocket)
     if (gameState.isSoloMode && this._mp) {
       this._mp.submitGlobalHTTP({
         sessionId:    gameState.leaderboardSessionId,
         playerId:     getAnonymousPlayerId(),
         name:         player.name,
-        strokes:      padArray(player.strokes.slice(), 10),
+        strokes,
         totalStrokes: gameState.totalStrokes(player.id),
         totalTime:    gameState.totalTime(player.id),
         holesCompleted,
-        bossDefeated: holesCompleted === gameState.totalHoles,
+        bossDefeated,
       });
     }
   }

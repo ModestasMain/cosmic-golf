@@ -980,82 +980,87 @@ class SpaceAmbience {
   }
 }
 
+// FileBGM — looped MP3 track with gain-only volume control.
+// The audio element plays continuously once started; we never pause it
+// mid-game so no pointerdown unlock handler can accidentally restart it
+// over another track. Volume switching is done purely via the gain node.
 class FileBGM {
-  constructor() {
-    this._running = false;
-    this._el = null;
+  constructor(src = '/audio/cosmic-golf-bgm.mp3') {
+    this._src     = src;
+    this._started = false;   // true once el.play() has been called
+    this._el      = null;
     this._srcNode = null;
     this._gainNode = null;
-    this._unlock = null;
   }
 
-  prepare() {
-    this._ensure();
-    const c = ctx();
-    if (this._gainNode) {
-      this._gainNode.gain.cancelScheduledValues(c.currentTime);
-      this._gainNode.gain.setValueAtTime(0.0001, c.currentTime);
-    }
-  }
-
+  // Create audio element + Web Audio graph. Call once.
   _ensure() {
     if (this._el) return;
     const el = document.createElement('audio');
-    el.preload = 'auto';
-    el.loop = true;
+    el.preload    = 'auto';
+    el.loop       = true;
     el.crossOrigin = 'anonymous';
-    el.src = '/audio/cosmic-golf-bgm.mp3';
+    el.src        = this._src;
     el.style.display = 'none';
     document.body.appendChild(el);
     this._el = el;
 
     const c = ctx();
     this._gainNode = c.createGain();
-    this._gainNode.gain.value = 0.0001;
+    this._gainNode.gain.value = 0;
     this._srcNode = c.createMediaElementSource(el);
     this._srcNode.connect(this._gainNode);
     this._gainNode.connect(musicBus());
-
-    this._unlock = () => {
-      if (this._el && this._el.paused && !gameState.isMuted) {
-        this._el.play().catch(() => {});
-      }
-    };
-    window.addEventListener('pointerdown', this._unlock, { passive: true });
   }
 
-  start() {
-    if (this._running) return;
-    this._running = true;
+  // Begin playback from the current position (or fromStart=true to rewind).
+  // Does nothing if already started — use setGain() to adjust volume instead.
+  start(fromStart = false) {
     this._ensure();
-    const c = ctx();
-    this._gainNode.gain.cancelScheduledValues(c.currentTime);
-    this._gainNode.gain.setValueAtTime(0.0001, c.currentTime);
-    if (!gameState.isMuted) {
-      this._gainNode.gain.linearRampToValueAtTime(0.52, c.currentTime + 3);
-      this._el.play().catch(() => {});
-    } else {
-      this._gainNode.gain.setValueAtTime(0, c.currentTime);
-      this._el.pause();
+    if (fromStart && this._el) this._el.currentTime = 0;
+    if (!this._started) {
+      this._started = true;
+      if (!gameState.isMuted) {
+        this._el.play().catch(() => {});
+      }
     }
   }
 
-  stop() {
-    this._running = false;
-    if (this._el) this._el.pause();
-    if (this._gainNode) this._gainNode.gain.setTargetAtTime(0, ctx().currentTime, 0.5);
+  // Fade gain to the target over `duration` seconds.
+  setGain(target, duration = 0) {
+    this._ensure();
+    const g = this._gainNode.gain;
+    const c = ctx();
+    g.cancelScheduledValues(c.currentTime);
+    g.setValueAtTime(g.value || 0.0001, c.currentTime);
+    if (duration > 0) {
+      g.linearRampToValueAtTime(Math.max(target, 0.0001), c.currentTime + duration);
+    } else {
+      g.setValueAtTime(target, c.currentTime);
+    }
+  }
+
+  // Audible: ramp up to full volume.
+  play(fadeIn = 1) {
+    this.start();
+    if (!gameState.isMuted) this.setGain(0.52, fadeIn);
+  }
+
+  // Silent: ramp gain to zero. Element keeps playing.
+  silence(fadeOut = 0.4) {
+    this.setGain(0, fadeOut);
   }
 
   setMuted(muted) {
     this._ensure();
-    if (!this._gainNode || !this._el) return;
-    const c = ctx();
     if (muted) {
-      this._gainNode.gain.setTargetAtTime(0, c.currentTime, 0.2);
-      this._el.pause();
+      this.silence(0.2);
+      if (this._el && !this._el.paused) this._el.pause();
     } else {
-      this._gainNode.gain.setTargetAtTime(0.52, c.currentTime, 0.3);
-      if (this._running) this._el.play().catch(() => {});
+      if (this._started && this._el && this._el.paused) {
+        this._el.play().catch(() => {});
+      }
+      // Gain is restored by whatever called setMuted — callers manage level.
     }
   }
 }
@@ -1070,7 +1075,9 @@ export class AudioManager {
     this._pwrDrone          = new PowerDrone();
     this._flightDrone       = new FlightDrone();
     this._ambience          = new SpaceAmbience();
-    this._bgm               = new FileBGM();
+    this._bgm               = new FileBGM('/audio/cosmic-golf-bgm.mp3');
+    this._bossBgm           = new FileBGM('/audio/cosmic-boss-encounter.mp3');
+    this._bossActive        = false;
     this._stopCinematicSwish = null;
   }
 
@@ -1096,12 +1103,16 @@ export class AudioManager {
     fxBus().gain.value = fxVol * FX_VOLUME_MULT;
     gameState.isMuted = musicVol === 0 && fxVol === 0;
 
-    this._bgm.prepare();
+    // Pre-create audio elements so they're ready before user interaction ends
+    this._bgm._ensure();
+    this._bossBgm._ensure();
 
     // BGM starts only when player presses "Launch into Space"
     eventBus.once(Events.GAME_LAUNCHED, () => {
-      this._bgm.start();
-      this._bgm.setMuted(!!gameState.isMuted);
+      if (!gameState.isMuted) {
+        this._bgm.play(3);          // normal BGM fades in over 3 s
+        this._bossBgm.start();      // start element silently so it's ready
+      }
       this._ambience.start();
     });
 
@@ -1130,7 +1141,39 @@ export class AudioManager {
     eventBus.on(Events.BALL_HOLED,  silencePwrDrone);
 
     eventBus.on(Events.GAME_COMPLETE, () => sfx.gameComplete());
-    eventBus.on(Events.WORLDEATER_WARNING, () => sfx.worldEaterRoar());
+
+    // ── Boss music switch ─────────────────────────────────────
+    // Normal BGM: audible on holes 1-9. Boss BGM: audible on hole 10 / BOSS room.
+    // Both elements run simultaneously; we control which is heard via gain only.
+
+    const startBossMusic = () => {
+      if (this._bossActive) return;
+      this._bossActive = true;
+      sfx.worldEaterRoar();
+      if (!gameState.isMuted) {
+        this._bgm.silence(0.5);         // fade out normal BGM quickly
+        this._bossBgm.start(true);      // rewind to start
+        this._bossBgm.play(1.5);        // fade boss BGM in
+      }
+    };
+
+    const stopBossMusic = () => {
+      if (!this._bossActive) return;
+      this._bossActive = false;
+      this._bossBgm.silence(0.5);
+      if (!gameState.isMuted) this._bgm.play(2);   // fade normal BGM back in
+    };
+
+    eventBus.on(Events.WORLDEATER_WARNING, startBossMusic);
+    eventBus.on(Events.BALL_HOLED,          stopBossMusic);
+    eventBus.on(Events.WORLDEATER_DEFEATED, stopBossMusic);
+    // Safety: if player skips/exits boss hole, reset music state
+    eventBus.on(Events.HOLE_LOADED, () => {
+      if (this._bossActive) {
+        this._bossActive = false;
+        this._bossBgm.silence(0.3);
+      }
+    });
     eventBus.on(Events.WORLDEATER_WEAKSPOT_HIT, () => sfx.worldEaterWeakspot());
     eventBus.on(Events.WORLDEATER_OPENED, () => sfx.worldEaterOpened());
     eventBus.on(Events.WORLDEATER_CHOMP, () => sfx.worldEaterChomp());
@@ -1161,11 +1204,18 @@ export class AudioManager {
     // Mute toggle — flip gameState flag, update BGM gain
     eventBus.on(Events.AUDIO_MUTE_TOGGLE, () => {
       gameState.isMuted = !gameState.isMuted;
-      this._bgm.setMuted(gameState.isMuted);
       if (gameState.isMuted) {
+        this._bgm.setMuted(true);
+        this._bossBgm.setMuted(true);
         this._bhDrone.silence();
         this._ambience.silence();
       } else {
+        // Restore whichever track should be audible
+        if (this._bossActive) {
+          this._bossBgm.play(0.3);
+        } else {
+          this._bgm.play(0.3);
+        }
         this._ambience.start();
       }
     });
@@ -1187,7 +1237,10 @@ export class AudioManager {
     localStorage.setItem('musicVolume', String(clamped));
     if (!this._wired) return;
     musicBus().gain.value = clamped;
-    this._bgm.setMuted(clamped === 0);
+    if (clamped === 0) {
+      this._bgm.setMuted(true);
+      this._bossBgm.setMuted(true);
+    }
     gameState.isMuted = musicBus().gain.value === 0 && fxBus().gain.value === 0;
   }
 

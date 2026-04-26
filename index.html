@@ -347,11 +347,10 @@
       display: none;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
+      justify-content: flex-start;
       pointer-events: auto;
       overflow-y: auto;
-      padding-left: clamp(12px, 2vw, 24px);
-      padding-right: clamp(12px, 2vw, 24px);
+      padding: clamp(24px, 4vh, 48px) clamp(12px, 2vw, 24px) clamp(24px, 4vh, 48px);
     }
     #scoreboard-overlay::before {
       content: '';
@@ -409,19 +408,26 @@
       height: 1px;
       background: linear-gradient(90deg, transparent, rgba(121, 88, 255, 0.9), transparent);
     }
-    #scoreboard-table {
+    #scoreboard-table-wrap {
       position: relative;
       z-index: 1;
       width: min(960px, calc(100vw - clamp(16px, 6vw, 72px)));
+      margin-bottom: clamp(10px, 2vw, 20px);
+      overflow-x: auto;
+      border-radius: clamp(14px, 2.2vw, 22px);
+      box-shadow: 0 24px 80px rgba(3, 2, 10, 0.45), inset 0 0 0 1px rgba(255,255,255,0.03);
+    }
+    #scoreboard-table {
+      position: relative;
+      width: 100%;
+      min-width: 480px;
       color: #fff;
       font-size: clamp(6.5px, 1.05vw, 9px);
       border-collapse: collapse;
-      margin-bottom: clamp(10px, 2vw, 20px);
       background: linear-gradient(180deg, rgba(15, 9, 35, 0.84), rgba(8, 5, 20, 0.78));
       border: 1px solid rgba(122, 76, 255, 0.42);
       border-radius: clamp(14px, 2.2vw, 22px);
       overflow: hidden;
-      box-shadow: 0 24px 80px rgba(3, 2, 10, 0.45), inset 0 0 0 1px rgba(255,255,255,0.03);
       backdrop-filter: blur(14px);
       -webkit-backdrop-filter: blur(14px);
     }
@@ -791,10 +797,12 @@
     <div id="scoreboard-overlay" class="overlay">
       <h2 id="scoreboard-title">HOLE COMPLETE</h2>
       <div id="scoreboard-subtitle">EAGLE!</div>
-      <table id="scoreboard-table">
-        <thead><tr id="scoreboard-header"></tr></thead>
-        <tbody id="scoreboard-body"></tbody>
-      </table>
+      <div id="scoreboard-table-wrap">
+        <table id="scoreboard-table">
+          <thead><tr id="scoreboard-header"></tr></thead>
+          <tbody id="scoreboard-body"></tbody>
+        </table>
+      </div>
       <button id="btn-next-hole">CONTINUE</button>
     </div>
     <div id="penalty-msg">OUT OF BOUNDS! +2 STROKES</div>

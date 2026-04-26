@@ -16,7 +16,6 @@ const _toCup = new Vector3();
 const _biasDir = new Vector3();
 const _surfaceDir = new Vector3();
 const _gravityFocus = new Vector3();
-const _stickNormal = new Vector3();
 const _bounceNormal = new Vector3();
 const _toWormhole = new Vector3();
 
@@ -50,6 +49,17 @@ export function computeGravityForce(position, planets) {
     force.addScaledVector(_diff.normalize(), strength);
   }
   return force;
+}
+
+export function shouldZeroGravityStick(ball, planet, margin = 0.5) {
+  const dist = ball.position.distanceTo(planet.position);
+  if (dist >= planet.radius + BALL.RADIUS + margin) return null;
+
+  _normal.subVectors(ball.position, planet.position).normalize();
+  const outwardSpeed = ball.velocity.dot(_normal);
+  if (outwardSpeed > PHYSICS.ZERO_G_SURFACE_ESCAPE_SPEED) return null;
+
+  return _normal.clone();
 }
 
 /**
@@ -232,10 +242,9 @@ export function simulateTrajectory(startPos, startVel, planets, allPlanets, step
     if (zeroGravity) {
       let stuck = false;
       for (const planet of simAllPlanets) {
-        const dist = ball.position.distanceTo(planet.position);
-        if (dist < planet.radius + BALL.RADIUS + 0.5) {
-          _stickNormal.subVectors(ball.position, planet.position).normalize();
-          ball.position.copy(planet.position).addScaledVector(_stickNormal, planet.radius + BALL.RADIUS);
+        const stickNormal = shouldZeroGravityStick(ball, planet);
+        if (stickNormal) {
+          ball.position.copy(planet.position).addScaledVector(stickNormal, planet.radius + BALL.RADIUS);
           ball.velocity.set(0, 0, 0);
           stuck = true;
           break;

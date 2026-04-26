@@ -14,7 +14,7 @@ import { eventBus, Events } from '../core/EventBus.js';
 import { gameState } from '../core/GameState.js';
 import { CAMERA, HOLE, AIM, PHYSICS, BALL, ORBIT, PLANET, WORLDEATER } from '../core/Constants.js';
 import { generateHole } from '../systems/HoleGenerator.js';
-import { stepBall } from '../systems/GravitySystem.js';
+import { stepBall, shouldZeroGravityStick } from '../systems/GravitySystem.js';
 import { TrajectoryPreview } from '../systems/TrajectoryPreview.js';
 import { Planet } from '../objects/Planet.js';
 // import { EarthPlanet } from '../objects/EarthPlanet.js';
@@ -1387,29 +1387,46 @@ export class HoleScene {
 
         result = stepBall(this.ball, physicsPlanets, AIM.TRAJECTORY_DT, combinedGravityScale, orbitPlanet);
 
-        // Black-hole cup pull is part of the deterministic flight path, so it
-        // also has to run at the same fixed timestep as simulateTrajectory().
-        if (this.cup && cupUnlocked) {
-          const cupDist = this.ball.position.distanceTo(this.cup.position);
-          if (cupDist < HOLE.BLACK_HOLE_PULL_RADIUS && cupDist > HOLE.CUP_RADIUS) {
-            const t = 1 - cupDist / HOLE.BLACK_HOLE_PULL_RADIUS;
-            const distSq = Math.max(cupDist * cupDist, HOLE.CUP_RADIUS * HOLE.CUP_RADIUS);
-            const strength = HOLE.BLACK_HOLE_GRAVITY * t * t / distSq;
-            const toCup = new Vector3().subVectors(this.cup.position, this.ball.position).normalize();
-            this.ball.velocity.addScaledVector(toCup, strength * AIM.TRAJECTORY_DT * 60);
+        // ZERO_GRAVITY sticky: only stick when drifting into/resting on a planet.
+        // Shots moving outward must be allowed to leave the surface.
+        let zeroGStuck = false;
+        if (this.serverEvents.gravityScale === 0.0) {
+          for (const planet of this.planets) {
+            const stickNormal = shouldZeroGravityStick(this.ball, planet);
+            if (stickNormal) {
+              this.ball.position.copy(planet.position).addScaledVector(stickNormal, planet.radius + BALL.RADIUS);
+              this.ball.velocity.set(0, 0, 0);
+              zeroGStuck = true;
+              break;
+            }
           }
         }
 
-        // Wormhole suction changes velocity, so keep it fixed-step too. Visual
-        // debris deflection remains frame-based below because the preview does
-        // not include debris collisions.
-        for (const worm of this.wormholes) {
-          const distToWorm = this.ball.position.distanceTo(worm.position);
-          if (distToWorm < WORMHOLE_CAPTURE_RADIUS) {
-            worm.applySuction(this.ball, AIM.TRAJECTORY_DT);
-            if (worm.checkBallEntered(this.ball.position)) {
-              enteredWormhole = worm;
-              break;
+        if (!zeroGStuck) {
+          // Black-hole cup pull is part of the deterministic flight path, so it
+          // also has to run at the same fixed timestep as simulateTrajectory().
+          if (this.cup && cupUnlocked) {
+            const cupDist = this.ball.position.distanceTo(this.cup.position);
+            if (cupDist < HOLE.BLACK_HOLE_PULL_RADIUS && cupDist > HOLE.CUP_RADIUS) {
+              const t = 1 - cupDist / HOLE.BLACK_HOLE_PULL_RADIUS;
+              const distSq = Math.max(cupDist * cupDist, HOLE.CUP_RADIUS * HOLE.CUP_RADIUS);
+              const strength = HOLE.BLACK_HOLE_GRAVITY * t * t / distSq;
+              const toCup = new Vector3().subVectors(this.cup.position, this.ball.position).normalize();
+              this.ball.velocity.addScaledVector(toCup, strength * AIM.TRAJECTORY_DT * 60);
+            }
+          }
+
+          // Wormhole suction changes velocity, so keep it fixed-step too. Visual
+          // debris deflection remains frame-based below because the preview does
+          // not include debris collisions.
+          for (const worm of this.wormholes) {
+            const distToWorm = this.ball.position.distanceTo(worm.position);
+            if (distToWorm < WORMHOLE_CAPTURE_RADIUS) {
+              worm.applySuction(this.ball, AIM.TRAJECTORY_DT);
+              if (worm.checkBallEntered(this.ball.position)) {
+                enteredWormhole = worm;
+                break;
+              }
             }
           }
         }
@@ -1436,19 +1453,6 @@ export class HoleScene {
         this.ball.syncMesh();
         this._onWormholeEnter(enteredWormhole);
         return;
-      }
-
-      // ZERO_GRAVITY sticky: ball touches a planet → kill velocity, stay on surface
-      if (this.serverEvents.gravityScale === 0.0) {
-        for (const planet of this.planets) {
-          const dist = this.ball.position.distanceTo(planet.position);
-          if (dist < planet.radius + BALL.RADIUS + 0.5) {
-            const normal = this.ball.position.clone().sub(planet.position).normalize();
-            this.ball.position.copy(planet.position).addScaledVector(normal, planet.radius + BALL.RADIUS);
-            this.ball.velocity.set(0, 0, 0);
-            break;
-          }
-        }
       }
 
       this.ball.syncMesh();

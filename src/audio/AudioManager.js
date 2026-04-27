@@ -511,6 +511,18 @@ const sfx = {
     oneShot({ freq: 820, freqEnd: 2100, type: 'sine', volume: 0.08, attack: 0.006, decay: 0.24, delay: 0.03 });
     noiseBurst({ duration: 0.05, volume: 0.07, cutoff: 2800 });
   },
+
+  // UI sounds — buttons
+  uiClick() {
+    oneShot({ freq: 1100, freqEnd: 700, type: 'triangle', volume: 0.18, attack: 0.001, decay: 0.06,
+      filterType: 'bandpass', filterFreq: 1200, filterQ: 3 });
+    noiseBurst({ duration: 0.018, volume: 0.09, cutoff: 3500 });
+  },
+
+  uiHover() {
+    oneShot({ freq: 680, freqEnd: 820, type: 'sine', volume: 0.055, attack: 0.003, decay: 0.07,
+      filterType: 'highpass', filterFreq: 500, filterQ: 1 });
+  },
 };
 
 // ── Power charge drone ────────────────────────────────────
@@ -1043,6 +1055,9 @@ class FileBGM {
   // Audible: ramp up to full volume.
   play(fadeIn = 1) {
     this.start();
+    // If the element was paused by setMuted(true), start() won't resume it
+    // because _started is already true — so we resume explicitly here.
+    if (this._el && this._el.paused) this._el.play().catch(() => {});
     if (!gameState.isMuted) this.setGain(0.52, fadeIn);
   }
 
@@ -1240,6 +1255,13 @@ export class AudioManager {
     if (clamped === 0) {
       this._bgm.setMuted(true);
       this._bossBgm.setMuted(true);
+    } else {
+      // Resume whichever track was paused when volume hit 0.
+      // setMuted(true) both paused the element AND ramped its own gain node to 0,
+      // so we must restore the internal gain and unpause the element.
+      const track = this._bossActive ? this._bossBgm : this._bgm;
+      track.setGain(0.52, 0.3);
+      if (track._el && track._el.paused) track._el.play().catch(() => {});
     }
     gameState.isMuted = musicBus().gain.value === 0 && fxBus().gain.value === 0;
   }
@@ -1294,3 +1316,27 @@ export class AudioManager {
 }
 
 export const audioManager = new AudioManager();
+
+// ── Global button sounds ───────────────────────────────────
+// Single delegated listener on document — catches every button/[role=button]
+// regardless of when it was injected into the DOM.
+
+let _lastHovered = null;
+
+document.addEventListener('pointerover', (e) => {
+  const btn = e.target.closest('button, [role="button"], .cg-quick-btn, .score-share-btn');
+  if (!btn || btn === _lastHovered) return;
+  _lastHovered = btn;
+  sfx.uiHover();
+}, { passive: true });
+
+document.addEventListener('pointerout', (e) => {
+  const btn = e.target.closest('button, [role="button"], .cg-quick-btn, .score-share-btn');
+  if (btn && btn === _lastHovered) _lastHovered = null;
+}, { passive: true });
+
+document.addEventListener('pointerdown', (e) => {
+  if (e.target.closest('button, [role="button"], .cg-quick-btn, .score-share-btn')) {
+    sfx.uiClick();
+  }
+}, { passive: true });

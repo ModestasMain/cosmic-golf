@@ -217,18 +217,18 @@ export class EventHUD {
     return el;
   }
 
-  _showPopup(type, phase) {
+  _showPopup(type) {
     if (this._bossMode) return;
+    if (!type) return;
     if (this._popupTimeout) { clearTimeout(this._popupTimeout); this._popupTimeout = null; }
 
-    const isWarning = phase === 'warning';
     const name  = EVENT_DISPLAY[type] ?? type;
     const color = EVENT_COLOR[type]   ?? '#aaddff';
 
     this._popupName.textContent      = name;
     this._popupName.style.color      = color;
     this._popupName.style.textShadow = `0 0 24px ${color}99, 0 0 55px ${color}44`;
-    this._popupSub.textContent       = isWarning ? 'INCOMING' : '';
+    this._popupSub.textContent       = '';
 
     // Pop in
     this._popup.style.transition = 'none';
@@ -241,7 +241,7 @@ export class EventHUD {
       this._popup.style.opacity    = '1';
     }));
 
-    const holdMs = isWarning ? 2200 : 2000;
+    const holdMs = 2000;
     this._popupTimeout = setTimeout(() => {
       this._popup.style.transition = 'opacity 0.35s ease, transform 0.35s ease';
       this._popup.style.transform  = 'translate(-50%, -50%) scale(1.08)';
@@ -266,9 +266,6 @@ export class EventHUD {
       if (this._bossMode) return;
       if (phase === 'start') {
         this._triggerSlotMachine(type);
-        this._showPopup(type, 'start');
-      } else if (phase === 'warning') {
-        this._showPopup(type, 'warning');
       } else if (phase === 'end') {
         this._syncServerEventDisplay();
       }
@@ -373,6 +370,7 @@ export class EventHUD {
     if (idx >= schedule.length) {
       this._spinning = false;
       this._syncServerEventDisplay();
+      this._showPopup(this._currentType, 'start');
       return;
     }
 

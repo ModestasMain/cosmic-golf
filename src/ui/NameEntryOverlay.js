@@ -1267,21 +1267,25 @@ export class NameEntryOverlay {
     this._leaderboardLoading = true;
     this._leaderboardError = false;
     try {
-      const res = await fetch(`https://${WORKER_HOST}/global-leaderboard`);
+      const today = new Date().toISOString().slice(0, 10);
+      const res = await fetch(`https://${WORKER_HOST}/api/daily/${today}`);
       if (!res.ok) throw new Error(`Leaderboard fetch failed: ${res.status}`);
-      const { entries, stats } = await res.json();
+      const { entries } = await res.json();
       if (Array.isArray(entries)) {
         this._leaderboardEntries = entries;
         if (this._leaderboardEl) this._renderLeaderboards(this._leaderboardEl);
       }
-      if (!stats || typeof stats !== 'object') return;
-      this._statsData = {
-        timesPlayed: Math.max(0, Math.round(stats.timesPlayed ?? 0)),
-        uniquePlayers: Math.max(0, Math.round(stats.uniquePlayers ?? 0)),
-        holeInOnes: Math.max(0, Math.round(stats.holeInOnes ?? 0)),
-        bossDefeats: Math.max(0, Math.round(stats.bossDefeats ?? 0)),
-      };
-      if (this._statsEl) this._renderStats(this._statsEl);
+      // Also fetch global stats separately for the launch tab counters
+      fetch(`https://${WORKER_HOST}/global-leaderboard`).then(r => r.ok ? r.json() : null).then(data => {
+        if (!data?.stats || typeof data.stats !== 'object') return;
+        this._statsData = {
+          timesPlayed: Math.max(0, Math.round(data.stats.timesPlayed ?? 0)),
+          uniquePlayers: Math.max(0, Math.round(data.stats.uniquePlayers ?? 0)),
+          holeInOnes: Math.max(0, Math.round(data.stats.holeInOnes ?? 0)),
+          bossDefeats: Math.max(0, Math.round(data.stats.bossDefeats ?? 0)),
+        };
+        if (this._statsEl) this._renderStats(this._statsEl);
+      }).catch(() => {});
     } catch {
       this._leaderboardError = true;
       if (this._leaderboardEl) this._renderLeaderboards(this._leaderboardEl);
@@ -1298,9 +1302,9 @@ export class NameEntryOverlay {
     header.innerHTML = `
       <div>
         <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:5px;color:rgba(255,255,255,0.4);margin-bottom:8px;">VOID RUN RECORDS</div>
-        <div style="font-family:'Orbitron',sans-serif;font-size:24px;font-weight:700;letter-spacing:2px;color:#fff;">LEADERBOARDS</div>
+        <div style="font-family:'Orbitron',sans-serif;font-size:24px;font-weight:700;letter-spacing:2px;color:#fff;">DAILY RUN LEADERBOARDS</div>
       </div>
-      <div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:3px;color:rgba(160,210,255,0.62);text-align:right;">NORMAL GAME<br><span style="color:rgba(255,255,255,0.34);">GLOBAL TOP 10</span></div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:3px;color:rgba(160,210,255,0.62);text-align:right;">DAILY CHALLENGE<br><span style="color:rgba(255,255,255,0.34);">TODAY'S TOP 10</span></div>
     `;
     container.appendChild(header);
 
@@ -1338,21 +1342,17 @@ export class NameEntryOverlay {
       return;
     }
 
-    let header = '<th>RANK</th><th style="text-align:left;">PLAYER</th>';
-    for (let h = 0; h < 10; h++) header += `<th>H${h + 1}</th>`;
-    header += '<th>STROKES</th><th>TIME</th>';
+    const header = '<th>RANK</th><th style="text-align:left;">PLAYER</th><th>STROKES</th><th>TIME</th>';
 
     const rows = entries.slice(0, 10).map((entry, index) => {
       const rank = index + 1;
       const rankBadge = this._frontRankBadge(rank);
-      const holes = Array.from({ length: 10 }, (_, h) => `<td style="color:rgba(224,216,255,0.72);">${entry.strokes?.[h] ?? '—'}</td>`).join('');
       return `
         <tr>
           <td>${rankBadge}</td>
           <td style="text-align:left;font-weight:700;letter-spacing:0.02em;color:#f7f4ff;">${this._escapeHTML(entry.name || 'ANONYMOUS')}</td>
-          ${holes}
-          <td style="font-weight:800;color:#fff;">${entry.totalStrokes ?? '—'}</td>
-          <td style="color:rgba(160,210,255,0.86);">${leaderboardStore.formatTime(entry.totalTime)}</td>
+          <td style="font-weight:800;color:#fff;">${entry.strokes ?? '—'}</td>
+          <td style="color:rgba(160,210,255,0.86);">${leaderboardStore.formatTime(entry.time)}</td>
         </tr>
       `;
     }).join('');

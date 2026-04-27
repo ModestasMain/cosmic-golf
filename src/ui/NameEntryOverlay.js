@@ -737,7 +737,7 @@ export class NameEntryOverlay {
         #cg-private-room[open] summary::after { transform: rotate(180deg); }
         @media (max-width: 680px) {
           #cg-callsign-pill { display: none !important; }
-          #cg-launch-title { font-size: clamp(28px, 11vw, 46px) !important; }
+          #cg-launch-title { width: clamp(140px, 44vw, 220px) !important; }
           #cg-launch-card { padding-left: 14px !important; padding-right: 14px !important; }
           #cg-launch-stats { display: none !important; }
           #cg-nav { padding-left: 16px !important; padding-right: 16px !important; }
@@ -746,10 +746,9 @@ export class NameEntryOverlay {
           #cg-daily-btn { flex-wrap: wrap !important; }
         }
         @media (max-width: 480px) {
-          #cg-nav-logo span { display: none; }
-          #cg-tabs { gap: 10px !important; }
+#cg-tabs { gap: 10px !important; }
           #cg-tabs button { font-size: 9px !important; letter-spacing: 1.5px !important; }
-          #cg-launch-title { font-size: clamp(24px, 9vw, 38px) !important; }
+          #cg-launch-title { width: clamp(130px, 38vw, 200px) !important; }
           #cg-launch-card { padding-left: 12px !important; padding-right: 12px !important; }
           #cg-content { padding-left: 12px !important; padding-right: 12px !important; }
           .cg-quick-btn { flex: 1 1 auto !important; text-align: center !important; }
@@ -758,7 +757,7 @@ export class NameEntryOverlay {
           #cg-nav { padding-left: 10px !important; padding-right: 10px !important; }
           #cg-content { padding-left: 10px !important; padding-right: 10px !important; }
           #cg-launch-card { padding-left: 10px !important; padding-right: 10px !important; }
-          #cg-launch-title { font-size: clamp(22px, 8vw, 32px) !important; }
+          #cg-launch-title { width: clamp(120px, 34vw, 180px) !important; }
         }
       `;
       document.head.appendChild(style);
@@ -785,16 +784,8 @@ export class NameEntryOverlay {
     // Logo
     const logo = document.createElement('div');
     logo.id = 'cg-nav-logo';
-    logo.style.cssText = 'display:flex;align-items:center;gap:10px;';
-    logo.innerHTML = `
-      <svg width="28" height="28" viewBox="0 0 28 28">
-        <circle cx="14" cy="14" r="11" fill="none" stroke="#AA00FF" stroke-width="1.5"/>
-        <circle cx="14" cy="14" r="5" fill="#AA00FF" opacity="0.6"/>
-        <circle cx="14" cy="5" r="2.5" fill="#00DDFF"/>
-        <ellipse cx="14" cy="15" rx="18" ry="5" fill="none" stroke="#AA00FF" stroke-width="1" opacity="0.4" transform="rotate(-20,14,15)"/>
-      </svg>
-      <span style="font-family:'Orbitron',sans-serif;font-size:13px;font-weight:700;letter-spacing:3px;color:#fff;">COSMIC<span style="color:#AA00FF;">·</span>GOLF</span>
-    `;
+    logo.style.cssText = 'display:flex;align-items:center;';
+    logo.innerHTML = `<img src="/assets/logo.png" alt="Cosmic Golf" style="height:44px;width:auto;object-fit:contain;filter:drop-shadow(0 0 8px rgba(170,0,255,0.4));">`;
 
     // Tabs (center column — always centered regardless of pill visibility)
     const tabsWrap = document.createElement('div');
@@ -926,15 +917,7 @@ export class NameEntryOverlay {
     const titleWrap = document.createElement('div');
     titleWrap.style.cssText = 'text-align:center;margin-bottom:8px;display:flex;flex-direction:column;align-items:center;gap:6px;';
     titleWrap.innerHTML = `
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">
-        <svg width="20" height="20" viewBox="0 0 22 22" style="flex-shrink:0;">
-          <circle cx="11" cy="11" r="8" fill="none" stroke="#AA00FF" stroke-width="1.5"/>
-          <circle cx="11" cy="11" r="4" fill="#AA00FF" opacity="0.5"/>
-          <circle cx="11" cy="4" r="2" fill="#00DDFF"/>
-        </svg>
-        <span style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:5px;color:rgba(255,255,255,0.45);">Multiplayer · Gravity · Mini Golf</span>
-      </div>
-      <div id="cg-launch-title" style="font-family:'Orbitron',sans-serif;font-size:clamp(38px,6vw,64px);font-weight:900;letter-spacing:6px;text-align:center;line-height:1;background:linear-gradient(135deg,#fff 0%,#FF00CC 40%,#AA00FF 70%,#00DDFF 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:4px;">COSMIC<br/>GOLF</div>
+      <img src="/assets/logo.png" alt="Cosmic Golf" id="cg-launch-title" style="width:clamp(180px,38vw,280px);height:auto;object-fit:contain;filter:drop-shadow(0 0 32px rgba(170,0,255,0.45)) drop-shadow(0 0 12px rgba(0,221,255,0.25));margin-bottom:4px;">
       <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:5px;color:rgba(255,255,255,0.3);margin-bottom:22px;">── SPACE EDITION ──</div>
     `;
     frag.appendChild(titleWrap);

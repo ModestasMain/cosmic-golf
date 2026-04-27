@@ -55,6 +55,7 @@ export class ServerEventSystem {
     // Warning
     this._warningShown    = false;
     this._nextEventType   = null;
+    this._initialized     = false; // true after the first update tick
   }
 
   get isStatic() { return !this.planetsMoving; }
@@ -118,11 +119,15 @@ export class ServerEventSystem {
         // new one — protects against tab-backgrounded skips where _endEvent
         // never ran for the previous cycle's event.
         if (this._activeType) this._endEvent();
-        this._startEvent(this._pickType(cycleIdx));
+        // On the very first tick, we may be joining mid-event — sync state
+        // silently so the HUD shows the event name without spinning or popping up.
+        this._startEvent(this._pickType(cycleIdx), !this._initialized);
       } else {
         this._endEvent();
       }
     }
+
+    this._initialized = true;
 
     // Defensive: if we're not in the event window, no event effects may persist.
     // Catches any state desync (visibility, hot reload, missed phase change).
@@ -159,11 +164,12 @@ export class ServerEventSystem {
     return SERVER_EVENTS.TYPES[seed % SERVER_EVENTS.TYPES.length];
   }
 
-  _startEvent(type) {
+  _startEvent(type, silent = false) {
     this._activeType = type;
     this._activeT    = 0;
 
-    eventBus.emit(Events.SERVER_EVENT, { type, phase: 'start' });
+    // 'sync' = joining mid-event; HUD shows the name without spin or popup.
+    eventBus.emit(Events.SERVER_EVENT, { type, phase: silent ? 'sync' : 'start' });
 
     if (type === 'ZERO_GRAVITY') {
       this.gravityScale = 0.0;

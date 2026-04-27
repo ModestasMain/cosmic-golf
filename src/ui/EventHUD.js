@@ -266,6 +266,12 @@ export class EventHUD {
       if (this._bossMode) return;
       if (phase === 'start') {
         this._triggerSlotMachine(type);
+      } else if (phase === 'sync') {
+        // Joined mid-event — show the current event name silently, no spin or popup.
+        this._firstEvent = false;
+        this._currentType = type;
+        this._lastDisplayMode = 'active';
+        this._setEventName(type, 'CURRENT EVENT');
       } else if (phase === 'end') {
         this._syncServerEventDisplay();
       }

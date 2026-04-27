@@ -682,6 +682,7 @@ class Game {
       return;
     }
 
+    document.getElementById('game-ui').style.visibility = 'visible';
     this.nameEntry.show().then(({ name, mode, roomCode }) => {
       gameState.players[0].name = name;
       if (mode === 'daily') {

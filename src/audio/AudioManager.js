@@ -23,6 +23,26 @@ function ctx() {
 let _master = null;
 let _musicBus = null;
 let _fxBus = null;
+let _announcerBus = null;
+let _announcerNodes = null;
+
+const DEFAULT_ANNOUNCER_TUNING = {
+  busVolume: 0.64,
+  clipVolume: 1.5,
+  clipDelay: 0.12,
+  oobDelay: 0.08,
+  playbackRate: 0.91,
+  highpassFreq: 120,
+  presenceFreq: 2420,
+  presenceGain: 2.8,
+  delayTime: 0.092,
+  feedback: 0,
+  echoVolume: 0.77,
+  compressorThreshold: -18,
+  compressorRatio: 4,
+};
+
+const announcerTuning = { ...DEFAULT_ANNOUNCER_TUNING };
 
 function master() {
   if (!_master) {
@@ -49,6 +69,153 @@ function fxBus() {
     _fxBus.connect(master());
   }
   return _fxBus;
+}
+
+function announcerBus() {
+  if (!_announcerBus) {
+    const c = ctx();
+    _announcerBus = c.createGain();
+    _announcerBus.gain.value = announcerTuning.busVolume;
+
+    const compressor = c.createDynamicsCompressor();
+    compressor.threshold.value = announcerTuning.compressorThreshold;
+    compressor.knee.value = 14;
+    compressor.ratio.value = announcerTuning.compressorRatio;
+    compressor.attack.value = 0.004;
+    compressor.release.value = 0.18;
+
+    const delay = c.createDelay(0.35);
+    delay.delayTime.value = announcerTuning.delayTime;
+    const feedback = c.createGain();
+    feedback.gain.value = announcerTuning.feedback;
+    const echoGain = c.createGain();
+    echoGain.gain.value = announcerTuning.echoVolume;
+
+    _announcerBus.connect(compressor);
+    compressor.connect(fxBus());
+    compressor.connect(delay);
+    delay.connect(feedback);
+    feedback.connect(delay);
+    delay.connect(echoGain);
+    echoGain.connect(fxBus());
+
+    _announcerNodes = { bus: _announcerBus, compressor, delay, feedback, echoGain };
+  }
+  return _announcerBus;
+}
+
+function applyAnnouncerTuning() {
+  if (!_announcerNodes) return;
+  const c = ctx();
+  const now = c.currentTime;
+  _announcerNodes.bus.gain.setTargetAtTime(announcerTuning.busVolume, now, 0.02);
+  _announcerNodes.delay.delayTime.setTargetAtTime(announcerTuning.delayTime, now, 0.02);
+  _announcerNodes.feedback.gain.setTargetAtTime(announcerTuning.feedback, now, 0.02);
+  _announcerNodes.echoGain.gain.setTargetAtTime(announcerTuning.echoVolume, now, 0.02);
+  _announcerNodes.compressor.threshold.setTargetAtTime(announcerTuning.compressorThreshold, now, 0.02);
+  _announcerNodes.compressor.ratio.setTargetAtTime(announcerTuning.compressorRatio, now, 0.02);
+}
+
+const ANNOUNCER_CLIPS = {
+  ace: '/audio/announcer/hole-in-one.mp3',
+  eagle: '/audio/announcer/eagle.mp3',
+  birdie: '/audio/announcer/birdie.mp3',
+  par: '/audio/announcer/par.mp3',
+  bogey: '/audio/announcer/bogey.mp3',
+  double: '/audio/announcer/double-bogey.mp3',
+  disaster: '/audio/announcer/triple-bogey.mp3',
+  oob: '/audio/announcer/out-of-bounds.mp3',
+};
+
+function announcerCueForScore(strokes, par = 4) {
+  if (!Number.isFinite(strokes)) return null;
+  if (strokes === 1) return 'ace';
+  if (strokes <= par - 2) return 'eagle';
+  if (strokes === par - 1) return 'birdie';
+  if (strokes === par) return 'par';
+  if (strokes === par + 1) return 'bogey';
+  if (strokes === par + 2) return 'double';
+  return 'disaster';
+}
+
+class AnnouncerClips {
+  constructor(clips) {
+    this._clips = clips;
+    this._buffers = new Map();
+    this._loading = new Map();
+    this._lastPlayed = new Map();
+  }
+
+  preload() {
+    for (const key of Object.keys(this._clips)) this._load(key);
+  }
+
+  async _load(key) {
+    if (!this._clips[key]) return null;
+    if (this._buffers.has(key)) return this._buffers.get(key);
+    if (this._loading.has(key)) return this._loading.get(key);
+
+    const load = fetch(this._clips[key])
+      .then((res) => {
+        if (!res.ok) throw new Error(`Failed to load announcer clip: ${this._clips[key]}`);
+        return res.arrayBuffer();
+      })
+      .then((data) => ctx().decodeAudioData(data))
+      .then((buffer) => {
+        this._buffers.set(key, buffer);
+        this._loading.delete(key);
+        return buffer;
+      })
+      .catch((err) => {
+        this._loading.delete(key);
+        console.warn(err);
+        return null;
+      });
+
+    this._loading.set(key, load);
+    return load;
+  }
+
+  async play(key, { delay = announcerTuning.clipDelay, volume = announcerTuning.clipVolume } = {}) {
+    if (!key || gameState.isMuted) return;
+
+    const c = ctx();
+    const last = this._lastPlayed.get(key) ?? -Infinity;
+    if (c.currentTime - last < 0.45) return;
+
+    const buffer = await this._load(key);
+    if (!buffer || gameState.isMuted) return;
+
+    const startAt = c.currentTime + delay;
+    const src = c.createBufferSource();
+    const gain = c.createGain();
+    const highpass = c.createBiquadFilter();
+    const presence = c.createBiquadFilter();
+
+    src.buffer = buffer;
+    src.playbackRate.setValueAtTime(announcerTuning.playbackRate, startAt);
+    highpass.type = 'highpass';
+    highpass.frequency.value = announcerTuning.highpassFreq;
+    presence.type = 'peaking';
+    presence.frequency.value = announcerTuning.presenceFreq;
+    presence.Q.value = 1;
+    presence.gain.value = announcerTuning.presenceGain;
+
+    const duration = buffer.duration / Math.max(0.25, announcerTuning.playbackRate);
+    gain.gain.setValueAtTime(0.0001, startAt);
+    gain.gain.linearRampToValueAtTime(volume, startAt + 0.025);
+    gain.gain.setValueAtTime(volume, startAt + Math.max(0.03, duration - 0.08));
+    gain.gain.linearRampToValueAtTime(0.0001, startAt + duration + 0.04);
+
+    src.connect(highpass);
+    highpass.connect(presence);
+    presence.connect(gain);
+    gain.connect(announcerBus());
+
+    src.start(startAt);
+    src.stop(startAt + duration + 0.08);
+    this._lastPlayed.set(key, startAt);
+  }
 }
 
 // ── Utility: one-shot oscillator ──────────────────────────
@@ -1092,6 +1259,7 @@ export class AudioManager {
     this._ambience          = new SpaceAmbience();
     this._bgm               = new FileBGM('/audio/cosmic-golf-bgm.mp3');
     this._bossBgm           = new FileBGM('/audio/cosmic-boss-encounter.mp3');
+    this._announcer         = new AnnouncerClips(ANNOUNCER_CLIPS);
     this._bossActive        = false;
     this._stopCinematicSwish = null;
   }
@@ -1121,6 +1289,8 @@ export class AudioManager {
     // Pre-create audio elements so they're ready before user interaction ends
     this._bgm._ensure();
     this._bossBgm._ensure();
+    announcerBus();
+    this._announcer.preload();
 
     // BGM starts only when player presses "Launch into Space"
     eventBus.once(Events.GAME_LAUNCHED, () => {
@@ -1137,9 +1307,15 @@ export class AudioManager {
 
     eventBus.on(Events.BALL_BOUNCED, ({ planetType, speed } = {}) => sfx.bounce(planetType, speed));
 
-    eventBus.on(Events.BALL_HOLED, () => sfx.holed());
+    eventBus.on(Events.BALL_HOLED, ({ strokes } = {}) => {
+      sfx.holed();
+      this._announcer.play(announcerCueForScore(strokes));
+    });
 
-    eventBus.on(Events.BALL_OUT_OF_BOUNDS, () => sfx.oob());
+    eventBus.on(Events.BALL_OUT_OF_BOUNDS, () => {
+      sfx.oob();
+      this._announcer.play('oob', { delay: announcerTuning.oobDelay, volume: announcerTuning.clipVolume });
+    });
 
     eventBus.on(Events.AIM_START, () => sfx.aimStart());
 
@@ -1312,6 +1488,42 @@ export class AudioManager {
 
   setAmbienceContext(context) {
     this._ambience.setContext(context);
+  }
+
+  getAnnouncerTuning() {
+    return announcerTuning;
+  }
+
+  setAnnouncerTuning(values = {}) {
+    Object.assign(announcerTuning, values);
+    announcerTuning.busVolume = Math.min(1.5, Math.max(0, announcerTuning.busVolume));
+    announcerTuning.clipVolume = Math.min(1.5, Math.max(0, announcerTuning.clipVolume));
+    announcerTuning.clipDelay = Math.min(1, Math.max(0, announcerTuning.clipDelay));
+    announcerTuning.oobDelay = Math.min(1, Math.max(0, announcerTuning.oobDelay));
+    announcerTuning.playbackRate = Math.min(1.4, Math.max(0.65, announcerTuning.playbackRate));
+    announcerTuning.highpassFreq = Math.min(600, Math.max(20, announcerTuning.highpassFreq));
+    announcerTuning.presenceFreq = Math.min(6000, Math.max(600, announcerTuning.presenceFreq));
+    announcerTuning.presenceGain = Math.min(12, Math.max(-8, announcerTuning.presenceGain));
+    announcerTuning.delayTime = Math.min(0.32, Math.max(0, announcerTuning.delayTime));
+    announcerTuning.feedback = Math.min(0.82, Math.max(0, announcerTuning.feedback));
+    announcerTuning.echoVolume = Math.min(1, Math.max(0, announcerTuning.echoVolume));
+    announcerTuning.compressorThreshold = Math.min(0, Math.max(-48, announcerTuning.compressorThreshold));
+    announcerTuning.compressorRatio = Math.min(20, Math.max(1, announcerTuning.compressorRatio));
+    applyAnnouncerTuning();
+  }
+
+  resetAnnouncerTuning() {
+    this.setAnnouncerTuning(DEFAULT_ANNOUNCER_TUNING);
+  }
+
+  playAnnouncerCue(key) {
+    this.init();
+    const delay = key === 'oob' ? announcerTuning.oobDelay : announcerTuning.clipDelay;
+    this._announcer.play(key, { delay, volume: announcerTuning.clipVolume });
+  }
+
+  playAnnouncerScore(strokes) {
+    this.playAnnouncerCue(announcerCueForScore(strokes));
   }
 }
 

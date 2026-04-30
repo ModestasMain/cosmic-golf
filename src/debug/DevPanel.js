@@ -14,6 +14,7 @@ import { eventBus, Events } from '../core/EventBus.js';
 import { Planet } from '../objects/Planet.js';
 import { SHAKE_CONFIG } from '../objects/GolfBall.js';
 import { TRAJ_CONFIG } from '../systems/TrajectoryPreview.js';
+import { audioManager } from '../audio/AudioManager.js';
 
 export class DevPanel {
   /**
@@ -52,6 +53,7 @@ export class DevPanel {
     this._buildPostFX(gui);
     this._buildPlanets(gui);
     this._buildBallFeel(gui);
+    this._buildAnnouncerAudio(gui);
     this._buildTrajectory(gui);
     this._buildWorldEater(gui);
     this._collapseFolders(gui);
@@ -606,6 +608,69 @@ export class DevPanel {
         cupSideGravityFocus: PHYSICS.CUP_SIDE_GRAVITY_FOCUS,
       }),
     }, 'copy').name('📋 Copy JSON');
+  }
+
+  // ── ANNOUNCER AUDIO ─────────────────────────────────────────
+  _buildAnnouncerAudio(gui) {
+    const p = audioManager.getAnnouncerTuning();
+    const apply = () => audioManager.setAnnouncerTuning(p);
+    const play = (key) => {
+      audioManager.init();
+      audioManager.playAnnouncerCue(key);
+    };
+    const reset = () => {
+      audioManager.resetAnnouncerTuning();
+      f.controllersRecursive().forEach(c => c.updateDisplay());
+    };
+
+    const actions = {
+      holeInOne: () => play('ace'),
+      eagle: () => play('eagle'),
+      birdie: () => play('birdie'),
+      par: () => play('par'),
+      bogey: () => play('bogey'),
+      doubleBogey: () => play('double'),
+      tripleBogey: () => play('disaster'),
+      outOfBounds: () => play('oob'),
+      copy: () => this._copy('AnnouncerAudio', p),
+      reset,
+    };
+
+    const f = gui.addFolder('📣 Announcer Voice');
+    f.close();
+
+    const clips = f.addFolder('Play clips');
+    clips.add(actions, 'holeInOne').name('▶ Hole in one');
+    clips.add(actions, 'eagle').name('▶ Eagle');
+    clips.add(actions, 'birdie').name('▶ Birdie');
+    clips.add(actions, 'par').name('▶ Par');
+    clips.add(actions, 'bogey').name('▶ Bogey');
+    clips.add(actions, 'doubleBogey').name('▶ Double bogey');
+    clips.add(actions, 'tripleBogey').name('▶ Triple bogey');
+    clips.add(actions, 'outOfBounds').name('▶ Out of bounds');
+
+    f.add(p, 'busVolume', 0, 1.5, 0.01).name('Master voice').onChange(apply);
+    f.add(p, 'clipVolume', 0, 1.5, 0.01).name('Clip volume').onChange(apply);
+    f.add(p, 'playbackRate', 0.65, 1.4, 0.01).name('Pitch / speed').onChange(apply);
+    f.add(p, 'clipDelay', 0, 1, 0.01).name('Score delay').onChange(apply);
+    f.add(p, 'oobDelay', 0, 1, 0.01).name('OOB delay').onChange(apply);
+
+    const tone = f.addFolder('Tone');
+    tone.add(p, 'highpassFreq', 20, 600, 1).name('Low cut').onChange(apply);
+    tone.add(p, 'presenceFreq', 600, 6000, 10).name('Presence freq').onChange(apply);
+    tone.add(p, 'presenceGain', -8, 12, 0.1).name('Presence gain').onChange(apply);
+
+    const echo = f.addFolder('PA echo');
+    echo.add(p, 'delayTime', 0, 0.32, 0.001).name('Echo delay').onChange(apply);
+    echo.add(p, 'feedback', 0, 0.82, 0.01).name('Echo repeats').onChange(apply);
+    echo.add(p, 'echoVolume', 0, 1, 0.01).name('Echo volume').onChange(apply);
+
+    const comp = f.addFolder('Compression');
+    comp.add(p, 'compressorThreshold', -48, 0, 1).name('Threshold').onChange(apply);
+    comp.add(p, 'compressorRatio', 1, 20, 0.5).name('Ratio').onChange(apply);
+
+    f.add(actions, 'copy').name('📋 Copy JSON');
+    f.add(actions, 'reset').name('↺ Reset voice FX');
   }
 
   // ── TRAJECTORY ───────────────────────────────────────────────

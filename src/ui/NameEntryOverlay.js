@@ -5,6 +5,7 @@
 
 import { eventBus, Events } from '../core/EventBus.js';
 import { leaderboardStore } from '../core/LeaderboardStore.js';
+import { MULTIPLAYER } from '../core/Constants.js';
 
 const QUICK_NAMES = ['VEGA', 'NOVA', 'ORION', 'PULSAR'];
 
@@ -44,7 +45,7 @@ const RARITY_STYLE = {
   epic:     { text: '#FF00CC', glow: 'rgba(255,0,204,0.4)',    border: 'rgba(255,0,204,0.3)'    },
 };
 
-const WORKER_HOST = 'cosmic-golf-mp.cosmicgolf.workers.dev';
+const WORKER_HOST = MULTIPLAYER.MP_HOST;
 
 // ─── Cosmos Canvas (rich animated background) ─────────────────────────────────
 

@@ -13,5 +13,5 @@ new_classes = ["CosmicGolfRoom"]
 
 [[kv_namespaces]]
 binding = "GLOBAL_LB"
-id = "71f643c544a64d5cb5f1c57b133c2fbb"
-preview_id = "5298d2b99d3f49bbae4844fc51c24acb"
+id = "YOUR_KV_NAMESPACE_ID"
+preview_id = "YOUR_KV_PREVIEW_ID"
